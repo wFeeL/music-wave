@@ -1,0 +1,45 @@
+# sample <pid> 3 of the silence run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 11456) every 1 millisecond
+Process:         WaveFeels [11456]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x100a8c000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.37 (37)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [9148]
+Target Type:     live task
+
+Date/Time:       2026-10-22 10:17:29.979 +0000
+Launch Time:     2026-10-22 10:17:08.751 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         19.3M
+Physical footprint (peak):  21.4M
+Idle exit:                  untracked
+Samples per thread:
+    1603 Thread_35016   DispatchQueue_1: com.apple.main-thread  (serial)
+    1603 Thread_35021
+    1603 Thread_35034: com.apple.NSEventThread
+    1603 Thread_35041: caulk.messenger.shared:17
+    1603 Thread_35042: caulk.messenger.shared:high
+    1603 Thread_35056: caulk::deferred_logger
+    1593 Thread_35030
+    1593 Thread_35031
+    1592 Thread_35022
+    14 Thread_<multiple>   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    9 Thread_<multiple>   DispatchQueue_406: com.wfeels.wavefeels.demo  (serial)
+    6 Thread_<multiple>   DispatchQueue_405: com.wfeels.wavefeels.analysis  (serial)
+    1 Thread_35022   DispatchQueue_12: com.apple.root.utility-qos.cooperative  (concurrent)
+    1 Thread_35030   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        6372
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        4809
+        mach_msg2_trap  (in libsystem_kernel.dylib)        3206
+        start_wqthread  (in libsystem_pthread.dylib)        8
+        _platform_memmove  (in libsystem_platform.dylib)        6
+        kevent_id  (in libsystem_kernel.dylib)        5
