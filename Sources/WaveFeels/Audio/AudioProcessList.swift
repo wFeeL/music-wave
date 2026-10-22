@@ -1,0 +1,99 @@
+import AppKit
+import CoreAudio
+import Darwin
+import WaveCore
+
+/// Процессы, которые Core Audio знает как клиентов звука, и сводка по приложениям.
+@MainActor
+final class AudioProcessList {
+    /// Вызывается на главном потоке, когда меняется `kAudioHardwarePropertyProcessObjectList`.
+    var onChange: (() -> Void)?
+
+    private var token: CAListenerToken?
+
+    func start() {
+        guard token == nil else { return }
+        token = CAProperty.listen(CAProperty.systemObject, kAudioHardwarePropertyProcessObjectList, queue: .main) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.onChange?()
+            }
+        }
+    }
+
+    func stop() {
+        token?.cancel()
+        token = nil
+    }
+
+    func snapshot() -> [AudioProcessInfo] {
+        let objects: [AudioObjectID] = CAProperty.readArray(CAProperty.systemObject, kAudioHardwarePropertyProcessObjectList)
+        return objects.compactMap { object -> AudioProcessInfo? in
+            let pid: pid_t = CAProperty.read(object, kAudioProcessPropertyPID, default: -1)
+            guard pid > 0 else { return nil }
+            let bundleID = CAProperty.readCFString(object, kAudioProcessPropertyBundleID)
+            let output: UInt32 = CAProperty.read(object, kAudioProcessPropertyIsRunningOutput, default: 0)
+            return AudioProcessInfo(
+                objectID: object,
+                pid: pid,
+                bundleID: (bundleID?.isEmpty ?? true) ? nil : bundleID,
+                executablePath: Self.executablePath(pid: pid),
+                isRunningOutput: output != 0
+            )
+        }
+    }
+
+    /// Приложения, у которых есть процессы со звуком. Помощник относится к приложению,
+    /// внутри бандла которого лежит его исполняемый файл.
+    func runningAudioApps() -> [AudioSource] {
+        var runningByPath: [String: NSRunningApplication] = [:]
+        for app in NSWorkspace.shared.runningApplications {
+            guard let url = app.bundleURL else { continue }
+            runningByPath[Self.canonicalPath(url)] = app
+        }
+        let ownPath = Self.canonicalPath(Bundle.main.bundleURL)
+
+        var seen = Set<String>()
+        var result: [AudioSource] = []
+        for process in snapshot() {
+            let executable = process.executablePath
+                ?? NSRunningApplication(processIdentifier: process.pid)?.executableURL?.path(percentEncoded: false)
+            guard let executable, let appPath = Self.outermostAppBundle(of: executable) else { continue }
+            let canonical = Self.canonicalPath(URL(fileURLWithPath: appPath))
+            guard canonical != ownPath, seen.insert(canonical).inserted else { continue }
+
+            let app = runningByPath[canonical]
+            let bundle = Bundle(path: canonical)
+            let bundleID = app?.bundleIdentifier ?? bundle?.bundleIdentifier ?? ""
+            let fallbackName = URL(fileURLWithPath: canonical).deletingPathExtension().lastPathComponent
+            let name = app?.localizedName
+                ?? bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+                ?? bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String
+                ?? fallbackName
+            result.append(.application(bundleID: bundleID, bundlePath: canonical, displayName: name))
+        }
+        return result.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Путь исполняемого файла процесса через `proc_pidpath`.
+    nonisolated static func executablePath(pid: pid_t) -> String? {
+        let capacity = Int(MAXPATHLEN) * 4
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
+        defer { buffer.deallocate() }
+        let length = proc_pidpath(pid, buffer, UInt32(capacity))
+        guard length > 0 else { return nil }
+        return String(decoding: UnsafeBufferPointer(start: buffer, count: Int(length)), as: UTF8.self)
+    }
+
+    /// Путь самого внешнего `.app` в пути файла, например `/Applications/Yandex Music.app`
+    /// для `/Applications/Yandex Music.app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper`.
+    nonisolated static func outermostAppBundle(of path: String) -> String? {
+        let components = (path as NSString).pathComponents
+        guard let index = components.firstIndex(where: { $0.hasSuffix(".app") }) else { return nil }
+        return NSString.path(withComponents: Array(components[...index]))
+    }
+
+    /// Путь бандла без символических ссылок, как его ждет `ProcessMatcher`.
+    nonisolated static func canonicalPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().path(percentEncoded: false)
+    }
+}

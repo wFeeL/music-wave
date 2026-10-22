@@ -26,6 +26,6 @@ package.targets += [
             .linkedFramework("ServiceManagement"),
         ]
     ),
-    .testTarget(name: "WaveFeelsTests", dependencies: ["WaveFeels"]),
+    .testTarget(name: "WaveFeelsTests", dependencies: ["WaveFeels", "WaveCore"]),
 ]
 #endif
