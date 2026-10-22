@@ -107,6 +107,8 @@ public final class StreamAnalyzer {
 
     private var fft: RealFFT
     private var mapper: BandMapper
+    /// Полосы каждого слоя по `WaveLayer.rawValue`. `WaveLayer.allCases` на каждом шаге выделял бы массив.
+    private var layerRanges: [Range<Int>]
     private var levelProcessor: LevelProcessor
     private var smoothers: [AttackRelease]
     private var envelope = BeatEnvelope(decay: StreamAnalyzer.envelopeDecay)
@@ -127,6 +129,7 @@ public final class StreamAnalyzer {
         let mapper = BandMapper(fftSize: config.fftSize, sampleRate: sampleRate)
         fft = RealFFT(size: config.fftSize)
         self.mapper = mapper
+        layerRanges = Self.makeLayerRanges(for: mapper)
         levelProcessor = Self.makeLevelProcessor(for: mapper)
         smoothers = Self.makeSmoothers()
         kickBins = Self.makeKickBins(for: config)
@@ -147,6 +150,7 @@ public final class StreamAnalyzer {
         let mapper = BandMapper(fftSize: config.fftSize, sampleRate: sampleRate)
         fft = RealFFT(size: config.fftSize)
         self.mapper = mapper
+        layerRanges = Self.makeLayerRanges(for: mapper)
         kickBins = Self.makeKickBins(for: config)
         kickFlux = Self.makeKickFlux(bins: kickBins)
         broadbandFlux = Self.makeBroadbandFlux(for: mapper)
@@ -221,9 +225,9 @@ public final class StreamAnalyzer {
         for band in 0..<BandMapper.bandCount {
             bands[band] = smoothers[band].step(toward: normalized[band], dt: dt)
         }
-        var layers = [Float](repeating: 0, count: WaveLayer.allCases.count)
-        for layer in WaveLayer.allCases {
-            let range = mapper.bands(for: layer)
+        var layers = [Float](repeating: 0, count: layerRanges.count)
+        for layer in 0..<layerRanges.count {
+            let range = layerRanges[layer]
             guard !range.isEmpty else { continue }
             var peak: Float = 0
             var sum: Float = 0
@@ -231,7 +235,7 @@ public final class StreamAnalyzer {
                 peak = max(peak, bands[band])
                 sum += bands[band]
             }
-            layers[layer.rawValue] = 0.5 * peak + 0.5 * sum / Float(range.count)
+            layers[layer] = 0.5 * peak + 0.5 * sum / Float(range.count)
         }
 
         envelope.step(dt: dt)
@@ -255,8 +259,12 @@ public final class StreamAnalyzer {
         )
     }
 
+    private static func makeLayerRanges(for mapper: BandMapper) -> [Range<Int>] {
+        WaveLayer.allCases.map { mapper.bands(for: $0) }
+    }
+
     private static func makeLevelProcessor(for mapper: BandMapper) -> LevelProcessor {
-        LevelProcessor(layerBands: WaveLayer.allCases.map { mapper.bands(for: $0) })
+        LevelProcessor(layerBands: makeLayerRanges(for: mapper))
     }
 
     private static func makeSmoothers() -> [AttackRelease] {
