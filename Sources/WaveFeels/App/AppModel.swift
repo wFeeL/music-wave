@@ -146,6 +146,8 @@ final class AppModel {
     @ObservationIgnored private var previewGlow: Float = 0
     @ObservationIgnored private var previewPulse: Float = 0
     @ObservationIgnored private var paletteFade = PaletteFade(palette: PaletteExtractor.fallback)
+    /// `wavePalette` для режима `mode` и палитры обложки `artwork`.
+    @ObservationIgnored private var wavePaletteCache: (mode: WaveColorMode, artwork: [PaletteColor], palette: [PaletteColor])?
     @ObservationIgnored private var lastVisualTime: Double?
     /// Пружины уровней трех слоев (по `WaveLayer.rawValue`) и общего уровня на кадрах отрисовки.
     @ObservationIgnored private var layerSprings = [LevelSpring](repeating: LevelSpring(), count: WaveLayer.allCases.count)
@@ -1013,8 +1015,18 @@ final class AppModel {
 
     /// Палитра волн, свечения и волны панели по «Цвету волн» поверх палитры обложки. Остров
     /// переходит к ней плавно (`PaletteFade`, 0.8 с): и к новой обложке, и к новому режиму.
+    /// Считается заново, только когда сменились режим или палитра обложки: «Свой цвет» строит
+    /// палитру в OKLab, на каждом кадре это лишнее.
     var wavePalette: [PaletteColor] {
-        settings.appearance.palette(artwork: palette)
+        let mode = settings.colorMode
+        if let cached = wavePaletteCache, cached.mode == mode, cached.artwork == palette {
+            return cached.palette
+        }
+        var appearance = WaveAppearance.standard
+        appearance.colorMode = mode
+        let result = appearance.palette(artwork: palette)
+        wavePaletteCache = (mode, palette, result)
+        return result
     }
 
     /// Кадр `sampled` с уровнями слоев и общим уровнем из пружин и акцентом доли на басу.
