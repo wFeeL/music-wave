@@ -1,0 +1,60 @@
+== step bundle: bash scripts/bundle.sh 0.1.0 1
+dist/WaveFeels.app/Contents/Info.plist: OK
+bundled dist/WaveFeels.app (version 0.1.0, build 1)
+dist/WaveFeels.app
+dist/WaveFeels.app/Contents
+dist/WaveFeels.app/Contents/Frameworks
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/MediaRemoteAdapter
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Resources
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/_CodeSignature
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/_CodeSignature/CodeResources
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/Resources
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/Resources/Info.plist
+dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/Current
+dist/WaveFeels.app/Contents/Helpers
+dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient
+dist/WaveFeels.app/Contents/Info.plist
+dist/WaveFeels.app/Contents/MacOS
+dist/WaveFeels.app/Contents/MacOS/WaveFeels
+dist/WaveFeels.app/Contents/Resources
+dist/WaveFeels.app/Contents/Resources/Adapter
+dist/WaveFeels.app/Contents/Resources/Adapter/mediaremote-adapter.pl
+dist/WaveFeels.app/Contents/Resources/Demo
+dist/WaveFeels.app/Contents/Resources/Demo/demo.wav
+dist/WaveFeels.app/Contents/Resources/Demo/silence.wav
+dist/WaveFeels.app/Contents/Resources/LICENSES
+dist/WaveFeels.app/Contents/Resources/LICENSES/mediaremote-adapter.txt
+== step bundle-update-test: bash scripts/bundle.sh 0.1.0 11 /Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Info.plist: OK
+bundled /Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app (version 0.1.0, build 11)
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/MediaRemoteAdapter
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Resources
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/_CodeSignature
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/_CodeSignature/CodeResources
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/Resources
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/A/Resources/Info.plist
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/Current
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Helpers
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Info.plist
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/MacOS
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/MacOS/WaveFeels
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/Adapter
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/Adapter/mediaremote-adapter.pl
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/Demo
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/Demo/demo.wav
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/Demo/silence.wav
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/LICENSES
+/Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app/Contents/Resources/LICENSES/mediaremote-adapter.txt

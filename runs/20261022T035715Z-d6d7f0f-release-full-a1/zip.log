@@ -1,0 +1,2 @@
+== step zip: ditto -c -k --keepParent /Users/runner/work/music-wave/music-wave/dist/WaveFeels.app /Users/runner/work/music-wave/music-wave/dist/WaveFeels-v0.1.0-alpha.1.zip
+== step zip-update-test: ditto -c -k --keepParent /Users/runner/work/music-wave/music-wave/dist/update-test/WaveFeels.app /Users/runner/work/music-wave/music-wave/dist/WaveFeels-v0.1.0-alpha.1-update-test.zip
