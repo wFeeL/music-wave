@@ -8,5 +8,6 @@ ci-latest/
 
 # Рабочие документы разработки хранятся только локально
 docs/
+.superpowers/
 .github/tester-prompt.md
 .github/workflows/tester.yml
