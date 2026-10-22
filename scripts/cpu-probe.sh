@@ -12,8 +12,9 @@
 #            200, толщина 2, амплитуда 2); предел play 20 %, итог в cpu-max.txt.
 # В обоих наборах «вздох» включен, пауза выключена. Содержимое набора (`defaults read`) пишется в
 # начало отчета, а действующие значения приложение пишет в свой лог строкой «настройки из набора
-# ...». Прогон без этой строки считается проваленным: сборка без --settings-suite мерила бы
-# настройки пользователя.
+# ...»: вид, крыло, которое рисуется на самом деле, энергосбережение и «Уменьшение движения».
+# Строка из прогона play попадает в шапку отчета (applied settings). Прогон без этой строки
+# считается проваленным: сборка без --settings-suite мерила бы настройки пользователя.
 #
 # Два прогона, каждый со своим процессом приложения:
 #   play:    --demo Demo/demo.wav --fake-notch --exit-after <секунды+10>; среднее выше предела
@@ -407,6 +408,9 @@ probe() {
     settings_line=$(grep -F "$SETTINGS_MARK" "$app_log" | tail -n 1)
     if [[ -n "$settings_line" ]]; then
         report "effective settings: ${settings_line#*"$SETTINGS_MARK"}"
+        if [[ -z "$APPLIED" ]]; then
+            APPLIED=${settings_line#*"$SETTINGS_MARK"}
+        fi
     else
         report "effective settings: not reported"
         reasons="$reasons; app did not report settings from $SUITE (build without --settings-suite?), the run may have used personal settings"
@@ -451,6 +455,11 @@ report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), 
 report ""
 report "defaults read $SUITE:"
 report "$(defaults read "$SUITE" 2>&1)"
+# Строку заменяет настоящая строка приложения из первого прогона, где она нашлась (обычно play).
+APPLIED_PLACEHOLDER="applied settings: not reported by the app"
+APPLIED=""
+report ""
+report "$APPLIED_PLACEHOLDER"
 
 EXIT_AFTER=$((DURATION + 10))
 # С --sample в тишине стеки снимаются после окна, на это приложению нужны лишние 10 с.
@@ -460,6 +469,16 @@ if [[ $SAMPLE -eq 1 ]]; then
 fi
 probe play "$PLAY_LIMIT" max shown window "$EXIT_AFTER" --demo "$DEMO_DIR/demo.wav" --fake-notch
 probe silence "$SILENCE_LIMIT" below hidden after "$SILENCE_EXIT_AFTER" --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture
+
+# Шапка отчета уже записана, поэтому строка подставляется в файл на место заглушки (через
+# ENVIRON, а не -v: awk -v разбирает обратные косые черты). В stdout она идет перед итогом.
+if [[ -n "$APPLIED" ]]; then
+    PLACEHOLDER="$APPLIED_PLACEHOLDER" LINE="applied settings: $APPLIED" \
+        awk '!done && $0 == ENVIRON["PLACEHOLDER"] { print ENVIRON["LINE"]; done = 1; next } { print }' \
+        "$REPORT" > "$TMP/report.txt" && cat "$TMP/report.txt" > "$REPORT"
+    echo ""
+    echo "applied settings: $APPLIED"
+fi
 
 report ""
 if [[ $FAILED -eq 0 ]]; then
