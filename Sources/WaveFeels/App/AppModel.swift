@@ -2,6 +2,10 @@ import AppKit
 import Observation
 import WaveCore
 
+/// Цвет палитры из WaveCore. В SDK macOS есть одноименная структура QuickDraw `RGBColor`
+/// (ApplicationServices), поэтому в приложении цвет называется только так.
+typealias PaletteColor = WaveCore.RGBColor
+
 /// Связывает настройки, захват звука, Now Playing и состояние острова.
 ///
 /// Цикл 10 Гц на главном акторе: уровень из `FrameStore` идет в `ActivityGate`, Now Playing
@@ -29,7 +33,7 @@ final class AppModel {
     private(set) var islandState: IslandState = .hidden
     /// Последний трек выбранного источника, держится и на паузе.
     private(set) var lastTrack: NowPlayingInfo?
-    private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    private(set) var palette: [PaletteColor] = PaletteExtractor.fallback
     /// Показать подсказку о доступе к звуку.
     private(set) var permissionHint = false
     /// Последний результат `AudioCapturePermission.preflight()`.
