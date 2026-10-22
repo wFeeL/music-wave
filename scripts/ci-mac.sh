@@ -6,8 +6,8 @@
 # С RELEASE=1 (release.yml) режим full дополнительно собирает вторую копию для проверки обновления:
 # тот же бинарник, CFBundleVersion "<номер запуска>1", dist/update-test/WaveFeels.app, подпись и
 # архив dist/WaveFeels-<тег>-update-test.zip. Designated requirement обеих копий пишется в sign.txt.
-# Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, sign.txt, snapshots/, cpu.txt,
-# cpu-sample.txt.
+# Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, test-sample*.txt, sign.txt,
+# snapshots/, cpu.txt, cpu-sample.txt.
 # Каждый шаг идет под своим лимитом времени (в macOS нет timeout, работает фоновый сторож).
 # Шаги из будущих задач (--render-snapshots, cpu-probe.sh) пропускаются, пока их нет,
 # с отметкой skipped в summary.md. Адаптер (build-adapter.sh) собирается только в режиме full,
@@ -271,11 +271,81 @@ trap finish EXIT
 
 run_step toolchain 60 "$OUT/toolchain.txt" toolchain_info
 
+# --- снимки стеков процесса тестов ---
+
+# Сжатый вывод sample: заголовок, число сэмплов по каждому потоку, дерево вызовов главного
+# потока (первый поток в «Call graph») и самые частые функции на вершине стека.
+trim_test_sample() { # файл sample
+    awk '
+        /^Call graph:/ { section = "graph"; print "Samples per thread:"; next }
+        /^Total number in stack/ { section = "skip"; next }
+        /^Sort by top of stack/ { section = "top"; shown = 0; print ""; print; next }
+        /^Binary Images:/ { section = "done"; next }
+        section == "" && NR <= 20 { print; next }
+        section == "graph" && /^    [0-9]+ Thread_/ {
+            if (threads < 60) print substr($0, 1, 200)
+            threads++
+            in_main = (threads == 1)
+            next
+        }
+        section == "graph" && in_main && main_lines < 250 { tree[++main_lines] = substr($0, 1, 250); next }
+        section == "top" && shown < 80 && NF { print substr($0, 1, 200); shown++; next }
+        END {
+            print ""
+            print "Main thread call tree:"
+            for (i = 1; i <= main_lines; i++) print tree[i]
+        }
+    ' "$1"
+}
+
+# Через 8 и 20 с после старта `swift test` снимает стеки процесса тестов (swiftpm-testing-helper
+# для Swift Testing, иначе xctest) на 4 с в test-sample.txt и test-sample-2.txt. На исход шага не
+# влияет: файл с ошибкой тоже результат.
+sample_tests() { # pid swift test
+    local start=$SECONDS at file target raw="$OUT/.test-sample.raw"
+    for at in 8 20; do
+        if [[ $at -eq 8 ]]; then file="$OUT/test-sample.txt"; else file="$OUT/test-sample-2.txt"; fi
+        while [[ $((SECONDS - start)) -lt $at ]] && kill -0 "$1" 2>/dev/null; do
+            sleep 1
+        done
+        kill -0 "$1" 2>/dev/null || return 0
+        target=$(pgrep -n -f swiftpm-testing-helper || pgrep -n xctest)
+        if [[ -z "$target" ]]; then
+            echo "no test runner process at $at s" > "$file"
+            continue
+        fi
+        rm -f "$raw"
+        {
+            echo "# sample $target 4 -mayDie at $at s after swift test started"
+            ps -o pid=,etime=,command= -p "$target" | cut -c1-200
+            echo
+            if sample "$target" 4 -mayDie -file "$raw" > /dev/null 2>&1 && [[ -s "$raw" ]]; then
+                trim_test_sample "$raw"
+            else
+                echo "sample failed"
+            fi
+        } > "$file" 2>&1
+        rm -f "$raw"
+    done
+}
+
+run_tests() {
+    local pid sampler rc
+    swift test --skip-build &
+    pid=$!
+    sample_tests "$pid" > /dev/null 2>&1 &
+    sampler=$!
+    wait "$pid"
+    rc=$?
+    wait "$sampler" 2>/dev/null
+    return "$rc"
+}
+
 # --- шаги режимов ---
 
 step_tests() {
     if run_step build-tests "$LIMIT_BUILD" "$OUT/build.log" swift build --build-tests; then
-        run_step test "$LIMIT_TEST" "$OUT/test.log" swift test --skip-build
+        run_step test "$LIMIT_TEST" "$OUT/test.log" run_tests
     else
         skip test "test build failed"
     fi
