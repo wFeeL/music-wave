@@ -22,15 +22,29 @@ struct CaptureRecoveryPipelineTests {
     /// Допуск снизу на интервал между медленными повторами: часы задач и `systemUptime` разные.
     static let slack = 0.9
 
-    @Test func failingTapIsRetriedSlowlyAfterFastRetries() async throws {
-        let fake = FakeTapCapture(behavior: .failing)
+    /// Конвейер с поддельным захватом и короткими сроками. Монитор вывода молчит о смене
+    /// устройства и перезапуске coreaudiod: пересборка по ним (на раннере устройство вывода
+    /// может смениться посреди теста) сбила бы интервалы между медленными повторами.
+    private static func makePipeline(
+        _ fake: FakeTapCapture,
+        processes: AudioProcessList? = nil
+    ) -> AudioPipeline {
+        let output = OutputDeviceMonitor()
         let pipeline = AudioPipeline(
             store: FrameStore(),
-            processes: AudioProcessList(),
-            output: OutputDeviceMonitor(),
-            timing: Self.timing,
+            processes: processes ?? AudioProcessList(),
+            output: output,
+            timing: timing,
             makeCapture: { _ in fake }
         )
+        output.onDeviceChange = nil
+        output.onServiceRestart = nil
+        return pipeline
+    }
+
+    @Test func failingTapIsRetriedSlowlyAfterFastRetries() async throws {
+        let fake = FakeTapCapture(behavior: .failing)
+        let pipeline = Self.makePipeline(fake)
         defer { pipeline.stop() }
         pipeline.start()
 
@@ -46,13 +60,7 @@ struct CaptureRecoveryPipelineTests {
 
     @Test func zeroWatchdogKeepsRebuildingSlowlyPastFiveAttempts() async throws {
         let fake = FakeTapCapture(behavior: .silent)
-        let pipeline = AudioPipeline(
-            store: FrameStore(),
-            processes: AudioProcessList(),
-            output: OutputDeviceMonitor(),
-            timing: Self.timing,
-            makeCapture: { _ in fake }
-        )
+        let pipeline = Self.makePipeline(fake)
         defer { pipeline.stop() }
         // Весь звук системы: «звучит» решает Now Playing.
         pipeline.adapterAvailable = true
@@ -83,13 +91,7 @@ struct CaptureRecoveryPipelineTests {
         let list = FakeProcessList([FakeProcessList.player])
         let processes = AudioProcessList()
         processes.snapshotOverride = { list.processes }
-        let pipeline = AudioPipeline(
-            store: FrameStore(),
-            processes: processes,
-            output: OutputDeviceMonitor(),
-            timing: Self.timing,
-            makeCapture: { _ in fake }
-        )
+        let pipeline = Self.makePipeline(fake, processes: processes)
         defer { pipeline.stop() }
         pipeline.source = FakeProcessList.source
         pipeline.adapterAvailable = true
