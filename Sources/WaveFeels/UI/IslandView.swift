@@ -110,7 +110,8 @@ struct IslandView: View {
             }
             .allowsHitTesting(false)
             bannerContent(state: state, geometry: geometry, visible: bannerVisible)
-            panelContent(state: state, geometry: geometry, banner: bannerVisible)
+            // При уменьшении движения тело острова растет не из баннера: маска должна совпадать.
+            panelContent(state: state, geometry: geometry, banner: bannerVisible && !reduceMotion)
         }
         .frame(width: panel.width, height: panel.height, alignment: .topLeading)
         .ignoresSafeArea()
