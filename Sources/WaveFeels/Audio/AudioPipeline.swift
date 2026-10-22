@@ -106,6 +106,10 @@ final class AudioPipeline {
     private let engine: AnalysisEngine
 
     @ObservationIgnored private var demo: DemoAudioSource?
+    /// Файл последнего демо: после сна демо запускается с него же.
+    @ObservationIgnored private var demoFile: URL?
+    /// Режим до `stopForSleep()`; `nil`, если сна не было или пробуждение уже обработано.
+    @ObservationIgnored private var modeBeforeSleep: Mode?
     @ObservationIgnored private var mode = Mode.stopped
     @ObservationIgnored private var appliedProcessIDs: [AudioObjectID] = []
     @ObservationIgnored private var lastRebuildAt = -Double.infinity
@@ -149,12 +153,14 @@ final class AudioPipeline {
         startWatchdog()
     }
 
-    /// Останавливает захват, демо, анализ и подписки.
-    /// Удаление tap синхронное: после возврата агрегата и IOProc нет.
+    /// Останавливает захват, демо, анализ и подписки. Главный поток не ждет удаления tap: оно
+    /// встает в очередь управления раньше любого следующего запуска. Дождаться его можно через
+    /// `waitForCaptureTeardown(timeout:)`.
     func stop() {
         mode = .stopped
+        modeBeforeSleep = nil
         cancelTasks()
-        stopCapture()
+        stopCaptureInBackground()
         stopDemo()
         engine.stop()
         processes.stop()
@@ -169,9 +175,13 @@ final class AudioPipeline {
     func startDemo(file: URL) throws {
         let newDemo = try DemoAudioSource(ring: ring, file: file)
         stop()
+        // Перед обнулением кольца tap должен быть удален, иначе у кольца будет два писателя.
+        // В режиме демо tap не создается, так что очередь управления пуста и ожидания нет.
+        stopCapture()
         // Оба писателя и читатель остановлены, кольцо можно обнулить.
         ring.reset()
         demo = newDemo
+        demoFile = file
         mode = .demo
         log("демо: \(file.lastPathComponent), \(Int(newDemo.sampleRate)) Гц")
         guard !paused else {
@@ -182,6 +192,53 @@ final class AudioPipeline {
         engine.start(sampleRate: newDemo.sampleRate)
         pushSettings()
         status = .demo
+    }
+
+    /// Ждет не дольше `timeout` секунд удаления tap и агрегата, уже поставленного `stop()`.
+    /// Нужно при выходе: агрегатное устройство не должно пережить приложение.
+    @discardableResult
+    func waitForCaptureTeardown(timeout: Double) -> Bool {
+        let finished = capture.waitUntilIdle(timeout: timeout)
+        if !finished {
+            log("удаление tap не закончилось за \(timeout) с")
+        }
+        return finished
+    }
+
+    // MARK: - Сон
+
+    /// Сон: запоминает режим (захват, демо или остановка) и останавливает все, не дожидаясь
+    /// удаления tap. Повторный вызов до пробуждения ничего не меняет.
+    func stopForSleep() {
+        guard modeBeforeSleep == nil else { return }
+        let before = mode
+        stop()
+        modeBeforeSleep = before
+    }
+
+    /// Пробуждение: возвращает режим до сна, захват собирается заново, демо запускается с тем же
+    /// файлом, остановленный конвейер остается остановленным. Пауза сохраняется (`paused`).
+    /// Без замеченного сна текущий режим перезапускается с нуля.
+    func restartAfterSleep() {
+        let previous = modeBeforeSleep ?? mode
+        modeBeforeSleep = nil
+        switch previous {
+        case .stopped:
+            return
+        case .live, .suspended:
+            stop()
+            start()
+        case .demo:
+            guard let file = demoFile else {
+                stop()
+                return
+            }
+            do {
+                try startDemo(file: file)
+            } catch {
+                log("демо после пробуждения не запустилось: \(error)")
+            }
+        }
     }
 
     /// Долгая тишина: IOProc и анализ останавливаются, подписки остаются.

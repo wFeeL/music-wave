@@ -89,6 +89,16 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         }
     }
 
+    /// Ждет не дольше `timeout` секунд, пока очередь управления выполнит все, что уже в нее
+    /// поставлено (например, удаление tap при выходе). `false`, если не дождался.
+    func waitUntilIdle(timeout: Double) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        controlQueue.async {
+            done.signal()
+        }
+        return done.wait(timeout: .now() + timeout) == .success
+    }
+
     // MARK: - Очередь управления
 
     private func stopOnControlQueue() -> String? {

@@ -37,6 +37,8 @@ final class AppModel {
     /// Приложения запускаются и закрываются пачкой: `/Applications` просматривается один раз
     /// через столько после последнего события.
     static let applicationsScanDelay: Duration = .milliseconds(500)
+    /// Сколько `stop()` ждет удаления tap и агрегата при выходе.
+    static let captureTeardownTimeout = 2.0
 
     let settings: AppSettings
     let store: FrameStore
@@ -171,6 +173,7 @@ final class AppModel {
         scanTask?.cancel()
         scanTask = nil
         stopSources()
+        pipeline.waitForCaptureTeardown(timeout: Self.captureTeardownTimeout)
         artworkTask?.cancel()
         artworkTask = nil
     }
@@ -191,7 +194,8 @@ final class AppModel {
         }
     }
 
-    /// Захват, демо, анализ и процессы адаптера останавливаются, агрегатное устройство удаляется.
+    /// Захват, демо, анализ и процессы адаптера останавливаются; агрегатное устройство
+    /// удаляется в очереди управления, главный поток этого не ждет.
     private func stopSources() {
         pipeline.stop()
         adapter.stop()
@@ -207,12 +211,15 @@ final class AppModel {
         guard loopTask != nil, !asleep else { return }
         asleep = true
         log("сон: захват и Now Playing остановлены")
-        stopSources()
+        pipeline.stopForSleep()
+        adapter.stop()
+        silentSince = nil
     }
 
-    /// `NSWorkspace.didWakeNotification`: через `wakeDelay` захват и адаптер запускаются заново,
-    /// tap собирается с нуля (устройство вывода и процессы за время сна могли смениться).
-    /// Пробуждение без замеченного сна тоже пересобирает все.
+    /// `NSWorkspace.didWakeNotification`: через `wakeDelay` возвращается режим до сна (захват
+    /// с новым tap, демо с тем же файлом, без захвата, пауза) и адаптер запускается заново:
+    /// устройство вывода и процессы за время сна могли смениться. Пробуждение без замеченного
+    /// сна тоже пересобирает все.
     func systemDidWake() {
         guard loopTask != nil else { return }
         wakeTask?.cancel()
@@ -232,13 +239,17 @@ final class AppModel {
     private func finishWake() {
         guard loopTask != nil else { return }
         if !asleep {
-            stopSources()
+            adapter.stop()
         }
         asleep = false
+        silentSince = nil
         defaultSourceStale = true
         applySettings()
         refreshSourceAppRunning()
-        startSources()
+        pipeline.restartAfterSleep()
+        if !arguments.noCapture {
+            adapter.start()
+        }
         checkAudioPermission()
         log("после пробуждения захват и Now Playing запущены")
     }
@@ -767,6 +778,9 @@ final class AppModel {
         Log.app.info("\(message, privacy: .public)")
         Log.file(message)
     }
+
+    /// Тесты: отложенный запуск после пробуждения, чтобы дождаться его без часов.
+    var pendingWakeForTesting: Task<Void, Never>? { wakeTask }
 }
 
 /// Обложка в панели. `id` меняется с каждой новой обложкой: по нему панель плавно сменяет картинку.
