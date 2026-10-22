@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Testing
+import WaveCore
 @testable import WaveFeels
 
 /// Остров в модели: курсор у выреза пересчитывает остров сразу и в срок задержек, о смене
