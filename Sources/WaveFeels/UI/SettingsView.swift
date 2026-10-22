@@ -56,6 +56,8 @@ struct SettingsView: View {
     @State private var catalogTask: Task<Void, Never>?
     /// Меняется, чтобы меню источника вернулось к выбранному пункту после «Выбрать приложение…».
     @State private var pickerID = 0
+    /// Устройство, для которого открыт лист калибровки сдвига; `nil`: лист закрыт.
+    @State private var calibration: CalibrationTarget?
 
     /// Снимки задают все, что зависит от машины: `catalog` (готовый список источников; без него
     /// список собирается сейчас), `login` (статус запуска при входе и лежит ли приложение в
@@ -153,6 +155,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(item: $calibration) { target in
+            CalibrationView(model: model, deviceUID: target.uid, deviceName: target.name)
+        }
     }
 
     /// Приложения часто запускаются и закрываются пачкой: список обновляется один раз, через
@@ -326,9 +331,9 @@ struct SettingsView: View {
         syncOffsetRows
     }
 
-    /// «Сдвиг синхронизации» текущего устройства вывода. Под ползунком его имя и «Сбросить», если
-    /// у устройства свой сдвиг; без UID (устройство неизвестно) ползунок правит общий сдвиг,
-    /// подписи нет.
+    /// «Сдвиг синхронизации» текущего устройства вывода. Под ползунком его имя, «Сбросить», если
+    /// у устройства свой сдвиг, и «Калибровать…» (лист `CalibrationView` для этого устройства);
+    /// без UID (устройство неизвестно) ползунок и калибровка правят общий сдвиг, имени нет.
     @ViewBuilder
     private var syncOffsetRows: some View {
         let settings = model.settings
@@ -345,19 +350,32 @@ struct SettingsView: View {
             in: Double(AppSettings.Limits.syncOffset.lowerBound)...Double(AppSettings.Limits.syncOffset.upperBound),
             text: AppModel.syncOffsetText(settings.syncOffsets.offset(forDeviceUID: uid))
         )
-        if !uid.isEmpty {
-            LabeledContent {
-                if settings.syncOffsets.hasOwnOffset(forDeviceUID: uid) {
+        LabeledContent {
+            HStack(spacing: 8) {
+                if !uid.isEmpty, settings.syncOffsets.hasOwnOffset(forDeviceUID: uid) {
                     Button("Сбросить") {
                         settings.syncOffsets.reset(deviceUID: uid)
                     }
-                    .controlSize(.small)
                 }
-            } label: {
+                Button("Калибровать…") {
+                    calibration = CalibrationTarget(uid: uid, name: name)
+                }
+            }
+            .controlSize(.small)
+        } label: {
+            if !uid.isEmpty {
                 Text("Для устройства: \(name)")
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Устройство вывода, для которого открыт лист калибровки: UID и имя на момент нажатия.
+    struct CalibrationTarget: Identifiable {
+        let uid: String
+        let name: String
+
+        var id: String { uid }
     }
 
     private var latencyKind: Binding<LatencyKind> {

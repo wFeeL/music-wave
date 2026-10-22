@@ -597,13 +597,18 @@ final class AudioPipeline {
     private func pushSettings() {
         var effective = settings
         effective.systemVolume = output.effectiveVolume
-        let latency = mode == .demo ? 0 : LatencyCalculator.outputLatency(output.latency, mode: latencyMode)
-        engine.update(settings: effective, outputLatency: latency, syncOffset: Double(syncOffsetMs) / 1000)
+        engine.update(settings: effective, outputLatency: outputLatency, syncOffset: Double(syncOffsetMs) / 1000)
     }
 
     /// Задержка вывода, с которой сейчас идут кадры и свечение, секунды (0 в демо).
     var outputLatency: Double {
-        mode == .demo ? 0 : LatencyCalculator.outputLatency(output.latency, mode: latencyMode)
+        mode == .demo ? 0 : deviceOutputLatency
+    }
+
+    /// Задержка вывода текущего устройства по режиму «Задержки волн», секунды, и в демо тоже: ее
+    /// берет метроном калибровки (`CalibrationView`), звук которого всегда идет через устройство.
+    var deviceOutputLatency: Double {
+        LatencyCalculator.outputLatency(output.latency, mode: latencyMode)
     }
 
     // MARK: - Сторож нулей
