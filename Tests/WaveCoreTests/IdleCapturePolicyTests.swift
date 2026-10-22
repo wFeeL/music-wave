@@ -2,17 +2,21 @@ import Testing
 @testable import WaveCore
 
 struct IdleCapturePolicyTests {
-    /// Тишина: уровень ниже порога, Now Playing не играет.
+    /// Тишина у приложения-источника: уровень ниже порога, Now Playing не играет.
     private static func silence(
         nowPlaying: Bool,
         suspended: Bool = false,
-        adapterAvailable: Bool = true
+        adapterAvailable: Bool = true,
+        systemWide: Bool = false,
+        outputting: Bool = false
     ) -> IdleCapturePolicy.Inputs {
         IdleCapturePolicy.Inputs(
             audioActive: false,
             sourcePlaying: false,
             adapterAvailable: adapterAvailable,
             sourceReportsNowPlaying: nowPlaying,
+            systemWide: systemWide,
+            sourceOutputting: outputting,
             suspended: suspended
         )
     }
@@ -53,6 +57,40 @@ struct IdleCapturePolicyTests {
         var policy = IdleCapturePolicy()
         let event = Self.run(&policy, Self.silence(nowPlaying: true, adapterAvailable: false), from: 0, to: 60)
         #expect(event == nil)
+    }
+
+    /// Весь звук системы не останавливается никогда: звук может начать любое приложение.
+    @Test func systemWideIsNeverSuspended() {
+        var policy = IdleCapturePolicy()
+        let event = Self.run(&policy, Self.silence(nowPlaying: true, systemWide: true), from: 0, to: 60)
+        #expect(event == nil)
+        let suspended = policy.update(Self.silence(nowPlaying: true, suspended: true, systemWide: true), now: 60.1)
+        #expect(suspended == .resume)
+    }
+
+    /// Процесс источника держит открытый поток вывода (тихий, но `IsRunningOutput`): захват не
+    /// останавливается, пока поток открыт; закрылся, тишина считается с этого момента.
+    @Test func outputtingSourceProcessHoldsCapture() throws {
+        var policy = IdleCapturePolicy()
+        let held = Self.run(&policy, Self.silence(nowPlaying: true, outputting: true), from: 0, to: 60)
+        #expect(held == nil)
+        let event = try #require(Self.run(&policy, Self.silence(nowPlaying: true), from: 60.1, to: 90))
+        #expect(event.action == .suspend)
+        #expect(abs(event.at - 70.1) < 0.05)
+        let resumed = policy.update(Self.silence(nowPlaying: true, suspended: true, outputting: true), now: 90.1)
+        #expect(resumed == .resume)
+    }
+
+    /// Сразу после приостановки конвейер мог сам возобновить захват (процесс начал выводить
+    /// звук): следующий тихий тик не останавливает его снова, тишина считается заново.
+    @Test func selfWakeRightAfterSuspendIsNotSuspendedAgain() throws {
+        var policy = IdleCapturePolicy()
+        let event = try #require(Self.run(&policy, Self.silence(nowPlaying: true), from: 0, to: 20))
+        #expect(event.action == .suspend)
+        let next = policy.update(Self.silence(nowPlaying: true), now: event.at + 0.1)
+        #expect(next == .none)
+        let later = try #require(Self.run(&policy, Self.silence(nowPlaying: true), from: event.at + 0.2, to: 40))
+        #expect(abs(later.at - (event.at + 10.1)) < 0.05)
     }
 
     @Test func sourceWithNowPlayingIsSuspendedAfterTenSeconds() throws {

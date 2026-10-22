@@ -554,17 +554,24 @@ final class AppModel {
         pipeline.paused = settings.paused
     }
 
-    /// После 10 с тишины IOProc останавливается, но только если Now Playing работает и с выбора
-    /// источника хотя бы раз прислал его трек: иначе о начале музыки узнает лишь tap (Telegram,
-    /// игры, весь звук без плеера). Возобновление по звуку, по старту воспроизведения, когда
-    /// приостановка перестала быть оправданной, а еще сам конвейер возобновляет захват, когда
-    /// процесс источника начал выводить звук (`AudioPipeline.suspendIdle()`).
+    /// После 10 с тишины IOProc останавливается, но только у приложения, о котором Now Playing
+    /// с выбора источника хотя бы раз прислал трек, и пока ни один его процесс не выводит звук:
+    /// иначе о начале музыки узнает лишь tap (Telegram, игры, весь звук системы). Возобновление
+    /// по звуку, по старту воспроизведения, когда приостановка перестала быть оправданной, а еще
+    /// сам конвейер возобновляет захват, когда процесс источника начал выводить звук
+    /// (`AudioPipeline.suspendIdle()`).
     private func manageIdleCapture(audioActive: Bool, sourcePlaying: Bool, now: Double) {
+        let source = effectiveSource
+        let systemWide = source == .systemWide
+        // Флаг вывода читается заново, только когда он может что-то решить.
+        let outputting = !systemWide && !audioActive && !sourcePlaying && pipeline.sourceProcessOutputting()
         let inputs = IdleCapturePolicy.Inputs(
             audioActive: audioActive,
             sourcePlaying: sourcePlaying,
             adapterAvailable: adapter.isAvailable,
             sourceReportsNowPlaying: sourceTrackSeen,
+            systemWide: systemWide,
+            sourceOutputting: outputting,
             suspended: pipeline.status == .suspended
         )
         switch idlePolicy.update(inputs, now: now) {

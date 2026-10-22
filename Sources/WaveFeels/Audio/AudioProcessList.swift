@@ -42,24 +42,6 @@ final class AudioProcessList {
         }
     }
 
-    /// Процессы, которые сейчас выводят звук, кроме этого приложения. Дешевле `snapshot()`:
-    /// для каждого процесса читается только `kAudioProcessPropertyIsRunningOutput`, а PID лишь
-    /// у выводящих. Нужен, чтобы раз в секунду проверять весь звук системы в приостановке.
-    func outputtingProcessIDs() -> Set<AudioObjectID> {
-        let own = getpid()
-        let objects: [AudioObjectID] = CAProperty.readArray(CAProperty.systemObject, kAudioHardwarePropertyProcessObjectList)
-        var result = Set<AudioObjectID>()
-        for object in objects {
-            let output: UInt32 = CAProperty.read(object, kAudioProcessPropertyIsRunningOutput, default: 0)
-            guard output != 0 else { continue }
-            let pid: pid_t = CAProperty.read(object, kAudioProcessPropertyPID, default: -1)
-            if pid > 0, pid != own {
-                result.insert(object)
-            }
-        }
-        return result
-    }
-
     /// Приложения, у которых есть процессы со звуком: сначала те, что выводят звук сейчас,
     /// внутри групп по имени. Помощник относится к приложению, внутри бандла которого лежит
     /// его исполняемый файл.
