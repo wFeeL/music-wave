@@ -11,13 +11,14 @@ enum SnapshotError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .demoNotFound: "нет Demo/demo.wav в ресурсах приложения"
-        case .renderFailed(let name): "ImageRenderer не отрисовал \(name)"
+        case .renderFailed(let name): "не отрисован снимок \(name)"
         case .encodeFailed(let name): "не удалось записать PNG \(name)"
         }
     }
 }
 
-/// Снимки острова для CI: PNG в масштабе 2 на фоне строки меню macOS.
+/// Снимки острова для CI: PNG в масштабе 2 на фоне строки меню macOS. После них снимки окна
+/// настроек в светлом и темном оформлении.
 ///
 /// Кадры анализа не задаются руками: `demo.wav` прогоняется через `Analyzer` вне реального
 /// времени с шагом 1/60 с до нужного момента, вместе с ним двигаются фазы волн и «вздох».
@@ -116,6 +117,15 @@ enum SnapshotRenderer {
         )
         return NotchGeometry.layout(for: [screen])!
     }
+
+    /// Размер окна настроек на снимке, pt: все разделы без прокрутки.
+    static let settingsSize = CGSize(width: 520, height: 800)
+
+    /// Снимки окна настроек: имя и темное ли оформление.
+    static let settingsScenes: [(name: String, dark: Bool)] = [
+        ("13-settings", false),
+        ("13-settings-dark", true),
+    ]
 
     /// Внешний монитор без выреза: капсула под строкой меню.
     static var pillLayout: NotchLayout {
@@ -224,7 +234,8 @@ enum SnapshotRenderer {
         ]
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let manifest = scenes.map { "\($0.name).png\n" }.joined()
+        let names = scenes.map(\.name) + settingsScenes.map(\.name)
+        let manifest = names.map { "\($0).png\n" }.joined()
         try Data(manifest.utf8).write(to: directory.appendingPathComponent(manifestName), options: .atomic)
         let defaults = snapshotDefaults()
         let model = AppModel(defaults: defaults)
@@ -233,6 +244,11 @@ enum SnapshotRenderer {
         for scene in scenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
             try render(scene, model: model, to: url)
+            written.append(url)
+        }
+        for scene in settingsScenes {
+            let url = directory.appendingPathComponent("\(scene.name).png")
+            try renderSettings(name: scene.name, dark: scene.dark, model: model, to: url)
             written.append(url)
         }
         return written
@@ -285,6 +301,70 @@ enum SnapshotRenderer {
         bitmap.size = NSSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
         guard let data = bitmap.representation(using: .png, properties: [:]) else {
             throw SnapshotError.encodeFailed(scene.name)
+        }
+        try data.write(to: url, options: .atomic)
+    }
+}
+
+// MARK: - Настройки
+
+extension SnapshotRenderer {
+    /// Источники на снимке настроек: Яндекс Музыка по умолчанию и Safari.
+    static var settingsCatalog: SourceCatalog {
+        SourceCatalog(
+            defaultSource: source,
+            playing: [],
+            browsers: [.application(
+                bundleID: "com.apple.Safari", bundlePath: "/Applications/Safari.app", displayName: "Safari"
+            )]
+        )
+    }
+
+    /// Окно настроек через `NSHostingView` в невидимом окне: `ImageRenderer` не рисует
+    /// элементы `Form`, за которыми стоят AppKit-контролы. Окно не выводится на экран,
+    /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана.
+    @MainActor
+    fileprivate static func renderSettings(
+        name: String,
+        dark: Bool,
+        model: AppModel,
+        to url: URL
+    ) throws {
+        guard let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) else {
+            throw SnapshotError.renderFailed(name)
+        }
+        let frame = NSRect(origin: .zero, size: settingsSize)
+        let content = SettingsView(model: model, presence: WindowPresence(), catalog: settingsCatalog) {}
+            .frame(width: settingsSize.width, height: settingsSize.height)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let hosting = NSHostingView(rootView: content)
+        hosting.frame = frame
+        hosting.appearance = appearance
+
+        let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = appearance
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+
+        // SwiftUI собирает AppKit-контролы при раскладке; короткий оборот цикла событий дает
+        // ей закончить отложенные обновления.
+        hosting.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        hosting.layoutSubtreeIfNeeded()
+
+        let bounds = hosting.bounds
+        guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: bounds) else {
+            throw SnapshotError.renderFailed(name)
+        }
+        appearance.performAsCurrentDrawingAppearance {
+            hosting.cacheDisplay(in: bounds, to: bitmap)
+        }
+        guard let data = bitmap.representation(using: .png, properties: [:]) else {
+            throw SnapshotError.encodeFailed(name)
         }
         try data.write(to: url, options: .atomic)
     }

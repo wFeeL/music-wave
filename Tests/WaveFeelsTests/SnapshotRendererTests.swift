@@ -9,6 +9,7 @@ struct SnapshotRendererTests {
         "01-silent", "02-loud-beat", "03-loud-no-beat", "04-expanded", "05-expanded-paused",
         "06-long-title", "07-palette-warm", "08-palette-cold", "09-pill-external",
         "10-expanded-no-artwork", "11-expanded-no-adapter", "12-pill-expanded",
+        "13-settings", "13-settings-dark",
     ]
 
     @Test func rendersAllSnapshotsWithVisibleWaves() throws {
@@ -71,6 +72,21 @@ struct SnapshotRendererTests {
         // Без Now Playing кнопок управления нет (кнопка «Открыть» правее, на месте «пауза/играть»).
         let noAdapter = try Bitmap(url: directory.appendingPathComponent("11-expanded-no-adapter.png"))
         #expect(noAdapter.brightPixels(in: transport.backward, scale: SnapshotRenderer.scale) == 0)
+
+        // Окно настроек отрисовано целиком, а не пустым фоном: в светлом оформлении есть темный
+        // текст, в темном светлый. Масштаб зависит от экрана, на котором идет отрисовка.
+        let settingsRect = CGRect(origin: .zero, size: SnapshotRenderer.settingsSize)
+        let light = try Bitmap(url: directory.appendingPathComponent("13-settings.png"))
+        let dark = try Bitmap(url: directory.appendingPathComponent("13-settings-dark.png"))
+        for (name, bitmap) in [("13-settings", light), ("13-settings-dark", dark)] {
+            #expect(bitmap.width >= Int(SnapshotRenderer.settingsSize.width), "\(name): ширина \(bitmap.width)")
+        }
+        let lightScale = CGFloat(light.width) / SnapshotRenderer.settingsSize.width
+        let darkScale = CGFloat(dark.width) / SnapshotRenderer.settingsSize.width
+        let ink = light.darkPixels(in: settingsRect, scale: lightScale)
+        let glyphs = dark.brightPixels(in: settingsRect, scale: darkScale)
+        #expect(ink > 2000, "13-settings: темных пикселей \(ink)")
+        #expect(glyphs > 2000, "13-settings-dark: светлых пикселей \(glyphs)")
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
@@ -123,6 +139,11 @@ private struct Bitmap {
     /// Сколько пикселей в `rect` (pt, начало сверху слева) заметно светлее черного.
     func visiblePixels(in rect: CGRect, scale: CGFloat) -> Int {
         count(in: rect, scale: scale) { r, g, b in max(r, g, b) >= 20 }
+    }
+
+    /// Сколько почти черных пикселей в `rect` (pt, начало сверху слева).
+    func darkPixels(in rect: CGRect, scale: CGFloat) -> Int {
+        count(in: rect, scale: scale) { r, g, b in max(r, g, b) <= 60 }
     }
 
     /// Сколько почти белых пикселей в `rect` (pt, начало сверху слева).

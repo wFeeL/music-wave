@@ -7,7 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var model: AppModel?
     private(set) var windows: WindowsController?
     private(set) var notch: NotchWindowController?
-    /// «Диагностика…» нажата до готовности модели: окно откроется сразу после запуска модели.
+    /// Модель для меню строки меню.
+    let modelHolder = AppModelHolder()
+    /// «Настройки…» или «Диагностика…» нажаты до готовности модели: окно откроется сразу после
+    /// запуска модели.
+    private var settingsRequested = false
     private var diagnosticsRequested = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -45,8 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.model = model
             self.windows = windows
             self.notch = notch
+            self.modelHolder.model = model
             model.start(arguments: arguments)
             notch.show()
+            if self.settingsRequested {
+                self.settingsRequested = false
+                windows.showSettings()
+            }
             if self.diagnosticsRequested {
                 self.diagnosticsRequested = false
                 windows.showDiagnostics()
@@ -58,6 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notch?.stop()
         model?.stop()
         Log.flush()
+    }
+
+    func showSettings() {
+        if let windows {
+            windows.showSettings()
+        } else {
+            settingsRequested = true
+            Log.file("настройки откроются после запуска модели")
+        }
     }
 
     func showDiagnostics() {

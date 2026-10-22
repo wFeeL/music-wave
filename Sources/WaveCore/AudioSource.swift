@@ -89,3 +89,66 @@ public enum ProcessMatcher {
         string.precomposedStringWithCanonicalMapping
     }
 }
+
+/// Пункты списка «Источник звука» в настройках: найденная Яндекс Музыка, приложения со звуком,
+/// установленные браузеры и выбранное приложение, которого нет в этих списках.
+public struct SourceChoices: Sendable, Equatable {
+    /// Браузеры, которые предлагаются, если установлены.
+    public static let browserBundleIDs = [
+        "ru.yandex.desktop.yandex-browser",
+        "com.google.Chrome",
+        "org.mozilla.firefox",
+        "com.apple.Safari",
+    ]
+
+    public var yandexMusic: AudioSource?
+    public var playing: [AudioSource]
+    public var browsers: [AudioSource]
+    /// Выбранное приложение вне списков, например через «Выбрать приложение…».
+    public var other: AudioSource?
+
+    public init(yandexMusic: AudioSource?, playing: [AudioSource], browsers: [AudioSource], other: AudioSource?) {
+        self.yandexMusic = yandexMusic
+        self.playing = playing
+        self.browsers = browsers
+        self.other = other
+    }
+
+    /// Списки без повторов в порядке Яндекс Музыка, приложения со звуком, браузеры. Приложение
+    /// узнается по пути бандла, без пути по bundle ID; весь звук системы в списки не попадает.
+    /// Пункт того же приложения, что `selected`, заменяется самим `selected`: имя в списках
+    /// может отличаться от сохраненного, а меню ищет выбранный пункт по равенству.
+    public static func make(
+        selected: AudioSource?,
+        yandexMusic: AudioSource?,
+        playing: [AudioSource],
+        browsers: [AudioSource]
+    ) -> SourceChoices {
+        let selectedKey = selected.flatMap(key)
+        var seen = Set<String>()
+        func take(_ source: AudioSource) -> AudioSource? {
+            guard let key = key(source), seen.insert(key).inserted else { return nil }
+            return key == selectedKey ? selected : source
+        }
+        let yandex = yandexMusic.flatMap(take)
+        let playingApps = playing.compactMap(take)
+        let browserApps = browsers.compactMap(take)
+        let other = selectedKey.flatMap { seen.contains($0) ? nil : selected }
+        return SourceChoices(yandexMusic: yandex, playing: playingApps, browsers: browserApps, other: other)
+    }
+
+    /// Есть ли пункт для `source`. Весь звук системы есть всегда.
+    public func contains(_ source: AudioSource) -> Bool {
+        source == .systemWide || source == yandexMusic || source == other
+            || playing.contains(source) || browsers.contains(source)
+    }
+
+    /// Ключ приложения: путь бандла в канонической форме Unicode, без пути bundle ID.
+    private static func key(_ source: AudioSource) -> String? {
+        guard case .application(let bundleID, let bundlePath, _) = source else { return nil }
+        if !bundlePath.isEmpty {
+            return "path:" + bundlePath.precomposedStringWithCanonicalMapping
+        }
+        return bundleID.isEmpty ? nil : "id:" + bundleID
+    }
+}

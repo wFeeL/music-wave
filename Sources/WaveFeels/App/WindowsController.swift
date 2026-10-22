@@ -17,6 +17,7 @@ final class WindowPresence {
 @MainActor
 final class WindowsController: NSObject, NSWindowDelegate {
     private let model: AppModel
+    private let settingsPresence = WindowPresence()
     private let diagnosticsPresence = WindowPresence()
     private var settingsWindow: NSWindow?
     private var diagnosticsWindow: NSWindow?
@@ -29,11 +30,16 @@ final class WindowsController: NSObject, NSWindowDelegate {
     func showSettings() {
         let window = settingsWindow ?? makeWindow(
             title: "Настройки WaveFeels",
-            size: NSSize(width: 460, height: 280),
+            size: NSSize(width: 520, height: 660),
             autosaveName: "WaveFeelsSettings",
-            content: SettingsPlaceholderView()
+            content: SettingsView(model: model, presence: settingsPresence) { [weak self] in
+                self?.showDiagnostics()
+            }
         )
         settingsWindow = window
+        if !settingsPresence.isOpen {
+            settingsPresence.isOpen = true
+        }
         present(window)
     }
 
@@ -54,16 +60,16 @@ final class WindowsController: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidMiniaturize(_ notification: Notification) {
-        setDiagnosticsLive(false, for: notification)
+        setLive(false, for: notification)
     }
 
     func windowDidDeminiaturize(_ notification: Notification) {
-        setDiagnosticsLive(true, for: notification)
+        setLive(true, for: notification)
     }
 
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow else { return }
-        setDiagnosticsLive(false, for: notification)
+        setLive(false, for: notification)
         let othersOpen = [settingsWindow, diagnosticsWindow].contains { window in
             guard let window, window !== closing else { return false }
             return window.isVisible || window.isMiniaturized
@@ -73,10 +79,19 @@ final class WindowsController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func setDiagnosticsLive(_ live: Bool, for notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === diagnosticsWindow,
-              diagnosticsPresence.isOpen != live else { return }
-        diagnosticsPresence.isOpen = live
+    private func setLive(_ live: Bool, for notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        let presence: WindowPresence
+        if window === diagnosticsWindow {
+            presence = diagnosticsPresence
+        } else if window === settingsWindow {
+            presence = settingsPresence
+        } else {
+            return
+        }
+        if presence.isOpen != live {
+            presence.isOpen = live
+        }
     }
 
     // MARK: - Окна
@@ -106,27 +121,13 @@ final class WindowsController: NSObject, NSWindowDelegate {
         return window
     }
 
+    /// Показывает окно поверх остальных; свернутое в Dock разворачивается.
     private func present(_ window: NSWindow) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
-    }
-}
-
-/// Заглушка до окна настроек.
-private struct SettingsPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "gearshape")
-                .font(.system(size: 30))
-                .foregroundStyle(.secondary)
-            Text("Настройки появятся в следующей сборке")
-                .font(.headline)
-            Text("Состояние захвата и Now Playing видно в окне «Диагностика».")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
         }
-        .padding(32)
-        .frame(minWidth: 400, minHeight: 220)
+        window.makeKeyAndOrderFront(nil)
     }
 }

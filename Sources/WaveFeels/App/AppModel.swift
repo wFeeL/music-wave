@@ -166,6 +166,16 @@ final class AppModel {
         settings.paused || screenLocked || (fullscreenSuppressed && settings.hideInFullscreen)
     }
 
+    /// «Приостановить визуализацию» и «Возобновить визуализацию»: на паузе захват и анализ
+    /// остановлены, остров скрыт и не рисуется. Применяется сразу, не дожидаясь тика.
+    func setPaused(_ paused: Bool) {
+        guard paused != settings.paused else { return }
+        settings.paused = paused
+        silentSince = nil
+        log(paused ? "визуализация приостановлена" : "визуализация возобновлена")
+        applySettings()
+    }
+
     // MARK: - Источник по умолчанию
 
     /// Источник, который сейчас используется: выбранный пользователем или по умолчанию.
@@ -207,7 +217,8 @@ final class AppModel {
         return .systemWide
     }
 
-    private static func applicationSource(at url: URL, fallbackBundleID: String?) -> AudioSource {
+    /// Источник-приложение по пути бандла: путь без символических ссылок, имя из бандла.
+    static func applicationSource(at url: URL, fallbackBundleID: String?) -> AudioSource {
         let path = AudioProcessList.canonicalPath(url)
         let bundle = Bundle(path: path)
         let bundleID = bundle?.bundleIdentifier ?? fallbackBundleID ?? ""
@@ -332,7 +343,9 @@ final class AppModel {
         pipeline.adapterSaysPlaying = sourcePlaying
 
         let audioActive = gate.update(levelDB: store.latest.rawLevelDB, now: now)
-        manageIdleCapture(audioActive: audioActive, sourcePlaying: sourcePlaying, now: now)
+        if !settings.paused {
+            manageIdleCapture(audioActive: audioActive, sourcePlaying: sourcePlaying, now: now)
+        }
 
         let inputs = IslandInputs(
             audioActive: audioActive,
@@ -381,6 +394,7 @@ final class AppModel {
             pipeline.settings = level
         }
         pipeline.latencyMode = settings.latencyMode
+        pipeline.paused = settings.paused
     }
 
     /// После 10 с тишины IOProc останавливается, но только если Now Playing работает: без него
@@ -881,6 +895,7 @@ extension AppModel {
         case .waitingForSource: "жду запуска источника"
         case .rebuilding(let attempt): "пересборка сторожем нулей, попытка \(attempt)"
         case .suspended: "приостановлен в тишине"
+        case .paused: "остановлен, визуализация на паузе"
         }
     }
 

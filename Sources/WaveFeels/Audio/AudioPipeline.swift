@@ -11,6 +11,8 @@ enum PipelineStatus: Equatable, Sendable {
     case rebuilding(attempt: Int)
     /// Долгая тишина: IOProc и анализ остановлены, подписки работают.
     case suspended
+    /// «Приостановить визуализацию»: IOProc, демо и анализ остановлены, подписки работают.
+    case paused
 }
 
 /// Выбор источника, сборка и пересборка захвата, сторож нулей.
@@ -63,6 +65,16 @@ final class AudioPipeline {
 
     @ObservationIgnored var latencyMode: LatencyMode = .auto {
         didSet { if latencyMode != oldValue { pushSettings() } }
+    }
+
+    /// «Приостановить визуализацию»: захват или демо и анализ стоят, подписки работают,
+    /// пересборок нет. Выставляет `AppModel`. Снятие паузы возвращает прежний режим, из
+    /// приостановки в тишине сразу в захват. Действует и до `start()`.
+    @ObservationIgnored var paused = false {
+        didSet {
+            guard paused != oldValue else { return }
+            if paused { enterPause() } else { leavePause() }
+        }
     }
 
     private enum Mode {
@@ -140,16 +152,20 @@ final class AudioPipeline {
         ring.reset()
         demo = newDemo
         mode = .demo
+        log("демо: \(file.lastPathComponent), \(Int(newDemo.sampleRate)) Гц")
+        guard !paused else {
+            status = .paused
+            return
+        }
         newDemo.start()
         engine.start(sampleRate: newDemo.sampleRate)
         pushSettings()
         status = .demo
-        log("демо: \(file.lastPathComponent), \(Int(newDemo.sampleRate)) Гц")
     }
 
     /// Долгая тишина: IOProc и анализ останавливаются, подписки остаются.
     func suspendIdle() {
-        guard mode == .live else { return }
+        guard mode == .live, !paused else { return }
         mode = .suspended
         rebuildTask?.cancel()
         rebuildTask = nil
@@ -160,7 +176,7 @@ final class AudioPipeline {
     }
 
     func resume() {
-        guard mode == .suspended else { return }
+        guard mode == .suspended, !paused else { return }
         mode = .live
         performRebuild(reason: "возобновление")
     }
@@ -172,7 +188,7 @@ final class AudioPipeline {
 
     /// Пересборка не чаще раза в 250 мс; запросы во время ожидания объединяются.
     func rebuild(reason: String) {
-        guard mode == .live, rebuildTask == nil else { return }
+        guard mode == .live, !paused, rebuildTask == nil else { return }
         let wait = max(0, lastRebuildAt + Self.minRebuildInterval - Self.now())
         rebuildTask = Task { @MainActor [weak self] in
             if wait > 0 {
@@ -184,10 +200,51 @@ final class AudioPipeline {
         }
     }
 
+    // MARK: - Пауза
+
+    private func enterPause() {
+        switch mode {
+        case .stopped:
+            return
+        case .live, .suspended:
+            rebuildTask?.cancel()
+            rebuildTask = nil
+            capture.stop()
+            engine.stop()
+            // После паузы сразу захват: тишину AppModel отсчитает заново.
+            mode = .live
+        case .demo:
+            demo?.stop()
+            engine.stop()
+        }
+        status = .paused
+        log("визуализация на паузе: захват и анализ остановлены")
+    }
+
+    private func leavePause() {
+        switch mode {
+        case .stopped, .suspended:
+            return
+        case .live:
+            performRebuild(reason: "визуализация возобновлена")
+        case .demo:
+            guard let demo else { return }
+            demo.start()
+            engine.start(sampleRate: demo.sampleRate)
+            pushSettings()
+            status = .demo
+            log("визуализация возобновлена: демо")
+        }
+    }
+
     // MARK: - Пересборка
 
     private func performRebuild(reason: String) {
         guard mode == .live else { return }
+        guard !paused else {
+            status = .paused
+            return
+        }
         rebuildTask?.cancel()
         rebuildTask = nil
         lastRebuildAt = Self.now()
