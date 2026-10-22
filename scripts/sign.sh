@@ -123,9 +123,9 @@ if [[ -z "$SHA" ]]; then
 fi
 echo "signing identity: $CERT_NAME ($SHA)"
 
-# Хэш без пробелов, переводов строк и двоеточий (как его печатает openssl), строчными буквами.
+# Хэш без пробелов, табуляций, переводов строк, двоеточий и обертки H"...", строчными буквами.
 normalize_hash() {
-    printf '%s' "$1" | tr -d ' \r\n:' | tr '[:upper:]' '[:lower:]'
+    printf '%s' "$1" | tr -d ' \t\r\n:' | tr '[:upper:]' '[:lower:]' | sed -E 's/^h"(.*)"$/\1/'
 }
 
 EXPECTED_LEAF=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")

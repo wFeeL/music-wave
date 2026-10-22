@@ -87,7 +87,7 @@ struct CoreAudioSmokeTests {
             }
         }.value
         let playing = log.frames
-        try await Task.sleep(for: .seconds(1.5))
+        try await Task.sleep(for: .seconds(2))
         let zeroRun = engine.zeroRunDuration
         let last = try #require(log.frames.last)
         engine.stop()
