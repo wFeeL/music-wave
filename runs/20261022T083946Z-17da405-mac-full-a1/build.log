@@ -1,0 +1,85 @@
+== step build-release: swift build -c release
+Building for production...
+[0/5] Write sources
+[2/5] Write swift-version-7974D3F7F03D5E95.txt
+[4/6] Compiling WaveCore ActivityGate.swift
+[5/7] Compiling WaveFeels AppDelegate.swift
+[5/7] Write Objects.LinkFileList
+[6/7] Linking WaveFeels
+Build complete! (43.26s)
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[1/13] Write sources
+[5/13] Write WaveFeels-entitlement.plist
+[6/13] Write sources
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/25] Emitting module WaveCore
+[10/25] Compiling WaveCore IslandStateMachine.swift
+[11/25] Compiling WaveCore Latency.swift
+[12/25] Compiling WaveCore LevelProcessor.swift
+[13/25] Compiling WaveCore NotchGeometry.swift
+[14/25] Compiling WaveCore NowPlaying.swift
+[15/25] Compiling WaveCore ActivityGate.swift
+[16/25] Compiling WaveCore Analyzer.swift
+[17/25] Compiling WaveCore AttackRelease.swift
+[18/25] Compiling WaveCore AudioSource.swift
+[19/25] Compiling WaveCore BandMapper.swift
+[20/25] Compiling WaveCore BeatDetector.swift
+[21/30] Compiling WaveCore Palette.swift
+[22/30] Compiling WaveCore RealFFT.swift
+[23/30] Compiling WaveCore SampleRingBuffer.swift
+[24/30] Compiling WaveCore TapStreamLayout.swift
+[25/30] Compiling WaveCore WaveShape.swift
+[26/64] Compiling WaveCoreTests ActivityGateTests.swift
+[27/64] Compiling WaveCoreTests AnalyzerTests.swift
+[28/64] Compiling WaveCoreTests AttackReleaseTests.swift
+[29/64] Compiling WaveCoreTests BandMapperTests.swift
+[30/64] Compiling WaveFeels OutputDeviceMonitor.swift
+[31/64] Compiling WaveFeels ProcessTapCapture.swift
+[34/70] Compiling WaveCoreTests RealFFTTests.swift
+[35/70] Compiling WaveCoreTests SampleRingBufferTests.swift
+[36/70] Compiling WaveCoreTests SourceChoicesTests.swift
+[37/70] Compiling WaveCoreTests TapStreamLayoutTests.swift
+[38/70] Compiling WaveCoreTests TestSignals.swift
+[39/70] Compiling WaveCoreTests WaveShapeTests.swift
+[40/70] Compiling WaveFeels Log.swift
+[41/70] Compiling WaveFeels SigningInfo.swift
+[48/80] Emitting module WaveFeels
+[49/80] Compiling WaveCoreTests LatencyTests.swift
+[50/80] Compiling WaveCoreTests LevelProcessorTests.swift
+[51/80] Compiling WaveCoreTests NotchGeometryTests.swift
+[52/80] Compiling WaveCoreTests NowPlayingTests.swift
+[53/80] Compiling WaveCoreTests PaletteTests.swift
+[54/80] Compiling WaveCoreTests ProcessMatcherTests.swift
+[65/80] Emitting module WaveCoreTests
+[66/80] Compiling WaveFeels DiagnosticsView.swift
+[67/80] Compiling WaveFeels ExpandedPanelView.swift
+[68/80] Compiling WaveFeels IslandShape.swift
+[69/80] Compiling WaveFeels IslandView.swift
+[70/80] Compiling WaveFeels MarqueeText.swift
+[71/80] Compiling WaveFeels SettingsView.swift
+[72/80] Compiling WaveFeels WaveCanvas.swift
+[73/80] Compiling WaveFeels FullscreenDetector.swift
+[74/80] Compiling WaveFeels NotchPanel.swift
+[75/80] Compiling WaveFeels NotchWindowController.swift
+[75/80] Write Objects.LinkFileList
+[76/80] Linking WaveFeels
+[77/80] Applying WaveFeels
+[79/89] Compiling WaveFeelsTests AppModelArtworkTests.swift
+[80/89] Compiling WaveFeelsTests AppModelDefaultSourceTests.swift
+[81/89] Compiling WaveFeelsTests AppModelPauseTests.swift
+[82/89] Compiling WaveFeelsTests AppSettingsTests.swift
+[83/89] Emitting module WaveFeelsTests
+[84/89] Compiling WaveFeelsTests ArtworkPixelsTests.swift
+[85/89] Compiling WaveFeelsTests CoreAudioSmokeTests.swift
+[86/89] Compiling WaveFeelsTests LaunchArgumentsTests.swift
+[87/89] Compiling WaveFeelsTests MediaRemoteAdapterTests.swift
+[88/92] Compiling WaveFeelsTests NotchPanelTests.swift
+[89/92] Compiling WaveFeelsTests PipelineLifecycleTests.swift
+[90/92] Compiling WaveFeelsTests SnapshotRendererTests.swift
+[91/94] Compiling WaveFeelsPackageTests runner.swift
+[92/94] Emitting module WaveFeelsPackageTests
+[92/94] Write Objects.LinkFileList
+[93/94] Linking WaveFeelsPackageTests
+Build complete! (45.70s)

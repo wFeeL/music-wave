@@ -1,0 +1,23 @@
+# sample <pid> 3 -mayDie of the play run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 6355) every 1 millisecond
+Process:         WaveFeels [6355]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x100e4c000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.33 (33)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [6321]
+Target Type:     live task
+
+Date/Time:       2026-10-22 08:38:35.546 +0000
+Launch Time:     2026-10-22 08:38:14.964 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+----
+
+Samples per thread:
+
+Sort by top of stack, same collapsed (when >= 5):

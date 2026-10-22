@@ -1,0 +1,387 @@
+# sample 4048 4 -mayDie at 20 s after swift test started
+ 4048 00:27 /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper --test-bundle-path /Users/runner/work/music-wave/music-wave/
+
+Analysis of sampling swiftpm-testing-helper (pid 4048) every 1 millisecond
+Process:         swiftpm-testing-helper [4048]
+Path:            /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper
+Load Address:    0x100f8c000
+Identifier:      swiftpm-testing-helper
+Version:         24907
+Build Info:      IDEApplication-24959000000000000~2 (17F113)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  swift-package [4024]
+Target Type:     live task
+
+Date/Time:       2026-10-22 08:37:22.488 +0000
+Launch Time:     2026-10-22 08:36:55.011 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         75.0M
+Physical footprint (peak):  79.5M
+Samples per thread:
+    2449 Thread_15569: Main Thread   DispatchQueue_<multiple>
+    2449 Thread_15575
+    2449 Thread_16174: caulk::deferred_logger
+    2449 Thread_16175: caulk.messenger.shared:high
+    2449 Thread_16180: caulk.messenger.shared:17
+    2449 Thread_16236: com.apple.NSEventThread
+    2449 Thread_16237
+    2449 Thread_16238   DispatchQueue_10: com.apple.root.utility-qos  (concurrent)
+    2449 Thread_16239   DispatchQueue_10: com.apple.root.utility-qos  (concurrent)
+    2425 Thread_15574
+    2412 Thread_16235
+    2357 Thread_15573
+    2338 Thread_16176
+    1242 Thread_16207   DispatchQueue_10: com.apple.root.utility-qos  (concurrent)
+    1207 Thread_16179   DispatchQueue_10: com.apple.root.utility-qos  (concurrent)
+    1196 Thread_16207
+    1139 Thread_16179
+    155 Thread_<multiple>   DispatchQueue_924: com.apple.RenderBox.Encoder  (serial)
+    142 Thread_<multiple>   DispatchQueue_937: com.apple.MTLCompilerConnectionQueue  (serial)
+    26 Thread_16179   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    23 Thread_<multiple>   DispatchQueue_928: com.Metal.CompletionQueueDispatch  (serial)
+    8 Thread_<multiple>   DispatchQueue_923: com.apple.RenderBox.Device  (serial)
+    6 Thread_<multiple>   DispatchQueue_949: fscache update queue  (serial)
+    6 Thread_16179   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+    5 Thread_16176   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+    4 Thread_<multiple>   DispatchQueue_925: com.Metal.CommandQueueDispatch  (serial)
+    1 Thread_16176   DispatchQueue_286: WMClientWindowManager  (serial)
+    1 Thread_16176   DispatchQueue_932: com.apple.RenderBox.SurfacePool  (serial)
+    1 Thread_16207   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        11886
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        7347
+        start_wqthread  (in libsystem_pthread.dylib)        4902
+        mach_msg2_trap  (in libsystem_kernel.dylib)        2689
+        ___chkstk_darwin  (in libsystem_pthread.dylib)        690
+        protocol witness for Collection.formIndex(after:) in conformance <> Range<A>  (in libswiftCore.dylib)        685
+        closure #1 in closure #1 in RealFFT.amplitudeSpectrum(_:)  (in WaveFeelsPackageTests)        592
+        swift_getAssociatedTypeWitness  (in libswiftCore.dylib)        427
+        swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCacheEntry::Key, swift::MetadataRequest&,
+        IndexingIterator.next()  (in libswiftCore.dylib)        329
+        _xzm_free  (in libsystem_malloc.dylib)        322
+        __psynch_cvwait  (in libsystem_kernel.dylib)        293
+        _swift_getGenericMetadata(swift::MetadataRequest, void const* const*, swift::TargetTypeContextDescriptor<swift::InProcess> const*)  (in libswiftCore.dylib)        235
+        swift::StableAddressConcurrentReadableHashMap<swift::GenericCacheEntry, swift::TaggedMetadataAllocator<(unsigned short)14>, swift::Mutex>::getOrInsert<swift::MetadataCacheKey, swift::MetadataW
+        swift::TargetContextDescriptor<swift::InProcess>::getGenericContext() const  (in libswiftCore.dylib)        228
+        getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)  (in libswiftCore.dylib)        216
+        Array._checkSubscript(_:wasNativeTypeChecked:)  (in libswiftCore.dylib)        215
+        swift::MetadataCacheKey::operator==(swift::MetadataCacheKey const&) const  (in libswiftCore.dylib)        208
+        kevent_id  (in libsystem_kernel.dylib)        195
+        _platform_memset  (in libsystem_platform.dylib)        169
+        Array.subscript.getter  (in libswiftCore.dylib)        165
+        swift_getAssociatedConformanceWitness  (in libswiftCore.dylib)        151
+        specialized Collection._failEarlyRangeCheck(_:bounds:)  (in libswiftCore.dylib)        137
+        _xzm_xzone_malloc  (in libsystem_malloc.dylib)        135
+        swift_retain  (in libswiftCore.dylib)        135
+        _platform_memmove  (in libsystem_platform.dylib)        117
+        _swift_isClassOrObjCExistentialType  (in libswiftCore.dylib)        112
+        static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests)        107
+        swift_release  (in libswiftCore.dylib)        107
+        _free  (in libsystem_malloc.dylib)        101
+        swift::storeEnumTagSinglePayloadImpl(swift::OpaqueValue*, unsigned int, unsigned int, swift::TargetMetadata<swift::InProcess> const*, unsigned long, unsigned int, void (swift::OpaqueValue*, un
+        _malloc_zone_malloc  (in libsystem_malloc.dylib)        95
+        swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned long long, 8ul, 8ul, 8ul>>::initializeWithCopy(swift::OpaqueValue*, swift::OpaqueValue*, swift::TargetMetadata<swift
+        <deduplicated_symbol>  (in libsystem_malloc.dylib)        93
+        swift_bridgeObjectRetain  (in libswiftCore.dylib)        89
+        swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned long long, 8ul, 8ul, 8ul>>::destroy(swift::OpaqueValue*, swift::TargetMetadata<swift::InProcess> const*)  (in libswi
+        swift_getTupleTypeMetadata  (in libswiftCore.dylib)        83
+        Range<>.subscript.read  (in libswiftCore.dylib)        72
+        __swift_instantiateCanonicalPrespecializedGenericMetadata  (in libswiftCore.dylib)        72
+        pthread_mutex_lock  (in libsystem_pthread.dylib)        66
+        swift_getCanonicalPrespecializedGenericMetadata  (in libswiftCore.dylib)        65
+        DYLD-STUB$$Array.subscript.getter  (in WaveFeelsPackageTests)        63
+        destroy for ClosedRange  (in libswiftCore.dylib)        59
+        mach_msg2_trap  (in dyld)        54
+        _platform_memcmp  (in libsystem_platform.dylib)        50
+        swift::MetadataCacheEntryBase<(anonymous namespace)::TupleCacheEntry, swift::TargetTupleTypeMetadata<swift::InProcess>::Element>::awaitSatisfyingState(swift::ConcurrencyControl&, swift::Metada
+        swift::MetadataCacheEntryBase<swift::GenericCacheEntry, void const*>::awaitSatisfyingState(swift::ConcurrencyControl&, swift::MetadataRequest)  (in libswiftCore.dylib)        50
+        <deduplicated_symbol>  (in libswiftCore.dylib)        46
+        performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMetadataState::CheckStateCallbacks&&) 
+        protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib)        43
+        swift::LockingConcurrentMap<swift::GenericCacheEntry, swift::LockingConcurrentMapStorage<swift::GenericCacheEntry, (unsigned short)14>>::getOrInsert<swift::MetadataCacheKey, swift::MetadataReq
+        protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib)        39
+        static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests)        39
+        swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned long long, 8ul, 8ul, 8ul>>::initializeWithTake(swift::OpaqueValue*, swift::OpaqueValue*, swift::TargetMetadata<swift
+        protocol witness for Collection.subscript.read in conformance <> Range<A>  (in libswiftCore.dylib)        37
+        swift_getTupleTypeMetadata2  (in libswiftCore.dylib)        37
+        <deduplicated_symbol>  (in dyld)        31
+        swift::metadataimpl::FixedSizeBufferValueWitnesses<swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned long long, 8ul, 8ul, 8ul>>, true, 8ul, 8ul, false>::storeEnumTagS
+        SIMD<>.sum()  (in WaveFeelsPackageTests)        30
+        swift_bridgeObjectRelease  (in libswiftCore.dylib)        28
+        ???  (in libz.1.dylib)  load address 0x19682c000 + 0x4474  [0x196830474]        25
+        DYLD-STUB$$swift_bridgeObjectRelease  (in WaveFeelsPackageTests)        25
+        DYLD-STUB$$malloc  (in libswiftCore.dylib)        24
+        EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib)        24
+        DYLD-STUB$$IndexingIterator.next()  (in WaveFeelsPackageTests)        22
+        swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned int, 4ul, 4ul, 4ul>>::initializeWithCopy(swift::OpaqueValue*, swift::OpaqueValue*, swift::TargetMetadata<swift::InPr
+        ???  (in libz.1.dylib)  load address 0x19682c000 + 0xbd78  [0x196837d78]        21
+        swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<(anonymous namespace)::TupleCacheEntry>, swift::Mutex>::find<(anonymous namespace)::TupleCacheEntry::Key>((anonymous namespace)::T
+        ???  (in libz.1.dylib)  load address 0x19682c000 + 0xbd04  [0x196837d04]        20
+        DYLD-STUB$$memcpy  (in libswiftCore.dylib)        20
+        ???  (in libz.1.dylib)  load address 0x19682c000 + 0x613c  [0x19683213c]        19
+        __swift::__runtime::llvm::hash_combine<__swift::__runtime::llvm::hash_code, __swift::__runtime::llvm::StringRef>(__swift::__runtime::llvm::hash_code const&, __swift::__runtime::llvm::StringRef
+        swift::TargetMetadata<swift::InProcess>::isCanonicalStaticallySpecializedGenericMetadata() const  (in libswiftCore.dylib)        19
+        protocol witness for Strideable.advanced(by:) in conformance Int64  (in libswiftCore.dylib)        18
+        Array.subscript.modify  (in libswiftCore.dylib)        17
+        DYLD-STUB$$memcmp  (in libswiftCore.dylib)        17
+        getContiguousArrayStorageType<A>(for:)  (in libswiftCore.dylib)        17
+        ???  (in libswiftCore.dylib)  load address 0x19a1d7000 + 0x4ac98  [0x19a221c98]        16
+        ???  (in libz.1.dylib)  load address 0x19682c000 + 0x9128  [0x196835128]        16
+        __swift_instantiateConcreteTypeFromMangledNameV2  (in WaveFeelsPackageTests)        16
+
+Main thread call tree:
+    + 2252 completeTaskWithClosure(swift::AsyncContext*, swift::SwiftError*)  (in libswift_Concurrency.dylib) + 1  [0x28c1a3ec5]
+    + ! 2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595f901]
+    + !   2252 specialized closure #1 in closure #1 in static Runner._forEach<A, B>(in:namingTasksWith:_:)  (in Testing) + 1  [0x105a0e08d]
+    + !     2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595f901]
+    + !       2252 <deduplicated_symbol>  (in Testing) + 1  [0x105969811]
+    + !         2252 <deduplicated_symbol>  (in Testing) + 1  [0x10594cfc5]
+    + !           2252 closure #4 in static Runner._runTestCases<A>(_:within:context:)  (in Testing) + 1  [0x1059fec2d]
+    + !             2252 specialized static Runner._runTestCase(_:within:context:)  (in Testing) + 1  [0x105a10ae9]
+    + !               2252 specialized static Test.Case.withCurrent<A>(_:perform:)  (in Testing) + 1  [0x105a01f39]
+    + !                 2252 TaskLocal.withValue<A>(_:operation:isolation:file:line:)  (in libswift_Concurrency.dylib) + 1  [0x28c1f58ad]
+    + !                   2252 TaskLocal.withValueImpl<A>(_:operation:isolation:file:line:)  (in libswift_Concurrency.dylib) + 1  [0x28c1f5c85]
+    + !                     2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595f901]
+    + !                       2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595e8a1]
+    + !                         2252 specialized TestCancellable.withCancellationHandling<A>(_:)  (in Testing) + 1  [0x105a34c31]
+    + !                           2252 TaskLocal.withValue<A>(_:operation:isolation:file:line:)  (in libswift_Concurrency.dylib) + 1  [0x28c1f58ad]
+    + !                             2252 TaskLocal.withValueImpl<A>(_:operation:isolation:file:line:)  (in libswift_Concurrency.dylib) + 1  [0x28c1f5c85]
+    + !                               2252 <deduplicated_symbol>  (in Testing) + 1  [0x10594cfc5]
+    + !                                 2252 specialized closure #1 in TestCancellable.withCancellationHandling<A>(_:)  (in Testing) + 1  [0x105a81745]
+    + !                                   2252 withTaskCancellationHandler<A>(operation:onCancel:isolation:)  (in libswift_Concurrency.dylib) + 1  [0x28c1c6a3d]
+    + !                                     2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595f901]
+    + !                                       2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595e8a1]
+    + !                                         2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595f901]
+    + !                                           2252 closure #1 in static Runner._runTestCase(_:within:context:)  (in Testing) + 1  [0x1059ff9d9]
+    + !                                             2252 specialized static Issue.withErrorRecording(at:configuration:isolation:_:)  (in Testing) + 1  [0x1059caa2d]
+    + !                                               2252 <deduplicated_symbol>  (in Testing) + 1  [0x10595f901]
+    + !                                                 2252 closure #1 in closure #1 in static Runner._runTestCase(_:within:context:)  (in Testing) + 1  [0x105a008a5]
+    + !                                                   2252 partial apply for implicit closure #1 in static SnapshotRendererTests.$s14WaveFeelsTests016SnapshotRendererC0V35rendersAllSnapshotsWithVisibleWaves4TestfMp_25generatorc4a137fe031f0294fMu_
+    + !                                                     2252 implicit closure #1 in static SnapshotRendererTests.$s14WaveFeelsTests016SnapshotRendererC0V35rendersAllSnapshotsWithVisibleWaves4TestfMp_25generatorc4a137fe031f0294fMu_@Sendable ()  (i
+    + !                                                       2252 static SnapshotRendererTests.$s14WaveFeelsTests016SnapshotRendererC0V35rendersAllSnapshotsWithVisibleWaves4TestfMp_16c4a137fe031f0294fMu_@Sendable ()  (in WaveFeelsPackageTests) + 1  
+    + !                                                         2252 SnapshotRendererTests.rendersAllSnapshotsWithVisibleWaves()  (in WaveFeelsPackageTests) + 1  [0x1065e2441]  SnapshotRendererTests.swift:29
+    + !                                                           1762 static SnapshotRenderer.renderAll(to:demo:)  (in WaveFeelsPackageTests) + 716  [0x106551b00]  SnapshotRenderer.swift:247
+    + !                                                           : 1116 static SnapshotRenderer.render(_:model:to:)  (in WaveFeelsPackageTests) + 516  [0x1065549ec]  SnapshotRenderer.swift:277
+    + !                                                           : | 1116 AppModel.showPreview(state:track:palette:frame:motion:pulse:time:nowPlayingAvailable:)  (in WaveFeelsPackageTests) + 560  [0x106458904]  AppModel.swift:765
+    + !                                                           : |   1116 AppModel.updateArtwork(immediately:)  (in WaveFeelsPackageTests) + 2000  [0x106453fcc]  AppModel.swift:654
+    + !                                                           : |     1116 Optional.map<A, B>(_:)  (in WaveFeelsPackageTests) + 396  [0x1062a3180]  /<compiler-generated>:0
+    + !                                                           : |       1116 partial apply for closure #1 in AppModel.updateArtwork(immediately:)  (in WaveFeelsPackageTests) + 28  [0x106463430]  /<compiler-generated>:0
+    + !                                                           : |         1116 closure #1 in AppModel.updateArtwork(immediately:)  (in WaveFeelsPackageTests) + 212  [0x1064557a0]  AppModel.swift:654
+    + !                                                           : |           1044 ArtworkAnalysis.init(data:displayPixels:)  (in WaveFeelsPackageTests) + 276  [0x10646d694]  ArtworkPixels.swift:68
+    + !                                                           : |           + 1038 static PaletteExtractor.extract(rgba:width:height:)  (in WaveFeelsPackageTests) + 1848  [0x1062cd80c]  Palette.swift:143
+    + !                                                           : |           + ! 519 static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 2608  [0x1062ced08]  Palette.swift:0
+    + !                                                           : |           + ! : 154 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 380  [0x19a3d6ac4]
+    + !                                                           : |           + ! : | 154 swift_checkMetadataState  (in libswiftCore.dylib) + 36  [0x19a1db5f0]
+    + !                                                           : |           + ! : |   107 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMe
+    + !                                                           : |           + ! : |   + 95 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<swift::GenericCacheEntry>, swift::Mutex>::find<swift::MetadataCacheKey>(swift::MetadataCacheK
+    + !                                                           : |           + ! : |   + ! 95 swift::MetadataCacheKey::operator==(swift::MetadataCacheKey const&) const  (in libswiftCore.dylib) + 16,500  [0x19a25f3bc,0x19a25f5a0]
+    + !                                                           : |           + ! : |   + 12 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<swift::GenericCacheEntry>, swift::Mutex>::find<swift::MetadataCacheKey>(swift::MetadataCacheK
+    + !                                                           : |           + ! : |   18 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMet
+    + !                                                           : |           + ! : |   + 10 getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)  (in libswiftCore.dylib) + 664  [0x19a24f280]
+    + !                                                           : |           + ! : |   + ! 10 swift::TargetContextDescriptor<swift::InProcess>::getGenericContext() const  (in libswiftCore.dylib) + 356,1692,...  [0x19a22e874,0x19a22edac,...]
+    + !                                                           : |           + ! : |   + 8 getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)  (in libswiftCore.dylib) + 144,16,...  [0x19a24f078,0x19a24eff8,...]
+    + !                                                           : |           + ! : |   16 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMet
+    + !                                                           : |           + ! : |   8 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMeta
+    + !                                                           : |           + ! : |   + 8 swift::TargetMetadata<swift::InProcess>::isCanonicalStaticallySpecializedGenericMetadata() const  (in libswiftCore.dylib) + 668,4,...  [0x19a24e4b8,0x19a24e
+    + !                                                           : |           + ! : |   2 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<swift::GenericCacheEntry>, swift::Mutex>::find<swift::MetadataCacheKey>(swift::MetadataCacheKey 
+    + !                                                           : |           + ! : |   1 getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)  (in libswiftCore.dylib) + 900  [0x19a24f36c]
+    + !                                                           : |           + ! : |   1 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMeta
+    + !                                                           : |           + ! : |   + 1 swift::MetadataCacheEntryBase<swift::GenericCacheEntry, void const*>::awaitSatisfyingState(swift::ConcurrencyControl&, swift::MetadataRequest)  (in libswift
+    + !                                                           : |           + ! : |   1 swift::MetadataCacheEntryBase<swift::GenericCacheEntry, void const*>::awaitSatisfyingState(swift::ConcurrencyControl&, swift::MetadataRequest)  (in libswiftCo
+    + !                                                           : |           + ! : 101 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 400  [0x19a3d6ad8]
+    + !                                                           : |           + ! : | 35 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 600  [0x19a383304]
+    + !                                                           : |           + ! : | + 14 protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib) + 40  [0x19a5b82d8]
+    + !                                                           : |           + ! : | + ! 9 _xzm_free  (in libsystem_malloc.dylib) + 232,304,...  [0x1868a4200,0x1868a4248,...]
+    + !                                                           : |           + ! : | + ! 2 DYLD-STUB$$free  (in libswiftCore.dylib) + 8  [0x19a6774d4]
+    + !                                                           : |           + ! : | + ! 2 _free  (in libsystem_malloc.dylib) + 96  [0x1868b3d30]
+    + !                                                           : |           + ! : | + ! 1 Array.subscript.read  (in libswiftCore.dylib) + 36  [0x19a32166c]
+    + !                                                           : |           + ! : | + 11 _xzm_free  (in libsystem_malloc.dylib) + 592,212,...  [0x1868a4368,0x1868a41ec,...]
+    + !                                                           : |           + ! : | + 3 Array.subscript.read  (in libswiftCore.dylib) + 72  [0x19a321690]
+    + !                                                           : |           + ! : | + 3 _free  (in libsystem_malloc.dylib) + 36,64,...  [0x1868b3cf4,0x1868b3d10,...]
+    + !                                                           : |           + ! : | + 2 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x1868a4278]
+    + !                                                           : |           + ! : | + ! 1 DYLD-STUB$$_platform_bzero  (in libsystem_malloc.dylib) + 8  [0x1868bb878]
+    + !                                                           : |           + ! : | + ! 1 _platform_memset  (in libsystem_platform.dylib) + 180  [0x186a91144]
+    + !                                                           : |           + ! : | + 2 protocol witness for Collection.subscript.read in conformance _ArrayBuffer<A>  (in libswiftCore.dylib) + 20  [0x19a5b82c4]
+    + !                                                           : |           + ! : | 33 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 460  [0x19a383278]
+    + !                                                           : |           + ! : | + 17 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 68  [0x19a321618]
+    + !                                                           : |           + ! : | + ! 15 Array.subscript.read  (in libswiftCore.dylib) + 128  [0x19a1ef0c4]
+    + !                                                           : |           + ! : | + ! : 6 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 112,212  [0x1868a31cc,0x1868a3230]
+    + !                                                           : |           + ! : | + ! : 5 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8,40,...  [0x1868a3958,0x1868a3978,...]
+    + !                                                           : |           + ! : | + ! : 4 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 80,4,...  [0x1868b310c,0x1868b30c0,...]
+    + !                                                           : |           + ! : | + ! 1 Array.subscript.read  (in libswiftCore.dylib) + 180  [0x19a1ef0f8]
+    + !                                                           : |           + ! : | + ! : 1 Array._checkSubscript(_:wasNativeTypeChecked:)  (in libswiftCore.dylib) + 44  [0x19a1e6408]
+    + !                                                           : |           + ! : | + ! 1 Array.subscript.read  (in libswiftCore.dylib) + 92  [0x19a1ef0a0]
+    + !                                                           : |           + ! : | + 15 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 44  [0x19a321600]
+    + !                                                           : |           + ! : | + ! 7 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 32,40,...  [0x1868a3970,0x1868a3978,...]
+    + !                                                           : |           + ! : | + ! 4 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 112,136,...  [0x1868a31cc,0x1868a31e4,...]
+    + !                                                           : |           + ! : | + ! 4 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 100,12,...  [0x1868b3120,0x1868b30c8,...]
+    + !                                                           : |           + ! : | + 1 Array.subscript.read  (in libswiftCore.dylib) + 276  [0x19a1ef158]
+    + !                                                           : |           + ! : | 18 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 292,72,...  [0x19a3831d0,0x19a3830f4,...]
+    + !                                                           : |           + ! : | 4 protocol witness for Collection.subscript.read in conformance [A]  (in libswiftCore.dylib) + 108  [0x19a321640]
+    + !                                                           : |           + ! : | 3 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 232  [0x19a383194]
+    + !                                                           : |           + ! : | + 3 protocol witness for Collection.endIndex.getter in conformance [A]  (in libswiftCore.dylib) + 36  [0x19a3215c4]
+    + !                                                           : |           + ! : | +   3 _ArrayBuffer.count.getter  (in libswiftCore.dylib) + 32  [0x19a317400]
+    + !                                                           : |           + ! : | +     3 _swift_isClassOrObjCExistentialType  (in libswiftCore.dylib) + 68,64  [0x19a1df400,0x19a1df3fc]
+    + !                                                           : |           + ! : | 2 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 184  [0x19a383164]
+    + !                                                           : |           + ! : | + 2 ___chkstk_darwin  (in libsystem_pthread.dylib) + 4  [0x186a82c24]
+    + !                                                           : |           + ! : | 2 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 260  [0x19a3831b0]
+    + !                                                           : |           + ! : | + 2 swift_getAssociatedConformanceWitness  (in libswiftCore.dylib) + 48  [0x19a1e5db4]
+    + !                                                           : |           + ! : | 2 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 500  [0x19a3832a0]
+    + !                                                           : |           + ! : | + 2 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 48,52  [0x19a1e1578,0x19a1e157c]
+    + !                                                           : |           + ! : | 1 _xzm_free  (in libsystem_malloc.dylib) + 1560  [0x1868a4730]
+    + !                                                           : |           + ! : | 1 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 88  [0x19a383104]
+    + !                                                           : |           + ! : |   1 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 0  [0x19a1e1548]
+    + !                                                           : |           + ! : 100 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 708  [0x19a3d6c0c]
+    + !                                                           : |           + ! : | 98 swift::storeEnumTagSinglePayloadImpl(swift::OpaqueValue*, unsigned int, unsigned int, swift::TargetMetadata<swift::InProcess> const*, unsigned long, unsigned i
+    + !                                                           : |           + ! : | 1 swift::storeEnumTagSinglePayloadImpl(swift::OpaqueValue*, unsigned int, unsigned int, swift::TargetMetadata<swift::InProcess> const*, unsigned long, unsigned in
+    + !                                                           : |           + ! : | + 1 _platform_memset  (in libsystem_platform.dylib) + 180  [0x186a91144]
+    + !                                                           : |           + ! : | 1 tuple_storeEnumTagSinglePayload<true, false>(swift::OpaqueValue*, unsigned int, unsigned int, swift::TargetMetadata<swift::InProcess> const*)  (in libswiftCore.
+    + !                                                           : |           + ! : 73 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 600  [0x19a3d6ba0]
+    + !                                                           : |           + ! : | 72 swift_getTupleTypeMetadata2  (in libswiftCore.dylib) + 48  [0x19a1dced8]
+    + !                                                           : |           + ! : | + 63 swift_getTupleTypeMetadata  (in libswiftCore.dylib) + 96  [0x19a1dcf60]
+    + !                                                           : |           + ! : | + ! 40 swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCach
+    + !                                                           : |           + ! : | + ! : 21 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<(anonymous namespace)::TupleCacheEntry>, swift::Mutex>::find<(anonymous namespace)::TupleCa
+    + !                                                           : |           + ! : | + ! : 15 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<(anonymous namespace)::TupleCacheEntry>, swift::Mutex>::find<(anonymous namespace)::TupleCa
+    + !                                                           : |           + ! : | + ! : | 12 __swift::__runtime::llvm::hash_combine<__swift::__runtime::llvm::hash_code, __swift::__runtime::llvm::StringRef>(__swift::__runtime::llvm::hash_code co
+    + !                                                           : |           + ! : | + ! : | 1 __swift::__runtime::llvm::hash_combine<__swift::__runtime::llvm::hash_code, __swift::__runtime::llvm::StringRef>(__swift::__runtime::llvm::hash_code con
+    + !                                                           : |           + ! : | + ! : | + 1 <deduplicated_symbol>  (in libswiftCore.dylib) + 460  [0x19a2657cc]
+    + !                                                           : |           + ! : | + ! : | 1 __swift::__runtime::llvm::hash_combine<__swift::__runtime::llvm::hash_code, __swift::__runtime::llvm::StringRef>(__swift::__runtime::llvm::hash_code con
+    + !                                                           : |           + ! : | + ! : | + 1 __swift::__runtime::llvm::hashing::detail::hash_short(char const*, unsigned long, unsigned long long)  (in libswiftCore.dylib) + 140  [0x19a265b7c]
+    + !                                                           : |           + ! : | + ! : | 1 __swift::__runtime::llvm::hashing::detail::hash_combine_recursive_helper::combine(unsigned long, char*, char*)  (in libswiftCore.dylib) + 224  [0x19a265
+    + !                                                           : |           + ! : | + ! : 3 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<(anonymous namespace)::TupleCacheEntry>, swift::Mutex>::find<(anonymous namespace)::TupleCac
+    + !                                                           : |           + ! : | + ! : | 2 std::enable_if<is_hashable_data<swift::TargetMetadata<swift::InProcess> const* const>::value, __swift::__runtime::llvm::hash_code>::type __swift::__runt
+    + !                                                           : |           + ! : | + ! : | 1 __swift::__runtime::llvm::hashing::detail::hash_short(char const*, unsigned long, unsigned long long)  (in libswiftCore.dylib) + 140  [0x19a265b7c]
+    + !                                                           : |           + ! : | + ! : 1 std::enable_if<is_hashable_data<swift::TargetMetadata<swift::InProcess> const* const>::value, __swift::__runtime::llvm::hash_code>::type __swift::__runtim
+    + !                                                           : |           + ! : | + ! 18 swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCach
+    + !                                                           : |           + ! : | + ! 3 swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCache
+    + !                                                           : |           + ! : | + ! : 3 swift::MetadataCacheEntryBase<(anonymous namespace)::TupleCacheEntry, swift::TargetTupleTypeMetadata<swift::InProcess>::Element>::awaitSatisfyingState(swi
+    + !                                                           : |           + ! : | + ! 2 swift::MetadataCacheEntryBase<(anonymous namespace)::TupleCacheEntry, swift::TargetTupleTypeMetadata<swift::InProcess>::Element>::awaitSatisfyingState(swift
+    + !                                                           : |           + ! : | + 7 swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCacheEn
+    + !                                                           : |           + ! : | + 2 swift_getTupleTypeMetadata  (in libswiftCore.dylib) + 64  [0x19a1dcf40]
+    + !                                                           : |           + ! : | 1 swift_getTupleTypeMetadata2  (in libswiftCore.dylib) + 32  [0x19a1dcec8]
+    + !                                                           : |           + ! : 44 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 92  [0x19a3d69a4]
+    + !                                                           : |           + ! : | 42 __swift_instantiateCanonicalPrespecializedGenericMetadata  (in libswiftCore.dylib) + 40  [0x19a670c84]
+    + !                                                           : |           + ! : | + 16 _swift_getGenericMetadata(swift::MetadataRequest, void const* const*, swift::TargetTypeContextDescriptor<swift::InProcess> const*)  (in libswiftCore.dylib) +
+    + !                                                           : |           + ! : | + ! 10 getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)  (in libswiftCore.dylib) + 672,648,...  [0x19a24f288,0x19a24f270,...]
+    + !                                                           : |           + ! : | + ! 6 getCache(swift::TargetTypeContextDescriptor<swift::InProcess> const&)  (in libswiftCore.dylib) + 664  [0x19a24f280]
+    + !                                                           : |           + ! : | + !   6 swift::TargetContextDescriptor<swift::InProcess>::getGenericContext() const  (in libswiftCore.dylib) + 896,32,...  [0x19a22ea90,0x19a22e730,...]
+    + !                                                           : |           + ! : | + 15 _swift_getGenericMetadata(swift::MetadataRequest, void const* const*, swift::TargetTypeContextDescriptor<swift::InProcess> const*)  (in libswiftCore.dylib) +
+    + !                                                           : |           + ! : | + ! 6 swift::LockingConcurrentMap<swift::GenericCacheEntry, swift::LockingConcurrentMapStorage<swift::GenericCacheEntry, (unsigned short)14>>::getOrInsert<swift::
+    + !                                                           : |           + ! : | + ! : 4 swift::StableAddressConcurrentReadableHashMap<swift::GenericCacheEntry, swift::TaggedMetadataAllocator<(unsigned short)14>, swift::Mutex>::getOrInsert<swi
+    + !                                                           : |           + ! : | + ! : 2 swift::StableAddressConcurrentReadableHashMap<swift::GenericCacheEntry, swift::TaggedMetadataAllocator<(unsigned short)14>, swift::Mutex>::getOrInsert<swi
+    + !                                                           : |           + ! : | + ! :   2 swift::MetadataCacheKey::operator==(swift::MetadataCacheKey const&) const  (in libswiftCore.dylib) + 4,500  [0x19a25f3b0,0x19a25f5a0]
+    + !                                                           : |           + ! : | + ! 5 swift::LockingConcurrentMap<swift::GenericCacheEntry, swift::LockingConcurrentMapStorage<swift::GenericCacheEntry, (unsigned short)14>>::getOrInsert<swift::
+    + !                                                           : |           + ! : | + ! : 5 swift::MetadataCacheEntryBase<swift::GenericCacheEntry, void const*>::awaitSatisfyingState(swift::ConcurrencyControl&, swift::MetadataRequest)  (in libswi
+    + !                                                           : |           + ! : | + ! 3 swift::MetadataCacheEntryBase<swift::GenericCacheEntry, void const*>::awaitSatisfyingState(swift::ConcurrencyControl&, swift::MetadataRequest)  (in libswift
+    + !                                                           : |           + ! : | + ! 1 swift::LockingConcurrentMap<swift::GenericCacheEntry, swift::LockingConcurrentMapStorage<swift::GenericCacheEntry, (unsigned short)14>>::getOrInsert<swift::
+    + !                                                           : |           + ! : | + 7 _swift_getGenericMetadata(swift::MetadataRequest, void const* const*, swift::TargetTypeContextDescriptor<swift::InProcess> const*)  (in libswiftCore.dylib) + 
+    + !                                                           : |           + ! : | + 2 swift::LockingConcurrentMap<swift::GenericCacheEntry, swift::LockingConcurrentMapStorage<swift::GenericCacheEntry, (unsigned short)14>>::getOrInsert<swift::Me
+    + !                                                           : |           + ! : | + 2 swift_getCanonicalPrespecializedGenericMetadata  (in libswiftCore.dylib) + 36  [0x19a24fc38]
+    + !                                                           : |           + ! : | 2 __swift_instantiateCanonicalPrespecializedGenericMetadata  (in libswiftCore.dylib) + 32,40  [0x19a670c7c,0x19a670c84]
+    + !                                                           : |           + ! : 14 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 432,60,...  [0x19a3d6af8,0x19a3d6984,...]
+    + !                                                           : |           + ! : 11 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 496  [0x19a3d6b38]
+    + !                                                           : |           + ! : | 11 swift_getTupleTypeMetadata2  (in libswiftCore.dylib) + 48  [0x19a1dced8]
+    + !                                                           : |           + ! : |   11 swift_getTupleTypeMetadata  (in libswiftCore.dylib) + 96  [0x19a1dcf60]
+    + !                                                           : |           + ! : |     9 swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCache
+    + !                                                           : |           + ! : |     2 swift::LockingConcurrentMap<(anonymous namespace)::TupleCacheEntry, (anonymous namespace)::TupleCacheStorage>::getOrInsert<(anonymous namespace)::TupleCache
+    + !                                                           : |           + ! : |       2 swift::ConcurrentReadableHashMap<swift::HashMapElementWrapper<(anonymous namespace)::TupleCacheEntry>, swift::Mutex>::find<(anonymous namespace)::TupleCac
+    + !                                                           : |           + ! : |         2 __swift::__runtime::llvm::hash_combine<__swift::__runtime::llvm::hash_code, __swift::__runtime::llvm::StringRef>(__swift::__runtime::llvm::hash_code con
+    + !                                                           : |           + ! : 6 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 188  [0x19a3d6a04]
+    + !                                                           : |           + ! : | 6 ___chkstk_darwin  (in libsystem_pthread.dylib) + 4,52  [0x186a82c24,0x186a82c54]
+    + !                                                           : |           + ! : 5 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 76  [0x19a3d6994]
+    + !                                                           : |           + ! : | 5 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 48,16  [0x19a1e1578,0x19a1e1558]
+    + !                                                           : |           + ! : 3 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 328  [0x19a3d6a90]
+    + !                                                           : |           + ! : | 3 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 0,12,...  [0x19a1e1548,0x19a1e1554,...]
+    + !                                                           : |           + ! : 2 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 356  [0x19a3d6aac]
+    + !                                                           : |           + ! : | 2 swift_getAssociatedConformanceWitness  (in libswiftCore.dylib) + 48  [0x19a1e5db4]
+    + !                                                           : |           + ! : 2 protocol witness for IteratorProtocol.next() in conformance IndexingIterator<A>  (in libswiftCore.dylib) + 684  [0x19a383358]
+    + !                                                           : |           + ! : 1 DYLD-STUB$$EnumeratedSequence.Iterator.next()  (in WaveFeelsPackageTests) + 4  [0x1065f47f4]
+    + !                                                           : |           + ! : 1 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 292  [0x19a3d6a6c]
+    + !                                                           : |           + ! : | 1 ___chkstk_darwin  (in libsystem_pthread.dylib) + 4  [0x186a82c24]
+    + !                                                           : |           + ! : 1 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 432  [0x19a3d6af8]
+    + !                                                           : |           + ! : | 1 swift::metadataimpl::FixedSizeBufferValueWitnesses<swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<(anonymous namespace)::int128_like, 16ul, 
+    + !                                                           : |           + ! : 1 EnumeratedSequence.Iterator.next()  (in libswiftCore.dylib) + 464  [0x19a3d6b18]
+    + !                                                           : |           + ! :   1 _swift_pod_destroy  (in libswiftCore.dylib) + 0  [0x19a2516e8]
+    + !                                                           : |           + ! 208 static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 2756  [0x1062ced9c]  Palette.swift:224
+    + !                                                           : |           + ! : 109 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 888  [0x1062d0bd4]  Palette.swift:242
+    + !                                                           : |           + ! : | 50 SIMD<>.sum()  (in WaveFeelsPackageTests) + 684  [0x1062d1180]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 30 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 216  [0x19a61bd6c]
+    + !                                                           : |           + ! : | + ! 22 swift_checkMetadataState  (in libswiftCore.dylib) + 36  [0x19a1db5f0]
+    + !                                                           : |           + ! : | + ! : 16 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_chec
+    + !                                                           : |           + ! : | + ! : 6 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_check
+    + !                                                           : |           + ! : | + ! :   6 swift::TargetMetadata<swift::InProcess>::isCanonicalStaticallySpecializedGenericMetadata() const  (in libswiftCore.dylib) + 40,60,...  [0x19a24e244,0x19
+    + !                                                           : |           + ! : | + ! 5 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*, swift_checkMe
+    + !                                                           : |           + ! : | + ! 3 swift_checkMetadataState  (in libswiftCore.dylib) + 36,8  [0x19a1db5f0,0x19a1db5d4]
+    + !                                                           : |           + ! : | + 7 dispatch thunk of SIMDStorage.subscript.getter  (in libswiftCore.dylib) + 4,0  [0x19a66a1c8,0x19a66a1c4]
+    + !                                                           : |           + ! : | + 5 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 192  [0x19a61bd54]
+    + !                                                           : |           + ! : | + ! 5 swift_getAssociatedConformanceWitness  (in libswiftCore.dylib) + 48,52,...  [0x19a1e5db4,0x19a1e5db8,...]
+    + !                                                           : |           + ! : | + 5 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 24,188,...  [0x19a61bcac,0x19a61bd50,...]
+    + !                                                           : |           + ! : | + 2 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 160  [0x19a61bd34]
+    + !                                                           : |           + ! : | + ! 2 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 16,52  [0x19a1e1558,0x19a1e157c]
+    + !                                                           : |           + ! : | + 1 DYLD-STUB$$dispatch thunk of SIMDStorage.subscript.getter  (in WaveFeelsPackageTests) + 4  [0x1065f45d8]
+    + !                                                           : |           + ! : | 27 SIMD<>.sum()  (in WaveFeelsPackageTests) + 540,412,...  [0x1062d10f0,0x1062d1070,...]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | 8 SIMD<>.sum()  (in WaveFeelsPackageTests) + 248  [0x1062d0fcc]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 6 dispatch thunk of static SignedNumeric.- prefix(_:)  (in libswiftCore.dylib) + 4,0  [0x19a655af8,0x19a655af4]
+    + !                                                           : |           + ! : | + 2 protocol witness for static SignedNumeric.- prefix(_:) in conformance Float  (in libswiftCore.dylib) + 0,8  [0x19a57d0d4,0x19a57d0dc]
+    + !                                                           : |           + ! : | 8 SIMD<>.sum()  (in WaveFeelsPackageTests) + 288  [0x1062d0ff4]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 5 protocol witness for SIMDStorage.scalarCount.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 0  [0x19a61bbf4]
+    + !                                                           : |           + ! : | + 3 dispatch thunk of SIMDStorage.scalarCount.getter  (in libswiftCore.dylib) + 4  [0x19a66a1a0]
+    + !                                                           : |           + ! : | 7 SIMD<>.sum()  (in WaveFeelsPackageTests) + 708  [0x1062d1198]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 4 dispatch thunk of static AdditiveArithmetic.+= infix(_:_:)  (in libswiftCore.dylib) + 0,4  [0x19a655a68,0x19a655a6c]
+    + !                                                           : |           + ! : | + 2 DYLD-STUB$$dispatch thunk of static AdditiveArithmetic.+= infix(_:_:)  (in WaveFeelsPackageTests) + 4  [0x1065f47d0]
+    + !                                                           : |           + ! : | + 1 protocol witness for static AdditiveArithmetic.+= infix(_:_:) in conformance Float  (in libswiftCore.dylib) + 12  [0x19a57d154]
+    + !                                                           : |           + ! : | 3 SIMD<>.sum()  (in WaveFeelsPackageTests) + 128  [0x1062d0f54]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 3 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 48,0  [0x19a1e1578,0x19a1e1548]
+    + !                                                           : |           + ! : | 2 SIMD<>.sum()  (in WaveFeelsPackageTests) + 176  [0x1062d0f84]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 2 ___chkstk_darwin  (in libsystem_pthread.dylib) + 0,4  [0x186a82c20,0x186a82c24]
+    + !                                                           : |           + ! : | 2 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 248,256  [0x19a61bd8c,0x19a61bd94]
+    + !                                                           : |           + ! : | 1 SIMD<>.sum()  (in WaveFeelsPackageTests) + 224  [0x1062d0fb4]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 1 <deduplicated_symbol>  (in libswiftCore.dylib) + 0  [0x19a20635c]
+    + !                                                           : |           + ! : | 1 SIMD<>.sum()  (in WaveFeelsPackageTests) + 724  [0x1062d11a8]  /<compiler-generated>:0
+    + !                                                           : |           + ! : |   1 swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned int, 4ul, 4ul, 4ul>>::destroy(swift::OpaqueValue*, swift::TargetMetadata<swift::In
+    + !                                                           : |           + ! : 46 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 908,168,...  [0x1062d0be8,0x1062d0904,...]  Palette.swift:0
+    + !                                                           : |           + ! : 23 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 876,1372,...  [0x1062d0bc8,0x1062d0db8,...]  Palette.swift:242
+    + !                                                           : |           + ! : 19 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 468,308,...  [0x1062d0a30,0x1062d0990,...]  Palette.swift:241
+    + !                                                           : |           + ! : 5 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 400,556,...  [0x1062d09ec,0x1062d0a88,...]  /<compiler-generated>:0
+    + !                                                           : |           + ! : 2 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 868  [0x1062d0bc0]  Palette.swift:242
+    + !                                                           : |           + ! : | 2 lazy protocol witness table accessor for type Float and conformance Float  (in WaveFeelsPackageTests) + 24  [0x1062d3008]  /<compiler-generated>:0
+    + !                                                           : |           + ! : 1 SIMD<>.sum()  (in WaveFeelsPackageTests) + 772  [0x1062d11d8]  /<compiler-generated>:0
+    + !                                                           : |           + ! : 1 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 92  [0x1062d08b8]  Palette.swift:240
+    + !                                                           : |           + ! : 1 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 852  [0x1062d0bb0]  Palette.swift:242
+    + !                                                           : |           + ! : | 1 __swift_instantiateConcreteTypeFromMangledNameV2  (in WaveFeelsPackageTests) + 60  [0x10629cf4c]  /<compiler-generated>:0
+    + !                                                           : |           + ! : 1 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 860  [0x1062d0bb8]  Palette.swift:242
+    + !                                                           : |           + ! :   1 lazy protocol witness table accessor for type SIMD3<Float> and conformance SIMD3<A>  (in WaveFeelsPackageTests) + 24  [0x1062d2f94]  /<compiler-generated>:0
+    + !                                                           : |           + ! 102 static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 1096  [0x1062ce720]  Palette.swift:200
+    + !                                                           : |           + ! : 100 Collection.map<A, B>(_:)  (in WaveFeelsPackageTests) + 1124  [0x10629c798]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | 99 partial apply for closure #1 in static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 28  [0x1062d2c60]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + 80 closure #1 in static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 216  [0x1062d070c]  Palette.swift:200
+    + !                                                           : |           + ! : | + ! 32 Collection.map<A, B>(_:)  (in WaveFeelsPackageTests) + 1124  [0x10629c798]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : 31 partial apply for closure #1 in closure #1 in static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 24  [0x1062d4250]  /<compiler-gener
+    + !                                                           : |           + ! : | + ! : | 30 closure #1 in closure #1 in static PaletteExtractor.kMeans(points:k:)  (in WaveFeelsPackageTests) + 52  [0x1062d0844]  Palette.swift:200
+    + !                                                           : |           + ! : | + ! : | + 17 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 888  [0x1062d0bd4]  Palette.swift:242
+    + !                                                           : |           + ! : | + ! : | + ! 9 SIMD<>.sum()  (in WaveFeelsPackageTests) + 684  [0x1062d1180]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : | + ! : 5 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 216  [0x19a61bd6c]
+    + !                                                           : |           + ! : | + ! : | + ! : | 5 swift_checkMetadataState  (in libswiftCore.dylib) + 36  [0x19a1db5f0]
+    + !                                                           : |           + ! : | + ! : | + ! : |   3 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*,
+    + !                                                           : |           + ! : | + ! : | + ! : |   2 performOnMetadataCache<swift::MetadataResponse, swift_checkMetadataState::CheckStateCallbacks>(swift::TargetMetadata<swift::InProcess> const*,
+    + !                                                           : |           + ! : | + ! : | + ! : |     2 swift::TargetMetadata<swift::InProcess>::isCanonicalStaticallySpecializedGenericMetadata() const  (in libswiftCore.dylib) + 60,108  [0x19a24
+    + !                                                           : |           + ! : | + ! : | + ! : 2 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 160  [0x19a61bd34]
+    + !                                                           : |           + ! : | + ! : | + ! : | 2 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 52  [0x19a1e157c]
+    + !                                                           : |           + ! : | + ! : | + ! : 2 protocol witness for SIMDStorage.subscript.getter in conformance SIMD3<A>  (in libswiftCore.dylib) + 192  [0x19a61bd54]
+    + !                                                           : |           + ! : | + ! : | + ! :   2 swift_getAssociatedConformanceWitness  (in libswiftCore.dylib) + 52  [0x19a1e5db8]
+    + !                                                           : |           + ! : | + ! : | + ! 3 SIMD<>.sum()  (in WaveFeelsPackageTests) + 708  [0x1062d1198]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : | + ! : 2 protocol witness for static AdditiveArithmetic.+= infix(_:_:) in conformance Float  (in libswiftCore.dylib) + 12  [0x19a57d154]
+    + !                                                           : |           + ! : | + ! : | + ! : 1 dispatch thunk of static AdditiveArithmetic.+= infix(_:_:)  (in libswiftCore.dylib) + 4  [0x19a655a6c]
+    + !                                                           : |           + ! : | + ! : | + ! 2 SIMD<>.sum()  (in WaveFeelsPackageTests) + 120,412  [0x1062d0f4c,0x1062d1070]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : | + ! 1 SIMD<>.sum()  (in WaveFeelsPackageTests) + 128  [0x1062d0f54]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : | + ! : 1 swift_getAssociatedTypeWitness  (in libswiftCore.dylib) + 16  [0x19a1e1558]
+    + !                                                           : |           + ! : | + ! : | + ! 1 SIMD<>.sum()  (in WaveFeelsPackageTests) + 276  [0x1062d0fe8]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : | + ! : 1 swift::metadataimpl::ValueWitnesses<swift::metadataimpl::NativeBox<unsigned int, 4ul, 4ul, 4ul>>::destroy(swift::OpaqueValue*, swift::TargetMetada
+    + !                                                           : |           + ! : | + ! : | + ! 1 SIMD<>.sum()  (in WaveFeelsPackageTests) + 288  [0x1062d0ff4]  /<compiler-generated>:0
+    + !                                                           : |           + ! : | + ! : | + !   1 dispatch thunk of SIMDStorage.scalarCount.getter  (in libswiftCore.dylib) + 4  [0x19a66a1a0]
+    + !                                                           : |           + ! : | + ! : | + 5 static PaletteExtractor.squaredDistance(_:_:)  (in WaveFeelsPackageTests) + 908,240,...  [0x1062d0be8,0x1062d094c,...]  Palette.swift:0
