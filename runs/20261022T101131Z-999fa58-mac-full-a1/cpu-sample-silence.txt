@@ -1,0 +1,47 @@
+# sample <pid> 3 of the silence run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 6429) every 1 millisecond
+Process:         WaveFeels [6429]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x102968000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.36 (36)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [4802]
+Target Type:     live task
+
+Date/Time:       2026-10-22 10:11:10.558 +0000
+Launch Time:     2026-10-22 10:10:49.963 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         19.3M
+Physical footprint (peak):  21.3M
+Idle exit:                  untracked
+Samples per thread:
+    36804 Thread_21980   DispatchQueue_1: com.apple.main-thread  (serial)
+    36804 Thread_21993: com.apple.NSEventThread
+    36804 Thread_22003: caulk.messenger.shared:17
+    36804 Thread_22004: caulk.messenger.shared:high
+    36804 Thread_22009: caulk::deferred_logger
+    36797 Thread_21984
+    36789 Thread_21990
+    36787 Thread_21985
+    15 Thread_<multiple>   DispatchQueue_407: com.wfeels.wavefeels.analysis  (serial)
+    11 Thread_<multiple>   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    5 Thread_<multiple>   DispatchQueue_408: com.wfeels.wavefeels.demo  (serial)
+    2 Thread_21984   DispatchQueue_12: com.apple.root.utility-qos.cooperative  (concurrent)
+    2 Thread_21985   DispatchQueue_12: com.apple.root.utility-qos.cooperative  (concurrent)
+    2 Thread_21990   DispatchQueue_12: com.apple.root.utility-qos.cooperative  (concurrent)
+    1 Thread_21984   DispatchQueue_20: com.apple.root.user-interactive-qos.overcommit  (concurrent)
+    1 Thread_21985   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+
+Sort by top of stack, same collapsed (when >= 5):
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        110412
+        __workq_kernreturn  (in libsystem_kernel.dylib)        110367
+        mach_msg2_trap  (in libsystem_kernel.dylib)        73600
+        RealFFT.amplitudeSpectrum(_:)  (in WaveFeels)        9
+        kevent_id  (in libsystem_kernel.dylib)        7
+        start_wqthread  (in libsystem_pthread.dylib)        7

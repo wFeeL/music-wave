@@ -1,0 +1,243 @@
+== step build-release: swift build -c release
+Building for production...
+[0/5] Write sources
+[2/5] Write swift-version-7974D3F7F03D5E95.txt
+[4/6] Compiling WaveCore ActivityGate.swift
+[5/7] Compiling WaveFeels AppDelegate.swift
+[5/7] Write Objects.LinkFileList
+[6/7] Linking WaveFeels
+Build complete! (37.89s)
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] Write sources
+[0/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[2/13] Write sources
+[4/13] Write WaveFeels-entitlement.plist
+[4/13] Write sources
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/28] Compiling WaveCore ActivityGate.swift
+[10/28] Compiling WaveCore AdapterSilenceMonitor.swift
+[11/28] Compiling WaveCore Analyzer.swift
+[12/28] Compiling WaveCore AttackRelease.swift
+[13/28] Compiling WaveCore AudioSource.swift
+[14/28] Compiling WaveCore BandMapper.swift
+[15/28] Compiling WaveCore BeatDetector.swift
+[16/28] Emitting module WaveCore
+[17/28] Compiling WaveCore CaptureRecovery.swift
+[18/28] Compiling WaveCore IdleCapture.swift
+[19/28] Compiling WaveCore IslandStateMachine.swift
+[20/28] Compiling WaveCore Latency.swift
+[21/28] Compiling WaveCore LevelProcessor.swift
+[22/28] Compiling WaveCore NotchGeometry.swift
+[23/28] Compiling WaveCore NowPlaying.swift
+[24/35] Compiling WaveCore OrphanedAdapterProcesses.swift
+[25/35] Compiling WaveCore Palette.swift
+[26/35] Compiling WaveCore RealFFT.swift
+[27/35] Compiling WaveCore SampleFeedMonitor.swift
+[28/35] Compiling WaveCore SampleRingBuffer.swift
+[29/35] Compiling WaveCore TapStreamLayout.swift
+[30/35] Compiling WaveCore WaveShape.swift
+[31/72] Compiling WaveFeels AppDelegate.swift
+[32/72] Compiling WaveFeels AppModel.swift
+[33/72] Compiling WaveFeels LaunchArguments.swift
+[34/72] Compiling WaveFeels WaveFeelsApp.swift
+[35/72] Compiling WaveFeels WindowsController.swift
+[36/72] Compiling WaveFeels AnalysisEngine.swift
+[37/72] Compiling WaveFeels AudioPipeline.swift
+[38/72] Compiling WaveFeels AudioProcessList.swift
+[39/79] Compiling WaveFeels OutputDeviceMonitor.swift
+[40/79] Compiling WaveFeels ProcessTapCapture.swift
+[41/79] Compiling WaveFeels MediaRemoteAdapter.swift
+[42/79] Compiling WaveFeels SnapshotRenderer.swift
+[43/79] Compiling WaveFeels AppSettings.swift
+[44/79] Compiling WaveCoreTests ProcessMatcherTests.swift
+[45/79] Compiling WaveCoreTests RealFFTTests.swift
+[46/79] Compiling WaveCoreTests SampleRingBufferTests.swift
+[47/79] Compiling WaveCoreTests SourceChoicesTests.swift
+[48/79] Compiling WaveCoreTests TapStreamLayoutTests.swift
+[57/89] Compiling WaveCoreTests IslandStateMachineTests.swift
+[58/89] Compiling WaveCoreTests LatencyTests.swift
+[59/89] Emitting module WaveFeels
+[60/89] Emitting module WaveCoreTests
+[73/89] Compiling WaveFeels DiagnosticsView.swift
+[74/89] Compiling WaveFeels ExpandedPanelView.swift
+[77/89] Compiling WaveFeels IslandShape.swift
+[78/89] Compiling WaveFeels IslandView.swift
+[79/89] Compiling WaveFeels MarqueeText.swift
+[80/89] Compiling WaveFeels SettingsView.swift
+[81/89] Compiling WaveFeels WaveCanvas.swift
+[82/89] Compiling WaveFeels FullscreenDetector.swift
+[83/89] Compiling WaveFeels NotchPanel.swift
+[84/89] Compiling WaveFeels NotchWindowController.swift
+[84/89] Write Objects.LinkFileList
+[85/89] Linking WaveFeels
+[86/89] Applying WaveFeels
+[88/99] Compiling WaveFeelsTests ArtworkPixelsTests.swift
+[89/99] Compiling WaveFeelsTests CaptureRecoveryPipelineTests.swift
+[90/99] Compiling WaveFeelsTests CoreAudioSmokeTests.swift
+[91/99] Compiling WaveFeelsTests LaunchArgumentsTests.swift
+[92/99] Emitting module WaveFeelsTests
+[93/99] Compiling WaveFeelsTests AppModelArtworkTests.swift
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:18:23: error: cannot find type 'IslandState' in scope
+16 | 
+17 |         let model = AppModel(defaults: defaults)
+18 |         var changes: [IslandState] = []
+   |                       `- error: cannot find type 'IslandState' in scope
+19 |         model.onIslandStateChange = { [weak model] in
+20 |             if let model { changes.append(model.islandState) }
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:30: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                              `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:42: error: reference to member 'expanded' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                          `- error: reference to member 'expanded' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:53: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                                     `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+[94/99] Compiling WaveFeelsTests AppModelDefaultSourceTests.swift
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:18:23: error: cannot find type 'IslandState' in scope
+16 | 
+17 |         let model = AppModel(defaults: defaults)
+18 |         var changes: [IslandState] = []
+   |                       `- error: cannot find type 'IslandState' in scope
+19 |         model.onIslandStateChange = { [weak model] in
+20 |             if let model { changes.append(model.islandState) }
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:30: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                              `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:42: error: reference to member 'expanded' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                          `- error: reference to member 'expanded' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:53: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                                     `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+[95/99] Compiling WaveFeelsTests AppModelIslandTests.swift
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:18:23: error: cannot find type 'IslandState' in scope
+16 | 
+17 |         let model = AppModel(defaults: defaults)
+18 |         var changes: [IslandState] = []
+   |                       `- error: cannot find type 'IslandState' in scope
+19 |         model.onIslandStateChange = { [weak model] in
+20 |             if let model { changes.append(model.islandState) }
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:30: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                              `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:42: error: reference to member 'expanded' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                          `- error: reference to member 'expanded' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:53: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                                     `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+[96/99] Compiling WaveFeelsTests AppModelPauseTests.swift
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:18:23: error: cannot find type 'IslandState' in scope
+16 | 
+17 |         let model = AppModel(defaults: defaults)
+18 |         var changes: [IslandState] = []
+   |                       `- error: cannot find type 'IslandState' in scope
+19 |         model.onIslandStateChange = { [weak model] in
+20 |             if let model { changes.append(model.islandState) }
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:30: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                              `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:42: error: reference to member 'expanded' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                          `- error: reference to member 'expanded' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:53: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                                     `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+[97/99] Compiling WaveFeelsTests AppSettingsTests.swift
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:18:23: error: cannot find type 'IslandState' in scope
+16 | 
+17 |         let model = AppModel(defaults: defaults)
+18 |         var changes: [IslandState] = []
+   |                       `- error: cannot find type 'IslandState' in scope
+19 |         model.onIslandStateChange = { [weak model] in
+20 |             if let model { changes.append(model.islandState) }
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:30: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                              `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:42: error: reference to member 'expanded' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                          `- error: reference to member 'expanded' cannot be resolved without a contextual type
+32 |     }
+33 | 
+
+/Users/runner/work/music-wave/music-wave/Tests/WaveFeelsTests/AppModelIslandTests.swift:31:53: error: reference to member 'collapsed' cannot be resolved without a contextual type
+29 |         model.setPointerInHoverZone(false)
+30 |         #expect(await waitUntil(.seconds(5)) { model.islandState == .collapsed })
+31 |         #expect(changes == [.collapsed, .expanded, .collapsed])
+   |                                                     `- error: reference to member 'collapsed' cannot be resolved without a contextual type
+32 |     }
+33 | 
+[98/103] Compiling WaveFeelsTests MediaRemoteAdapterTests.swift
+[99/103] Compiling WaveFeelsTests NotchPanelTests.swift
+[100/103] Compiling WaveFeelsTests PipelineLifecycleTests.swift
+[101/103] Compiling WaveFeelsTests SnapshotRendererTests.swift
