@@ -116,15 +116,27 @@ public enum BeatEvaluation {
         public var annotationCount: Int
         /// Вспышек после обрезки и слияния.
         public var flashCount: Int
+        /// Вспышки, попавшие в окно (один к одному), из `flashCount`.
+        public var matched: Int
         public var lockedFlashCount: Int
         public var lockedMatched: Int
+        public var unlockedFlashCount: Int
+        public var unlockedMatched: Int
         /// `nil`, если захвата со вспышками не было.
         public var lockedPrecision: Double?
+        /// Точность вспышек без захвата; `nil`, если таких вспышек не было.
+        public var unlockedPrecision: Double?
         public var precision: Double
         public var recall: Double
         public var f: Double
         /// Средний сдвиг вспышки от доли, мс (минус раньше); `nil`, если ни одна вспышка не попала в окно.
         public var meanOffsetMs: Double?
+        /// Сумма и число сдвигов вспышек в окне отдельно для вспышек с захватом и без (для среднего по
+        /// набору файлов с весом вспышки).
+        public var offsetLockedSumMs: Double
+        public var offsetLockedCount: Int
+        public var offsetUnlockedSumMs: Double
+        public var offsetUnlockedCount: Int
         public var cmlt: Double
         public var amlt: Double
         public var lockedCoverage: Double
@@ -133,11 +145,15 @@ public enum BeatEvaluation {
         public var tempoBPM: Double?
     }
 
-    /// Слияние вспышек: идут по времени, каждая ближе `gap` к последней оставленной выпадает.
+    /// Слияние вспышек: идут по времени, каждая ближе `gap` к последней оставленной выпадает; если
+    /// выпадающая с захватом, а оставленная без, остается вспышка с захватом.
     public static func dedupe(_ flashes: [OfflineBeatChain.Flash], gap: Double = dedupeGap) -> [OfflineBeatChain.Flash] {
         var kept: [OfflineBeatChain.Flash] = []
         for flash in flashes.sorted(by: { $0.time < $1.time }) {
-            if let last = kept.last, flash.time - last.time < gap { continue }
+            if let last = kept.last, flash.time - last.time < gap {
+                if flash.locked, !last.locked { kept[kept.count - 1] = flash }
+                continue
+            }
             kept.append(flash)
         }
         return kept
@@ -160,40 +176,76 @@ public enum BeatEvaluation {
         let times = flashes.map(\.time)
 
         let lockedTimes = flashes.filter(\.locked).map(\.time)
-        let lockedPrecision = BeatMetrics.lockedPrecision(
-            flashes: flashes, annotations: audibleBeats, window: options.window
-        )
-        let lockedMatched = lockedPrecision.map { Int(($0 * Double(lockedTimes.count)).rounded()) } ?? 0
-        let f = BeatMetrics.fMeasure(detections: times, annotations: audibleBeats, window: options.window)
-        let offset = BeatMetrics.meanOffset(detections: times, annotations: audibleBeats, window: options.window)
+        let unlockedTimes = flashes.filter { !$0.locked }.map(\.time)
+        let window = options.window
+        // Точность каждого вида считается отдельно против всех аннотаций (один к одному внутри вида).
+        func matches(_ detections: [Double]) -> (precision: Double?, matched: Int) {
+            guard !detections.isEmpty else { return (nil, 0) }
+            let precision = BeatMetrics.fMeasure(detections: detections, annotations: audibleBeats, window: window).precision
+            return (precision, Int((precision * Double(detections.count)).rounded()))
+        }
+        let locked = matches(lockedTimes)
+        let unlocked = matches(unlockedTimes)
+        let all = matches(times)
+        let f = BeatMetrics.fMeasure(detections: times, annotations: audibleBeats, window: window)
+        let offset = BeatMetrics.meanOffset(detections: times, annotations: audibleBeats, window: window)
+        let lockedOffsets = BeatMetrics.offsets(detections: lockedTimes, annotations: audibleBeats, window: window)
+        let unlockedOffsets = BeatMetrics.offsets(detections: unlockedTimes, annotations: audibleBeats, window: window)
         let continuity = BeatMetrics.continuity(detections: times, annotations: audibleBeats)
-        let coverageStates = result.states.filter { $0.time >= skip }
-        let coverage = BeatMetrics.lockedCoverage(states: coverageStates, duration: duration)
+        let coverage = Self.coverage(states: result.states, from: skip, duration: duration)
 
         return FileScore(
             path: path, group: group, heldout: heldout, duration: duration, annotationCount: beats.count,
-            flashCount: flashes.count, lockedFlashCount: lockedTimes.count, lockedMatched: lockedMatched,
-            lockedPrecision: lockedPrecision, precision: f.precision, recall: f.recall, f: f.f,
-            meanOffsetMs: offset.map { $0 * 1000 }, cmlt: continuity.cmlt, amlt: continuity.amlt,
+            flashCount: flashes.count, matched: all.matched, lockedFlashCount: lockedTimes.count,
+            lockedMatched: locked.matched, unlockedFlashCount: unlockedTimes.count, unlockedMatched: unlocked.matched,
+            lockedPrecision: locked.precision, unlockedPrecision: unlocked.precision,
+            precision: f.precision, recall: f.recall, f: f.f, meanOffsetMs: offset.map { $0 * 1000 },
+            offsetLockedSumMs: lockedOffsets.reduce(0, +) * 1000, offsetLockedCount: lockedOffsets.count,
+            offsetUnlockedSumMs: unlockedOffsets.reduce(0, +) * 1000, offsetUnlockedCount: unlockedOffsets.count,
+            cmlt: continuity.cmlt, amlt: continuity.amlt,
             lockedCoverage: coverage, lockTime: result.lockTime, tempoBPM: result.tempoBPM
         )
+    }
+
+    /// Доля времени от `from` до `duration` с захватом. Состояние, действовавшее в момент `from`,
+    /// считается с этого момента.
+    static func coverage(states: [OfflineBeatChain.State], from: Double, duration: Double) -> Double {
+        guard from > 0 else { return BeatMetrics.lockedCoverage(states: states, duration: duration) }
+        let ordered = states.sorted { $0.time < $1.time }
+        var shifted: [OfflineBeatChain.State] = []
+        if var current = ordered.last(where: { $0.time <= from }) {
+            current.time = from
+            shifted.append(current)
+        }
+        shifted += ordered.filter { $0.time > from }
+        for index in shifted.indices { shifted[index].time -= from }
+        return BeatMetrics.lockedCoverage(states: shifted, duration: duration - from)
     }
 
     /// Сводка по набору файлов: среднее по файлам (каждый файл весит одинаково).
     public struct Summary: Sendable, Equatable, Codable {
         public var name: String
         public var files: Int
-        /// Среднее lockedPrecision по файлам, у которых были вспышки при захвате.
-        public var lockedPrecision: Double?
-        /// Сколько файлов вошло в `lockedPrecision`.
+        /// Сколько файлов имели вспышки при захвате (только они входят в `lockedPrecision`).
         public var lockedFiles: Int
-        /// lockedPrecision по сумме вспышек всех файлов (файлы с большим числом вспышек весят больше).
+        /// Среднее lockedPrecision по этим файлам; файлы без захвата в него не входят.
+        public var lockedPrecision: Double?
+        /// lockedPrecision по сумме вспышек всех файлов (основное число: файл с большим числом вспышек
+        /// весит больше, файлы без захвата не входят, потому что вспышек у них нет).
         public var lockedPrecisionPooled: Double?
+        /// Точность по всем вспышкам (с захватом и без), по сумме вспышек всех файлов.
+        public var precisionPooled: Double?
+        /// Точность вспышек без захвата по сумме вспышек; `nil`, если таких не было.
+        public var unlockedPrecisionPooled: Double?
         public var f: Double
+        /// Среднее по файлам точности и полноты (каждый файл весит одинаково).
         public var precision: Double
         public var recall: Double
         /// Среднее по файлам, у которых оно есть.
         public var meanOffsetMs: Double?
+        /// Средний сдвиг вспышек с захватом и без по сумме вспышек в окне; `nil`, если таких нет.
+        public var meanOffsetLockedMs: Double?
+        public var meanOffsetUnlockedMs: Double?
         public var cmlt: Double
         public var amlt: Double
         public var lockedCoverage: Double
@@ -205,15 +257,19 @@ public enum BeatEvaluation {
             let present = values.compactMap { $0 }
             return present.isEmpty ? nil : mean(present)
         }
-        let lockedFlashes = scores.reduce(0) { $0 + $1.lockedFlashCount }
-        let lockedMatched = scores.reduce(0) { $0 + $1.lockedMatched }
+        func sum(_ value: (FileScore) -> Int) -> Int { scores.reduce(0) { $0 + value($1) } }
+        func ratio(_ matched: Int, _ total: Int) -> Double? { total == 0 ? nil : Double(matched) / Double(total) }
+        func offset(_ total: Double, _ count: Int) -> Double? { count == 0 ? nil : total / Double(count) }
         return Summary(
-            name: name, files: scores.count,
+            name: name, files: scores.count, lockedFiles: scores.filter { $0.lockedPrecision != nil }.count,
             lockedPrecision: optionalMean(scores.map(\.lockedPrecision)),
-            lockedFiles: scores.filter { $0.lockedPrecision != nil }.count,
-            lockedPrecisionPooled: lockedFlashes == 0 ? nil : Double(lockedMatched) / Double(lockedFlashes),
+            lockedPrecisionPooled: ratio(sum(\.lockedMatched), sum(\.lockedFlashCount)),
+            precisionPooled: ratio(sum(\.matched), sum(\.flashCount)),
+            unlockedPrecisionPooled: ratio(sum(\.unlockedMatched), sum(\.unlockedFlashCount)),
             f: mean(scores.map(\.f)), precision: mean(scores.map(\.precision)), recall: mean(scores.map(\.recall)),
             meanOffsetMs: optionalMean(scores.map(\.meanOffsetMs)),
+            meanOffsetLockedMs: offset(scores.reduce(0) { $0 + $1.offsetLockedSumMs }, sum(\.offsetLockedCount)),
+            meanOffsetUnlockedMs: offset(scores.reduce(0) { $0 + $1.offsetUnlockedSumMs }, sum(\.offsetUnlockedCount)),
             cmlt: mean(scores.map(\.cmlt)), amlt: mean(scores.map(\.amlt)),
             lockedCoverage: mean(scores.map(\.lockedCoverage))
         )
@@ -248,11 +304,14 @@ public enum BeatEvaluation {
     // MARK: Текст
 
     public static let notes = [
-        "flashes clipped to time <= duration + latency, flashes closer than 50 ms merged; annotations shifted onto the audible axis",
-        "lockedPrecision: share of flashes under a locked schedule that hit a beat (one-to-one, window); F, meanOffset, CMLt, AMLt: all flashes",
+        "flashes clipped to time <= duration + latency, flashes closer than 50 ms merged (a locked flash wins a pair); annotations shifted onto the audible axis",
+        "LPpool (headline) = locked flashes that hit a beat / all locked flashes, pooled over files; lockedFiles = files that had locked flashes at all",
+        "lockedPrec = mean of per-file locked precision over those lockedFiles only: files that never lock are NOT in it (they show up only in lockedCov and in lockedFiles < files)",
+        "prec / unlockedPrec: pooled precision over all flashes / over flashes under an unlocked schedule (one-to-one, window); each kind is matched on its own against all beats",
+        "meanOff = mean of per-file mean offsets over all flashes; offLocked / offUnlocked = mean signed offset (ms) of the flashes inside the window, pooled over flashes",
+        "F, CMLt, AMLt, lockedCov: means over files, every file weighs the same",
         "CMLt omits mir_eval's previous-beat-also-correct condition, so it is more lenient than mir_eval and not comparable to published numbers",
         "flashes lead the beat by design (BeatGlow.lead 15 ms): a negative meanOffset is expected",
-        "group rows are means over files (every file weighs the same); LPpool pools flashes over files",
     ]
 
     private static func fraction(_ value: Double?) -> String {
@@ -271,17 +330,28 @@ public enum BeatEvaluation {
     public static func table(title: String, summaries: [Summary]) -> String {
         let width = max(8, summaries.map(\.name.count).max() ?? 0)
         var lines = [title]
-        let heads = ["files", "lockedPrec", "LPpool", "F", "meanOff ms", "AMLt", "CMLt", "lockedCov"]
-        lines.append(pad("group", width) + "  " + heads.map { right($0, 10) }.joined(separator: " "))
+        let heads = [
+            "files", "lockedFiles", "LPpool", "lockedPrec", "prec", "unlockedPrec", "F", "meanOff", "offLocked",
+            "offUnlocked", "AMLt", "CMLt", "lockedCov",
+        ]
+        lines.append(pad("group", width) + "  " + heads.map { right($0, max($0.count, 7)) }.joined(separator: " "))
         for row in summaries {
             let cells = [
-                String(row.files), fraction(row.lockedPrecision), fraction(row.lockedPrecisionPooled), fraction(row.f),
-                row.meanOffsetMs.map { String(format: "%+.1f", $0) } ?? "-", fraction(row.amlt), fraction(row.cmlt),
-                fraction(row.lockedCoverage),
+                String(row.files), String(row.lockedFiles), fraction(row.lockedPrecisionPooled), fraction(row.lockedPrecision),
+                fraction(row.precisionPooled), fraction(row.unlockedPrecisionPooled), fraction(row.f), milliseconds(row.meanOffsetMs),
+                milliseconds(row.meanOffsetLockedMs), milliseconds(row.meanOffsetUnlockedMs), fraction(row.amlt),
+                fraction(row.cmlt), fraction(row.lockedCoverage),
             ]
-            lines.append(pad(row.name, width) + "  " + cells.map { right($0, 10) }.joined(separator: " "))
+            lines.append(
+                pad(row.name, width) + "  "
+                    + zip(cells, heads).map { right($0, max($1.count, 7)) }.joined(separator: " ")
+            )
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func milliseconds(_ value: Double?) -> String {
+        value.map { String(format: "%+.1f", $0) } ?? "-"
     }
 
     /// Таблица по файлам.

@@ -10,16 +10,16 @@
 #      gtzan.skipped.txt и на stderr.
 #
 # Идемпотентен: повторный запуск ничего не скачивает и не конвертирует заново. Данные считаются
-# недоверенными: из них ничего не запускается (git clone без хуков, tar без абсолютных путей,
-# файлы только читаются ffmpeg), в репозиторий ничего не пишется. Нужны bash, curl, git, tar, ffmpeg.
+# недоверенными: из них ничего не запускается (разметка берется по закрепленному коммиту без
+# хуков, архив проверяется по sha256 и на символические ссылки, ffmpeg читает только file:), в репозиторий ничего не пишется. Нужны bash, curl, git, tar, ffmpeg.
 set -euo pipefail
 
 ROOT="${1:-${WAVEFEELS_DATA:-$HOME/datasets/wavefeels}}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/.." && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO="$(cd "$HERE/.." && pwd -P)"
 
 mkdir -p "$ROOT"
-ROOT="$(cd "$ROOT" && pwd)"
+ROOT="$(cd "$ROOT" && pwd -P)"
 case "$ROOT/" in
     "$REPO"/*) echo "fetch-beat-data: $ROOT лежит внутри репозитория, данные пишутся только вне его" >&2; exit 1 ;;
 esac
@@ -27,6 +27,9 @@ esac
 GENRES=(blues classical country disco hiphop jazz metal pop reggae rock)
 AUDIO_URL="https://huggingface.co/datasets/marsyas/gtzan/resolve/main/data/genres.tar.gz"
 ANN_URL="https://github.com/TempoBeatDownbeat/gtzan_tempo_beat"
+# Версии данных закреплены, чтобы базовые числа воспроизводились.
+ANN_COMMIT="fd9cafdebb6426fee41c3718791be61306323dd7"
+AUDIO_SHA256="b28cc067ff6199bd826f5d1a6931458586d64acae7f44b2e882b7a97af057531"
 RAW="$ROOT/raw"
 OUT="$ROOT/gtzan48k"
 mkdir -p "$RAW" "$OUT"
@@ -46,15 +49,29 @@ if [ "$(count_raw)" -lt 1000 ]; then
         curl -fL --retry 3 -o "$RAW/genres.tar.gz.part" "$AUDIO_URL"
         mv "$RAW/genres.tar.gz.part" "$RAW/genres.tar.gz"
     fi
+    actual="$(sha256sum "$RAW/genres.tar.gz" | cut -d' ' -f1)"
+    [ "$actual" = "$AUDIO_SHA256" ] || { echo "fetch-beat-data: контрольная сумма genres.tar.gz $actual, ожидалась $AUDIO_SHA256" >&2; exit 1; }
     echo "fetch-beat-data: распаковываю аудио"
-    tar -xzf "$RAW/genres.tar.gz" -C "$RAW" --no-same-owner --exclude='._*' --exclude='.DS_Store' 2>/dev/null
+    # GNU tar сам отбрасывает ведущий / и члены с "..". Ошибки показываются; шум про расширенные заголовки macOS убирается.
+    tar -xzf "$RAW/genres.tar.gz" -C "$RAW" --no-same-owner --exclude='._*' --exclude='.DS_Store' \
+        2> >(grep -v 'unknown extended header keyword' >&2)
+    if [ -n "$(find "$RAW/genres" -type l -print -quit)" ]; then
+        echo "fetch-beat-data: в архиве есть символические ссылки, стоп" >&2
+        exit 1
+    fi
     [ "$(count_raw)" -ge 1000 ] || { echo "fetch-beat-data: в архиве меньше 1000 wav" >&2; exit 1; }
 fi
 
 if [ ! -d "$RAW/ann/beats" ]; then
     echo "fetch-beat-data: клонирую разметку долей"
-    rm -rf "$RAW/ann"
-    git clone --depth 1 "$ANN_URL" "$RAW/ann"
+    rm -rf "$RAW/ann" "$RAW/ann.part"
+    git init -q "$RAW/ann.part"
+    git -C "$RAW/ann.part" fetch -q --depth 1 "$ANN_URL" "$ANN_COMMIT"
+    git -C "$RAW/ann.part" -c advice.detachedHead=false checkout -q FETCH_HEAD
+    mv "$RAW/ann.part" "$RAW/ann"
+fi
+if [ "$(git -C "$RAW/ann" rev-parse HEAD 2>/dev/null)" != "$ANN_COMMIT" ]; then
+    echo "fetch-beat-data: предупреждение: разметка не на закрепленной версии $ANN_COMMIT" >&2
 fi
 
 # Конвертация: один файл на вызов, запись через временный файл, чтобы обрыв не оставил полфайла.
@@ -62,7 +79,7 @@ convert_one() {
     local in="$1" out="$2"
     [ -s "$out" ] && return 0
     # Битый файл (в GTZAN известен jazz.00054) не должен ронять остальные: он попадет в список пропущенных.
-    if ffmpeg -nostdin -loglevel error -y -i "$in" -ac 1 -ar 48000 -c:a pcm_f32le -f wav "$out.part"; then
+    if ffmpeg -nostdin -loglevel error -y -protocol_whitelist file -i "$in" -ac 1 -ar 48000 -c:a pcm_f32le -f wav "$out.part"; then
         mv "$out.part" "$out"
     else
         rm -f "$out.part"

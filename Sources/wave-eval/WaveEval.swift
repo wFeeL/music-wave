@@ -49,12 +49,20 @@ enum WaveEval {
         }
 
         let entries: [EvalList.Entry]
+        let allEntries: [EvalList.Entry]
         do {
             let text = try String(contentsOfFile: parsed.listPath, encoding: .utf8)
-            entries = EvalList.select(try EvalList.parse(text), split: parsed.split, limit: parsed.maxFiles)
+            allEntries = try EvalList.parse(text)
+            entries = EvalList.select(allEntries, split: parsed.split, limit: parsed.maxFiles)
         } catch {
             log("wave-eval: \(error)\n")
             return 66
+        }
+        do {
+            try parsed.validateUnions(knownGroups: Set(allEntries.map(\.group)))
+        } catch {
+            log("wave-eval: \(error)\n")
+            return 64
         }
         guard !entries.isEmpty else {
             log("wave-eval: no files in the selected split\n")

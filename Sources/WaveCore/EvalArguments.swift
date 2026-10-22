@@ -39,6 +39,7 @@ public struct EvalArguments: Sendable, Equatable {
         case unknownTrackerParameter(String)
         case missingList
         case extraArgument(String)
+        case unknownUnionGroup(union: String, group: String)
 
         public var description: String {
             switch self {
@@ -48,6 +49,7 @@ public struct EvalArguments: Sendable, Equatable {
             case .unknownTrackerParameter(let name): "unknown tracker parameter '\(name)'"
             case .missingList: "missing list.tsv"
             case .extraArgument(let value): "unexpected argument '\(value)'"
+            case .unknownUnionGroup(let union, let group): "--union \(union): no group '\(group)' in the list"
             }
         }
     }
@@ -61,7 +63,7 @@ public struct EvalArguments: Sendable, Equatable {
     public var overrides: [Override] = []
     public var json = false
     public var perFile = false
-    public var split = Split.all
+    public var split = Split.tune
     /// Число потоков; `nil` берет число ядер.
     public var jobs: Int?
     public var unions: [Union] = []
@@ -79,7 +81,8 @@ public struct EvalArguments: Sendable, Equatable {
     public static let usage = """
         usage: wave-eval [options] <list.tsv>
           list.tsv lines: <wav>\\t<annotation>\\t<group>[\\t<tune|heldout>]  (no 4th column means tune)
-          --split tune|heldout|all   file subset to score (default all; 'all' also reports both halves)
+          --split tune|heldout|all   file subset to score (default tune; heldout numbers appear only with
+                                     heldout or all, keep them out of tuning loops)
           --offset-ms N              manual flash shift, Config.syncOffset (default 0)
           --latency-ms N             output latency, Config.outputLatency (default 0)
           --tracker name=value       override a BeatTracker.Parameters field, repeatable
@@ -170,6 +173,7 @@ public struct EvalArguments: Sendable, Equatable {
                 guard let equals = text.firstIndex(of: "="),
                     let parsed = Double(text[text.index(after: equals)...]), parsed.isFinite
                 else { throw Error.invalidValue(option: name, value: text) }
+                guard parsed >= 0 else { throw Error.invalidValue(option: name, value: text) }
                 let override = Override(name: String(text[..<equals]), value: parsed)
                 var probe = BeatTracker.Parameters()
                 guard probe.set(override.name, to: override.value) else {
@@ -195,6 +199,15 @@ public struct EvalArguments: Sendable, Equatable {
         if positional.count > 1 { throw Error.extraArgument(positional[1]) }
         result.listPath = path
         return result
+    }
+
+    /// Проверка, что все группы объединений есть в списке (опечатка в имени не должна молча сужать строку).
+    public func validateUnions(knownGroups: Set<String>) throws {
+        for union in unions {
+            for group in union.groups where !knownGroups.contains(group) {
+                throw Error.unknownUnionGroup(union: union.name, group: group)
+            }
+        }
     }
 
     /// Настройка цепочки для файла. Зерно складывается из `seed` и имени файла (FNV-1a), поэтому

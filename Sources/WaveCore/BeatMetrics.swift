@@ -44,18 +44,21 @@ public enum BeatMetrics {
     /// окне ±`window`; плюс значит позже. `nil`, если таких детекций нет. Сопоставление не взаимно
     /// однозначное: две детекции могут указать на одну аннотацию.
     public static func meanOffset(detections: [Double], annotations: [Double], window: Double) -> Double? {
+        let found = offsets(detections: detections, annotations: annotations, window: window)
+        return found.isEmpty ? nil : found.reduce(0, +) / Double(found.count)
+    }
+
+    /// Разности "детекция минус ближайшая аннотация" для детекций, у которых аннотация есть в окне
+    /// ±`window` (те же, что усредняет `meanOffset`).
+    public static func offsets(detections: [Double], annotations: [Double], window: Double) -> [Double] {
         let sorted = annotations.sorted()
-        var sum = 0.0
-        var count = 0
+        var found: [Double] = []
         for detection in detections {
             guard let nearest = nearestIndex(of: detection, in: sorted) else { continue }
             let difference = detection - sorted[nearest]
-            if abs(difference) <= window + edge {
-                sum += difference
-                count += 1
-            }
+            if abs(difference) <= window + edge { found.append(difference) }
         }
-        return count == 0 ? nil : sum / Double(count)
+        return found
     }
 
     public struct Continuity: Sendable, Equatable {

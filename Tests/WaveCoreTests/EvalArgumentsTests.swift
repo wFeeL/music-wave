@@ -5,7 +5,7 @@ struct EvalArgumentsTests {
     @Test func defaults() throws {
         let parsed = try EvalArguments.parse(["list.tsv"])
         #expect(parsed.listPath == "list.tsv")
-        #expect(parsed.split == .all)
+        #expect(parsed.split == .tune)
         #expect(parsed.offsetMs == 0 && parsed.latencyMs == 0)
         #expect(parsed.renderHz == 60 && parsed.windowMs == 70 && parsed.seed == 1)
         #expect(parsed.jobs == nil && parsed.maxFiles == nil)
@@ -27,6 +27,14 @@ struct EvalArgumentsTests {
         #expect(parsed.renderHz == 120 && parsed.seed == 7 && parsed.windowMs == 50 && parsed.skipSeconds == 5)
         #expect(parsed.jobs == 3 && parsed.maxFiles == 10)
         #expect(parsed.listPath == "list.tsv")
+    }
+
+    @Test func unionGroupsMustExist() throws {
+        let parsed = try EvalArguments.parse(["--union", "steady=disco,pop", "x.tsv"])
+        try parsed.validateUnions(knownGroups: ["disco", "pop", "jazz"])
+        #expect(throws: EvalArguments.Error.unknownUnionGroup(union: "steady", group: "pop")) {
+            try parsed.validateUnions(knownGroups: ["disco"])
+        }
     }
 
     @Test func listMayComeFirst() throws {
@@ -58,6 +66,12 @@ struct EvalArgumentsTests {
         // Целое поле не берет дробное значение.
         #expect(throws: EvalArguments.Error.invalidValue(option: "--tracker", value: "lockHits=2.5")) {
             try EvalArguments.parse(["--tracker", "lockHits=2.5", "x.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--tracker", value: "alpha=-3")) {
+            try EvalArguments.parse(["--tracker", "alpha=-3", "x.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--tracker", value: "alpha=inf")) {
+            try EvalArguments.parse(["--tracker", "alpha=inf", "x.tsv"])
         }
         #expect(throws: EvalArguments.Error.invalidValue(option: "--tracker", value: "alpha")) {
             try EvalArguments.parse(["--tracker", "alpha", "x.tsv"])
