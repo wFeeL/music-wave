@@ -23,11 +23,12 @@ jobs:
         timeout-minutes: 12
         run: bash scripts/ci-mac.sh "$MODE"
         env: {SIGNING_P12_BASE64: '${{ secrets.SIGNING_P12_BASE64 }}', SIGNING_P12_PASSWORD: '${{ secrets.SIGNING_P12_PASSWORD }}'}
-      - uses: softprops/action-gh-release@v2
+      - id: release
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/WaveFeels-${{ github.ref_name }}*.zip
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
       - if: always()
         run: bash scripts/publish-ci-results.sh
-        env: {GH_TOKEN: '${{ github.token }}', CI_OUTCOME: '${{ steps.ci.outcome }}'}
+        env: {GH_TOKEN: '${{ github.token }}', CI_OUTCOME: '${{ steps.ci.outcome }}', RELEASE_OUTCOME: '${{ steps.release.outcome }}'}

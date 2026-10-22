@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Публикует ci-out/ в ветку ci-results: runs/<UTC>-<sha7>-<workflow>-<mode>-a<attempt>/.
-# Запускается последним шагом workflow (if: always()) с GH_TOKEN, CI_OUTCOME и MODE в окружении.
+# Запускается последним шагом workflow (if: always()) с GH_TOKEN, CI_OUTCOME и MODE в окружении (в release.yml еще RELEASE_OUTCOME).
 # Каждая попытка заново клонирует ветку (или создает orphan при первом запуске), до пяти попыток.
 # Код 0 при успехе, 1 после пяти неудачных попыток. Рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
@@ -39,6 +39,9 @@ write_summary() { # каталог результатов
         echo "## Workflow"
         echo
         echo "- ci step outcome: ${CI_OUTCOME:-unknown}"
+        if [[ -n "${RELEASE_OUTCOME:-}" ]]; then
+            echo "- release step outcome: $RELEASE_OUTCOME"
+        fi
         echo "- ref: ${GITHUB_REF_NAME:-unknown}"
         echo "- run: $RUN_URL"
         echo "- results: $RUN_DIR"
