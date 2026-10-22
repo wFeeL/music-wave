@@ -5,7 +5,7 @@
 #   play:    --demo Demo/demo.wav --fake-notch --exit-after <секунды+10>; среднее выше 15 % одного
 #            ядра считается провалом. Остров обязан появиться (строка «остров: скрыт -> ...» в логе
 #            приложения), иначе замер ничего не говорит и тоже считается провалом.
-#   silence: --demo Demo/silence.wav --fake-notch --no-capture --exit-after <секунды+10>; среднее
+#   silence: --demo Demo/silence.wav --fake-notch --no-capture --exit-after <секунды+20>; среднее
 #            должно быть меньше 1 %. Остров обязан остаться скрытым (ни одного перехода из «скрыт»):
 #            в тишине анализ идет с частотой 15 Гц вместо 60 и ничего не рисуется, иначе замер не про
 #            простой.
@@ -14,10 +14,12 @@
 # CPU считается как прирост накопленного процессорного времени (`ps -o time=`) за окно в
 # <секунды> (по умолчанию 30) после прогрева 5 с, деленный на прошедшее время. `%cpu` из `ps` не
 # годится: это затухающее среднее. Внутри окна раз в секунду пишется загрузка за эту секунду и RSS
-# (`ps -o rss=`). В середине окна каждого прогона `sample <pid> 3` снимает стеки всех потоков: итоги
-# по потокам и самые частые функции на вершине стека идут в cpu-sample.txt (play) и
-# cpu-sample-silence.txt, полный вывод в cpu-sample.raw.txt и cpu-sample-silence.raw.txt. Фоновый
-# сторож убивает приложение вместе с потомками через <секунды+20> (в macOS нет timeout).
+# (`ps -o rss=`). `sample <pid> 3` снимает стеки всех потоков: в play в середине окна, в silence
+# сразу после окна (сам sample грузит процессор и исказил бы замер в тишине, поэтому приложение
+# в этом прогоне живет на 10 с дольше). Итоги по потокам и самые частые функции на вершине стека
+# идут в cpu-sample.txt (play) и cpu-sample-silence.txt, полный вывод в cpu-sample.raw.txt и
+# cpu-sample-silence.raw.txt. Фоновый сторож убивает приложение вместе с потомками через 10 с после
+# его --exit-after (в macOS нет timeout).
 #
 # Итог в $OUT/cpu.txt (по умолчанию ci-out/cpu.txt), он же печатается в stdout. Код 0, если оба
 # прогона в пределах, 1 при провале, 2 при ошибке вызова. Рассчитан на bash 3.2 и BSD-утилиты.
@@ -151,7 +153,7 @@ trim_sample() { # файл sample
 }
 
 # Запускает sample в фоне, pid в SAMPLE_PID и SAMPLE_WD (не через $(...): подстановка ждала бы
-# фоновые процессы, а wait не видит внуков). Приложение в это время живо еще минимум 15 с, поэтому
+# фоновые процессы, а wait не видит внуков). Приложение в это время живо еще около 15 с, поэтому
 # -mayDie не нужен: с ним sample на раннере отдавал заголовок без стеков.
 SAMPLE_PID=""
 SAMPLE_WD=""
@@ -200,10 +202,12 @@ finish_sample() { # имя прогона
 }
 
 # Один прогон: имя, предел среднего в процентах, сравнение (max: не больше предела, below: строго
-# меньше), каким должен быть остров (shown или hidden), аргументы приложения.
+# меньше), каким должен быть остров (shown или hidden), когда снимать стеки (window: в середине
+# окна, after: сразу после него), через сколько секунд приложение выходит само (--exit-after),
+# остальные аргументы приложения.
 probe() {
-    local name=$1 limit=$2 compare=$3 expect_island=$4
-    shift 4
+    local name=$1 limit=$2 compare=$3 expect_island=$4 sample_at=$5 exit_after=$6
+    shift 6
     local log_start pid wd rc t0 c0 k0 t1 c1 k1 t c r prev_t prev_c sec
     local per_second="" max_sec=0 rss_first="" rss_last=0 rss_max=0 alive=1 sampled=0
     local average children verdict=ok reasons="" app_log="$TMP/$name.log"
@@ -211,12 +215,12 @@ probe() {
     report ""
     report "## $name"
     report ""
-    report "args: $*"
+    report "args: $* --exit-after $exit_after"
 
     log_start=$(log_lines)
-    "$BIN" "$@" > "$TMP/$name.stdout" 2>&1 &
+    "$BIN" "$@" --exit-after "$exit_after" > "$TMP/$name.stdout" 2>&1 &
     pid=$!
-    watchdog "$pid" $((DURATION + 20)) 2>> "$TMP/$name.stdout" &
+    watchdog "$pid" $((exit_after + 10)) 2>> "$TMP/$name.stdout" &
     wd=$!
 
     sleep "$WARMUP"
@@ -255,11 +259,15 @@ probe() {
         c1=$c
         prev_t=$t
         prev_c=$c
-        if [[ -z "$SAMPLE_PID" && $sampled -eq 0 && $((t - t0)) -ge $((DURATION * 500)) ]]; then
+        if [[ $sample_at == window && $sampled -eq 0 && $((t - t0)) -ge $((DURATION * 500)) ]]; then
             sampled=1
             take_sample "$pid"
         fi
     done
+    if [[ $sample_at == after && $alive -eq 1 ]]; then
+        sampled=1
+        take_sample "$pid"
+    fi
 
     wait "$pid"
     rc=$?
@@ -332,8 +340,8 @@ report "method: cumulative CPU time from ps over a ${DURATION} s window after ${
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 
 EXIT_AFTER=$((DURATION + 10))
-probe play "$PLAY_LIMIT" max shown --demo "$DEMO_DIR/demo.wav" --fake-notch --exit-after "$EXIT_AFTER"
-probe silence "$SILENCE_LIMIT" below hidden --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture --exit-after "$EXIT_AFTER"
+probe play "$PLAY_LIMIT" max shown window "$EXIT_AFTER" --demo "$DEMO_DIR/demo.wav" --fake-notch
+probe silence "$SILENCE_LIMIT" below hidden after $((EXIT_AFTER + 10)) --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture
 
 report ""
 if [[ $FAILED -eq 0 ]]; then

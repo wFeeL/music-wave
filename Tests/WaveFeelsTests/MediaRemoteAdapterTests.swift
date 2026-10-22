@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 import WaveCore
@@ -168,6 +169,40 @@ struct MediaRemoteAdapterTests {
         #expect(adapter.availability == .available)
         #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "Three" })
         #expect(adapter.availability == .available)
+    }
+
+    /// «Тишина адаптера» снимает смена источника; треки других приложений на тиках модели ее
+    /// не снимают.
+    @Test @MainActor func silentAdapterClearsOnSourceChange() async throws {
+        _ = NSApplication.shared
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'stream') { print track('One'); sleep 30; }
+            """#)
+        defer { fake.remove() }
+        let model = AppModel(defaults: fake.defaults, bundle: fake.bundle)
+        model.defaultSourceResolver = { .systemWide }
+        model.settings.source = AudioSource.application(
+            bundleID: "com.example.player",
+            bundlePath: "/nonexistent/Player.app",
+            displayName: "Плеер"
+        )
+        // Без захвата модель адаптер не запускает: он запускается здесь.
+        model.start(arguments: LaunchArguments(noCapture: true))
+        defer { model.stop() }
+        model.adapter.start()
+        #expect(await waitUntil(.seconds(30)) { model.adapter.info?.title == "One" })
+        #expect(model.adapter.isAvailable)
+
+        model.adapter.markSilent()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(model.adapter.availability == .silent)
+
+        model.settings.source = AudioSource.application(
+            bundleID: "com.example.other",
+            bundlePath: "/nonexistent/Other.app",
+            displayName: "Другой"
+        )
+        #expect(await waitUntil(.seconds(5)) { model.adapter.availability == .available })
     }
 
     /// Поток адаптера, переживший прошлый запуск (родитель launchd), первый `start()`
