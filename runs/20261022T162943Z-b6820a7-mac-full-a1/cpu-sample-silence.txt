@@ -1,0 +1,44 @@
+# sample <pid> 3 of the silence run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 8691) every 1 millisecond
+Process:         WaveFeels [8691]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x102714000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.44 (44)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [6444]
+Target Type:     live task
+
+Date/Time:       2026-10-22 16:29:22.038 +0000
+Launch Time:     2026-10-22 16:29:01.465 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         19.3M
+Physical footprint (peak):  21.4M
+Idle exit:                  untracked
+Samples per thread:
+    1724 Thread_27581   DispatchQueue_1: com.apple.main-thread  (serial)
+    1724 Thread_27586
+    1724 Thread_27592: com.apple.NSEventThread
+    1724 Thread_27613: caulk.messenger.shared:17
+    1724 Thread_27614: caulk.messenger.shared:high
+    1724 Thread_27619: caulk::deferred_logger
+    1719 Thread_27591
+    1717 Thread_27606
+    1694 Thread_27587
+    31 Thread_<multiple>   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    6 Thread_<multiple>   DispatchQueue_399: com.wfeels.wavefeels.demo  (serial)
+    3 Thread_<multiple>   DispatchQueue_398: com.wfeels.wavefeels.analysis  (serial)
+    1 Thread_27587   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+    1 Thread_27606   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        6839
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        5172
+        mach_msg2_trap  (in libsystem_kernel.dylib)        3448
+        kevent_id  (in libsystem_kernel.dylib)        24
+        start_wqthread  (in libsystem_pthread.dylib)        14
