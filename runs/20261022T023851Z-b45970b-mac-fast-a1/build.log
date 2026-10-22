@@ -1,0 +1,55 @@
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] Write sources
+[0/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[2/13] Write sources
+[3/13] Write WaveFeels-entitlement.plist
+[4/13] Write sources
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/24] Compiling WaveCore BeatDetector.swift
+[10/24] Compiling WaveCore IslandStateMachine.swift
+[11/24] Compiling WaveCore Latency.swift
+[12/24] Compiling WaveCore LevelProcessor.swift
+[13/24] Compiling WaveCore NotchGeometry.swift
+[14/24] Compiling WaveCore ActivityGate.swift
+[15/24] Compiling WaveCore Analyzer.swift
+[16/24] Compiling WaveCore AttackRelease.swift
+[17/24] Compiling WaveCore AudioSource.swift
+[18/24] Compiling WaveCore BandMapper.swift
+[19/24] Emitting module WaveCore
+[20/29] Compiling WaveCore NowPlaying.swift
+[21/29] Compiling WaveCore Palette.swift
+[22/29] Compiling WaveCore RealFFT.swift
+[23/29] Compiling WaveCore SampleRingBuffer.swift
+[24/29] Compiling WaveCore WaveShape.swift
+[25/51] Compiling WaveFeels AudioProcessList.swift
+[26/51] Compiling WaveFeels CoreAudio+Property.swift
+[27/51] Compiling WaveFeels DemoAudioSource.swift
+[28/51] Compiling WaveFeels OutputDeviceMonitor.swift
+[29/55] Emitting module WaveFeels
+[30/55] Compiling WaveCoreTests ActivityGateTests.swift
+[31/55] Compiling WaveCoreTests AnalyzerTests.swift
+[32/55] Compiling WaveCoreTests AttackReleaseTests.swift
+[33/55] Compiling WaveCoreTests BandMapperTests.swift
+[34/55] Compiling WaveCoreTests BeatDetectorTests.swift
+[35/55] Compiling WaveFeels ProcessTapCapture.swift
+[36/55] Compiling WaveFeels AudioCapturePermission.swift
+[37/55] Compiling WaveFeels Log.swift
+[38/55] Compiling WaveFeels SigningInfo.swift
+[38/55] Write Objects.LinkFileList
+[46/55] Emitting module WaveCoreTests
+[51/60] Linking WaveFeels
+[52/60] Applying WaveFeels
+[54/63] Compiling WaveFeelsTests CoreAudioSmokeTests.swift
+[55/63] Emitting module WaveFeelsTests
+[56/63] Compiling WaveFeelsTests LaunchArgumentsTests.swift
+[57/63] Compiling WaveCoreTests ProcessMatcherTests.swift
+[58/63] Compiling WaveCoreTests RealFFTTests.swift
+[59/63] Compiling WaveCoreTests SampleRingBufferTests.swift
+[60/63] Compiling WaveCoreTests TestSignals.swift
+[61/63] Compiling WaveCoreTests WaveShapeTests.swift
+[62/65] Emitting module WaveFeelsPackageTests
+[63/65] Compiling WaveFeelsPackageTests runner.swift
+[63/65] Write Objects.LinkFileList
+[64/65] Linking WaveFeelsPackageTests
+Build complete! (21.20s)
