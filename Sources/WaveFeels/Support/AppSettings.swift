@@ -17,7 +17,10 @@ final class AppSettings {
         static let levelMode = "wf.levelMode"
         static let followSystemVolume = "wf.followSystemVolume"
         static let latencyMode = "wf.latencyMode"
+        /// Общий сдвиг до 1.1. Только читается: из него `syncOffsets` получает `fallbackMs`, пока
+        /// своего ключа нет.
         static let syncOffset = "wf.syncOffset"
+        static let syncOffsets = "wf.syncOffsets"
         static let wingWidth = "wf.wingWidth"
         static let glowIntensity = "wf.glowIntensity"
         static let beatPulse = "wf.beatPulse"
@@ -36,7 +39,7 @@ final class AppSettings {
     enum Limits {
         static let sensitivity: ClosedRange<Float> = 0.25...3
         static let manualLatency: ClosedRange<Int> = 0...LatencyCalculator.maxMilliseconds
-        static let syncOffset: ClosedRange<Int> = -100...100
+        static let syncOffset = SyncOffsets.range
         static let wingWidth = WaveAppearance.Limits.wingWidth
         static let glowIntensity: ClosedRange<Double> = 0...1
         static let hideDelay: ClosedRange<Double> = 1...30
@@ -47,7 +50,6 @@ final class AppSettings {
         static let levelMode = LevelMode.auto
         static let followSystemVolume = true
         static let latencyMode = LatencyMode.auto
-        static let syncOffset = 0
         static let wingWidth = 64.0
         static let glowIntensity = 0.6
         static let beatPulse = true
@@ -70,7 +72,7 @@ final class AppSettings {
     @ObservationIgnored private var storedLevelMode: LevelMode
     @ObservationIgnored private var storedFollowSystemVolume: Bool
     @ObservationIgnored private var storedLatencyMode: LatencyMode
-    @ObservationIgnored private var storedSyncOffsetMs: Int
+    @ObservationIgnored private var storedSyncOffsets: SyncOffsets
     @ObservationIgnored private var storedWingWidth: Double
     @ObservationIgnored private var storedGlowIntensity: Double
     @ObservationIgnored private var storedBeatPulse: Bool
@@ -96,7 +98,8 @@ final class AppSettings {
         storedLatencyMode = Self.clampLatency(
             Self.readJSON(LatencyMode.self, defaults, Key.latencyMode) ?? Default.latencyMode
         )
-        storedSyncOffsetMs = Self.clampSyncOffset(Self.readInt(defaults, Key.syncOffset) ?? Default.syncOffset)
+        storedSyncOffsets = Self.readJSON(SyncOffsets.self, defaults, Key.syncOffsets)
+            ?? SyncOffsets.migrated(legacyMs: Self.readInt(defaults, Key.syncOffset))
         storedWingWidth = Self.clamp(
             Self.readDouble(defaults, Key.wingWidth) ?? Default.wingWidth,
             Limits.wingWidth,
@@ -213,18 +216,18 @@ final class AppSettings {
         }
     }
 
-    /// «Сдвиг синхронизации», мс: -100...100 с шагом 5. Минус ставит свечение и волны раньше звука,
-    /// плюс позже.
-    var syncOffsetMs: Int {
+    /// «Сдвиг синхронизации» по устройствам вывода, мс: -100...100 с шагом 5 (`SyncOffsets`).
+    /// Хранится как JSON в `wf.syncOffsets`. Пока ключа нет (или JSON испорчен), общий сдвиг
+    /// берется из старого `wf.syncOffset`; старый ключ не пишется и не удаляется.
+    var syncOffsets: SyncOffsets {
         get {
-            access(keyPath: \.syncOffsetMs)
-            return storedSyncOffsetMs
+            access(keyPath: \.syncOffsets)
+            return storedSyncOffsets
         }
         set {
-            let value = Self.clampSyncOffset(newValue)
-            guard value != storedSyncOffsetMs else { return }
-            withMutation(keyPath: \.syncOffsetMs) { storedSyncOffsetMs = value }
-            defaults.set(value, forKey: Key.syncOffset)
+            guard newValue != storedSyncOffsets else { return }
+            withMutation(keyPath: \.syncOffsets) { storedSyncOffsets = newValue }
+            writeJSON(newValue, Key.syncOffsets)
         }
     }
 
@@ -433,13 +436,6 @@ final class AppSettings {
             let range = Limits.manualLatency
             return .manual(milliseconds: min(max(milliseconds, range.lowerBound), range.upperBound))
         }
-    }
-
-    /// В пределах `Limits.syncOffset`, до ближайшего кратного 5 (-37 дает -35).
-    private static func clampSyncOffset(_ milliseconds: Int) -> Int {
-        let range = Limits.syncOffset
-        let clamped = min(max(milliseconds, range.lowerBound), range.upperBound)
-        return Int((Double(clamped) / 5).rounded()) * 5
     }
 
     private static func clampLineCount(_ count: Int) -> Int {

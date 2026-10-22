@@ -199,29 +199,79 @@ struct AppSettingsTests {
         }
     }
 
-    /// «Сдвиг синхронизации»: 0 по умолчанию, -100...100 мс, шаг 5 мс, мусор в хранилище дает 0.
-    @Test func syncOffsetDefaultsAndClamps() {
+    /// «Сдвиг синхронизации» по устройствам: пусто по умолчанию, JSON в `wf.syncOffsets`,
+    /// переживает перезапуск, значения -100...100 мс с шагом 5 мс.
+    @Test func syncOffsetsDefaultPersistAndClamp() {
         Self.withDefaults { defaults in
             let settings = AppSettings(defaults: defaults)
-            #expect(settings.syncOffsetMs == 0)
-            settings.syncOffsetMs = 250
-            #expect(settings.syncOffsetMs == 100)
-            settings.syncOffsetMs = -37
-            #expect(settings.syncOffsetMs == -35)
-            #expect(defaults.object(forKey: "wf.syncOffset") != nil)
-            #expect(AppSettings(defaults: defaults).syncOffsetMs == -35)
-            settings.syncOffsetMs = -500
-            #expect(settings.syncOffsetMs == -100)
+            #expect(settings.syncOffsets == SyncOffsets())
+            settings.syncOffsets.set(250, deviceUID: "airpods", name: "AirPods")
+            settings.syncOffsets.set(-37, deviceUID: "", name: "")
+            #expect(settings.syncOffsets.offset(forDeviceUID: "airpods") == 100)
+            #expect(settings.syncOffsets.offset(forDeviceUID: "speakers") == -35)
+            #expect(defaults.data(forKey: "wf.syncOffsets") != nil)
+            #expect(defaults.object(forKey: "wf.syncOffset") == nil)
+
+            let reloaded = AppSettings(defaults: defaults)
+            #expect(reloaded.syncOffsets == settings.syncOffsets)
+            #expect(reloaded.syncOffsets.byDevice["airpods"]?.name == "AirPods")
+
+            settings.syncOffsets.reset(deviceUID: "airpods")
+            #expect(AppSettings(defaults: defaults).syncOffsets.offset(forDeviceUID: "airpods") == -35)
+        }
+    }
+
+    /// Старый общий сдвиг `wf.syncOffset` становится `fallbackMs`, пока нового ключа нет. Перенос
+    /// ничего не пишет, старый ключ не меняется и после записи нового не читается. Мусор дает 0.
+    @Test func legacySyncOffsetMigratesToFallback() {
+        Self.withDefaults { defaults in
+            defaults.set(42, forKey: "wf.syncOffset")
+            let settings = AppSettings(defaults: defaults)
+            #expect(settings.syncOffsets == SyncOffsets(fallbackMs: 40))
+            #expect(settings.syncOffsets.offset(forDeviceUID: "airpods") == 40)
+            #expect(defaults.object(forKey: "wf.syncOffsets") == nil)
+
+            settings.syncOffsets.set(20, deviceUID: "airpods", name: "AirPods")
+            #expect(defaults.data(forKey: "wf.syncOffsets") != nil)
+            #expect(defaults.integer(forKey: "wf.syncOffset") == 42)
+
+            defaults.set(-100, forKey: "wf.syncOffset")
+            let reloaded = AppSettings(defaults: defaults)
+            #expect(reloaded.syncOffsets.fallbackMs == 40)
+            #expect(reloaded.syncOffsets.offset(forDeviceUID: "airpods") == 20)
         }
         Self.withDefaults { defaults in
+            defaults.set(250, forKey: "wf.syncOffset")
+            #expect(AppSettings(defaults: defaults).syncOffsets == SyncOffsets(fallbackMs: 100))
             defaults.set("не число", forKey: "wf.syncOffset")
-            #expect(AppSettings(defaults: defaults).syncOffsetMs == 0)
+            #expect(AppSettings(defaults: defaults).syncOffsets == SyncOffsets())
             defaults.set(Data([1, 2, 3]), forKey: "wf.syncOffset")
-            #expect(AppSettings(defaults: defaults).syncOffsetMs == 0)
+            #expect(AppSettings(defaults: defaults).syncOffsets == SyncOffsets())
             defaults.set(Double.nan, forKey: "wf.syncOffset")
-            #expect(AppSettings(defaults: defaults).syncOffsetMs == 0)
-            defaults.set(42, forKey: "wf.syncOffset")
-            #expect(AppSettings(defaults: defaults).syncOffsetMs == 40)
+            #expect(AppSettings(defaults: defaults).syncOffsets == SyncOffsets())
+
+            // Испорченный JSON нового ключа считается отсутствием: снова перенос старого.
+            defaults.set(-35, forKey: "wf.syncOffset")
+            defaults.set(Data([1, 2, 3]), forKey: "wf.syncOffsets")
+            #expect(AppSettings(defaults: defaults).syncOffsets == SyncOffsets(fallbackMs: -35))
+        }
+    }
+
+    @Test func syncOffsetsObservedOnlyOnRealChanges() {
+        Self.withDefaults { defaults in
+            let settings = AppSettings(defaults: defaults)
+            settings.syncOffsets.set(10, deviceUID: "airpods", name: "AirPods")
+            let fired = ChangeFlag()
+            withObservationTracking {
+                _ = settings.syncOffsets
+            } onChange: {
+                fired.value = true
+            }
+            settings.syncOffsets.set(10, deviceUID: "airpods", name: "AirPods")
+            settings.syncOffsets.reset(deviceUID: "speakers")
+            #expect(!fired.value)
+            settings.syncOffsets.set(15, deviceUID: "airpods", name: "AirPods")
+            #expect(fired.value)
         }
     }
 
@@ -270,7 +320,7 @@ extension AppSettingsTests {
             #expect(settings.beatPulse == false)
             #expect(settings.latencyMode == .manual(milliseconds: 80))
             #expect(settings.source == source)
-            #expect(settings.syncOffsetMs == 0)
+            #expect(settings.syncOffsets == SyncOffsets())
             var expected = WaveAppearance.standard
             expected.wingWidth = 120
             #expect(settings.appearance == expected)

@@ -892,7 +892,7 @@ final class AppModel {
             pipeline.settings = level
         }
         pipeline.latencyMode = settings.latencyMode
-        pipeline.syncOffsetMs = settings.syncOffsetMs
+        pipeline.syncOffsets = settings.syncOffsets
         pipeline.paused = settings.paused
     }
 
@@ -1563,7 +1563,7 @@ extension AppModel {
     }
 
     /// Темп, уверенность и захват ритма из последнего расписания свечения, задержки, из которых
-    /// складывается время свечения, и сдвиг синхронизации.
+    /// складывается время свечения, и сдвиг синхронизации текущего устройства вывода.
     private func rhythmSection() -> DiagnosticsSection {
         let schedule = store.schedule
         let tempo = schedule.bpm.flatMap { $0.isFinite ? "\(Int($0.rounded())) BPM" : nil } ?? "нет"
@@ -1575,7 +1575,10 @@ extension AppModel {
             DiagnosticsRow(label: "Задержка вывода", value: "\(Self.milliseconds(pipeline.outputLatency)) мс"),
             DiagnosticsRow(label: "Задержка показа", value: "\(Self.milliseconds(lead)) мс"),
             DiagnosticsRow(label: "Запаздывание онсета", value: "\(Self.milliseconds(StreamAnalyzer.onsetLag)) мс"),
-            DiagnosticsRow(label: "Сдвиг синхронизации", value: Self.syncOffsetText(settings.syncOffsetMs)),
+            DiagnosticsRow(
+                label: "Сдвиг синхронизации",
+                value: Self.syncOffsetText(settings.syncOffsets.offset(forDeviceUID: output.deviceUID))
+            ),
         ])
     }
 

@@ -12,7 +12,8 @@ import WaveCore
 /// Пока окно открыто и не свернуто, задержка «Авто», статус запуска при входе и доступ к звуку
 /// обновляются раз в 3 с. Список источников (поиск Яндекс Музыки, браузеры, приложения со звуком)
 /// дороже: он обновляется при открытии окна, при запуске и закрытии приложений и не чаще раза
-/// в 10 с.
+/// в 10 с. Устройство вывода для «Сдвига синхронизации» берется из `AudioPipeline` и меняется
+/// сразу.
 struct SettingsView: View {
     /// Вкладки окна.
     enum Tab: Hashable, CaseIterable {
@@ -20,9 +21,10 @@ struct SettingsView: View {
     }
 
     /// Размер окна: «Основные» в самом высоком состоянии (ручная задержка, подсказка о доступе
-    /// к звуку и кнопка настроек конфиденциальности под ней) помещаются без прокрутки. На
-    /// маленьком экране окно ужимается до его видимой области (`WindowsController`).
-    static let windowSize = CGSize(width: 520, height: 880)
+    /// к звуку и кнопка настроек конфиденциальности под ней, строка устройства с «Сбросить» под
+    /// сдвигом синхронизации) помещаются без прокрутки. На маленьком экране окно ужимается до его
+    /// видимой области (`WindowsController`).
+    static let windowSize = CGSize(width: 520, height: 916)
     static let minSize = CGSize(width: 480, height: 420)
     static let statusInterval: Duration = .seconds(3)
     /// Список источников обновляется раз в столько обновлений статуса, то есть раз в 12 с.
@@ -38,6 +40,8 @@ struct SettingsView: View {
     private let inApplications: Bool
     /// Снимки: экран острова для предела крыла задан.
     private let fixedScreen: NotchLayout?
+    /// Снимки: устройство вывода для сдвига синхронизации задано, а не берется у машины.
+    private let fixedDevice: (uid: String, name: String)?
 
     @State private var tab: Tab
     /// Игрок предпросмотра вкладки «Вид», один на окно.
@@ -55,13 +59,15 @@ struct SettingsView: View {
 
     /// Снимки задают все, что зависит от машины: `catalog` (готовый список источников; без него
     /// список собирается сейчас), `login` (статус запуска при входе и лежит ли приложение в
-    /// `/Applications`), `screen` (экран острова) и вкладку `tab`.
+    /// `/Applications`), `screen` (экран острова), `device` (UID и имя устройства вывода) и
+    /// вкладку `tab`.
     init(
         model: AppModel,
         presence: WindowPresence,
         catalog: SourceCatalog? = nil,
         login: (status: SMAppService.Status, inApplications: Bool)? = nil,
         screen: NotchLayout? = nil,
+        device: (uid: String, name: String)? = nil,
         tab: Tab = .general,
         openDiagnostics: @escaping @MainActor () -> Void
     ) {
@@ -70,6 +76,7 @@ struct SettingsView: View {
         self.openDiagnostics = openDiagnostics
         inApplications = login?.inApplications ?? LaunchAtLogin.isInApplications
         fixedScreen = screen
+        fixedDevice = device
         _tab = State(initialValue: tab)
         _player = State(initialValue: PreviewPlayer())
         _catalog = State(initialValue: catalog ?? SourceCatalog.current(model: model))
@@ -316,16 +323,41 @@ struct SettingsView: View {
                 text: "\(milliseconds) мс"
             )
         }
+        syncOffsetRows
+    }
+
+    /// «Сдвиг синхронизации» текущего устройства вывода. Под ползунком его имя и «Сбросить», если
+    /// у устройства свой сдвиг; без UID (устройство неизвестно) ползунок правит общий сдвиг,
+    /// подписи нет.
+    @ViewBuilder
+    private var syncOffsetRows: some View {
+        let settings = model.settings
+        let uid = fixedDevice?.uid ?? model.pipeline.outputDeviceUID
+        let deviceName = fixedDevice?.name ?? model.pipeline.outputDeviceName
+        let name = deviceName.isEmpty ? uid : deviceName
         SettingsSliderRow(
             "Сдвиг синхронизации",
             subtitle: "Меньше: свечение раньше звука, больше: позже",
             value: Binding(
-                get: { Double(settings.syncOffsetMs) },
-                set: { settings.syncOffsetMs = Int(($0 / 5).rounded()) * 5 }
+                get: { Double(settings.syncOffsets.offset(forDeviceUID: uid)) },
+                set: { settings.syncOffsets.set(Int($0.rounded()), deviceUID: uid, name: name) }
             ),
             in: Double(AppSettings.Limits.syncOffset.lowerBound)...Double(AppSettings.Limits.syncOffset.upperBound),
-            text: AppModel.syncOffsetText(settings.syncOffsetMs)
+            text: AppModel.syncOffsetText(settings.syncOffsets.offset(forDeviceUID: uid))
         )
+        if !uid.isEmpty {
+            LabeledContent {
+                if settings.syncOffsets.hasOwnOffset(forDeviceUID: uid) {
+                    Button("Сбросить") {
+                        settings.syncOffsets.reset(deviceUID: uid)
+                    }
+                    .controlSize(.small)
+                }
+            } label: {
+                Text("Для устройства: \(name)")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var latencyKind: Binding<LatencyKind> {
