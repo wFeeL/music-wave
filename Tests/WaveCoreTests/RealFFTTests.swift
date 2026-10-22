@@ -53,8 +53,15 @@ private func peakIndex(_ spectrum: [Float]) -> Int {
     }
 }
 
-#if !DEBUG
+/// 600 преобразований (10 с анализа при 60 Гц). CI собирает тесты в отладке, где код в разы
+/// медленнее, поэтому там граница 3 с: она ловит только грубую регрессию (например, БПФ стал
+/// квадратичным), а в релизе прежние 500 мс.
 @Test func sixHundredTransformsAreFast() {
+    #if DEBUG
+    let limit: Duration = .seconds(3)
+    #else
+    let limit: Duration = .milliseconds(500)
+    #endif
     let fft = RealFFT(size: fftSize)
     let input = TestSignals.whiteNoise(amplitude: 0.5, count: fftSize, seed: 7)
     let clock = ContinuousClock()
@@ -63,6 +70,5 @@ private func peakIndex(_ spectrum: [Float]) -> Int {
         for _ in 0..<600 { checksum += fft.amplitudeSpectrum(input)[10] }
     }
     #expect(checksum.isFinite)
-    #expect(elapsed < .milliseconds(500), "took \(elapsed)")
+    #expect(elapsed < limit, "took \(elapsed), limit \(limit)")
 }
-#endif
