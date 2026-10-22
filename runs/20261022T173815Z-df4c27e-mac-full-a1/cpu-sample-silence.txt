@@ -1,0 +1,42 @@
+# sample <pid> 3 of the silence run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 8640) every 1 millisecond
+Process:         WaveFeels [8640]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x104250000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.48 (48)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [6647]
+Target Type:     live task
+
+Date/Time:       2026-10-22 17:37:53.031 +0000
+Launch Time:     2026-10-22 17:37:32.803 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         19.4M
+Physical footprint (peak):  21.4M
+Idle exit:                  untracked
+Samples per thread:
+    1808 Thread_27549   DispatchQueue_1: com.apple.main-thread  (serial)
+    1808 Thread_27560
+    1808 Thread_27563: com.apple.NSEventThread
+    1808 Thread_27606: caulk.messenger.shared:17
+    1808 Thread_27607: caulk.messenger.shared:high
+    1808 Thread_27619: caulk::deferred_logger
+    1806 Thread_27556
+    1804 Thread_27568
+    1800 Thread_27557
+    8 Thread_<multiple>   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    3 Thread_<multiple>   DispatchQueue_404: com.wfeels.wavefeels.demo  (serial)
+    2 Thread_27557   DispatchQueue_403: com.wfeels.wavefeels.analysis  (serial)
+    1 Thread_27568   DispatchQueue_20: com.apple.root.user-interactive-qos.overcommit  (concurrent)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        7210
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        5424
+        mach_msg2_trap  (in libsystem_kernel.dylib)        3615
+        start_wqthread  (in libsystem_pthread.dylib)        7
