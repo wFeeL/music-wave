@@ -5,3 +5,8 @@ dist/
 .DS_Store
 ci-out/
 ci-latest/
+
+# Рабочие документы разработки хранятся только локально
+docs/
+.github/tester-prompt.md
+.github/workflows/tester.yml

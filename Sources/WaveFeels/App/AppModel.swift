@@ -808,7 +808,7 @@ final class AppModel {
     }
 
     /// Обложка, по которой считаются картинка панели и палитра: только пока Now Playing
-    /// работает. В запасном режиме (design.md, «Now Playing») обложки нет и палитра стандартная,
+    /// работает. В запасном режиме обложки нет и палитра стандартная,
     /// даже если `lastTrack` остался с тех пор, когда адаптер работал.
     nonisolated static func artworkSource(track: NowPlayingInfo?, nowPlayingAvailable: Bool) -> Data? {
         nowPlayingAvailable ? track?.artworkData : nil
