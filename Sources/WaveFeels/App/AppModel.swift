@@ -1467,7 +1467,10 @@ extension AppModel {
         ))
         rows.append(DiagnosticsRow(label: "Звучит по уровню", value: Self.yesNo(gate.isActive)))
         rows.append(DiagnosticsRow(label: "Играет по Now Playing", value: Self.yesNo(pipeline.adapterSaysPlaying)))
-        rows.append(DiagnosticsRow(label: "Источник выводит звук", value: Self.yesNo(pipeline.sourceOutputting)))
+        rows.append(DiagnosticsRow(
+            label: "Источник выводит звук",
+            value: Self.outputtingDescription(status: pipeline.status, outputting: pipeline.sourceOutputting)
+        ))
 
         if source == .systemWide {
             rows.append(DiagnosticsRow(label: "Найденные процессы", value: "весь звук системы, процессы не отбираются"))
@@ -1611,6 +1614,18 @@ extension AppModel {
 
     /// Пояснение к `captureStallHint` в диагностике.
     static let captureStallText = "Звук не приходит, хотя доступ разрешен. WaveFeels повторяет попытки."
+
+    /// «Источник выводит звук»: значение обновляется, только пока tap работает, пересобирается
+    /// сторожем нулей или захват приостановлен в тишине; в остальных статусах оно устарело.
+    nonisolated static func outputtingDescription(status: PipelineStatus, outputting: Bool) -> String {
+        switch status {
+        case .capturing(.running(_, _)), .rebuilding(_), .suspended:
+            outputting ? "да" : "нет"
+        case .stopped, .demo, .starting, .waitingForSource, .retrying(_, _), .paused,
+             .capturing(.idle), .capturing(.failed(_)):
+            "нет данных"
+        }
+    }
 
     private static func yesNo(_ value: Bool) -> String {
         value ? "да" : "нет"
