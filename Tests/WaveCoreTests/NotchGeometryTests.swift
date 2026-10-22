@@ -169,6 +169,23 @@ struct NotchGeometryTests {
         #expect(panel.contains(layout.collapsedIsland(wingWidth: NotchGeometry.maxWingWidth)))
         #expect(panel.minY == layout.expandedIsland.minY - 40)
         #expect(panel.maxY == 956)
+        // Запас по бокам под тень и «вздох».
+        #expect(panel.minX == layout.expandedIsland.minX - NotchGeometry.panelSideMargin)
+        #expect(panel.maxX == layout.expandedIsland.maxX + NotchGeometry.panelSideMargin)
+        #expect(NotchGeometry.panelSideMargin == 24)
+        // Клики только над самим раскрытым островом, не над запасом.
+        let margin = CGPoint(x: panel.minX + 4, y: layout.expandedIsland.midY)
+        #expect(!layout.pointer(at: margin, state: .expanded).acceptsClicks)
+    }
+
+    @Test func collapsedPillHasNoWings() throws {
+        let layout = try #require(NotchGeometry.layout(for: [external()]))
+        for wing: CGFloat in [0, 40, 64, 120] {
+            #expect(layout.collapsedIsland(wingWidth: wing) == layout.notch)
+        }
+        #expect(layout.collapsedIsland(wingWidth: 64).size == NotchGeometry.pillSize)
+        let panel = layout.panelFrame
+        #expect(panel.minX == layout.expandedIsland.minX - NotchGeometry.panelSideMargin)
     }
 
     @Test func panelIsClampedToScreen() throws {

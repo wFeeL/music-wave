@@ -360,14 +360,73 @@ struct WaveShapeTests {
         #expect(fallback == PaletteExtractor.fallback.map(\.oklab))
     }
 
-    @Test func glowColorIsLiftedAndSaturated() {
-        let dull = WavePaint.glowColor(RGBColor(hex: 0x3A3246)).oklab
-        #expect(dull.l >= 0.7, "L \(dull.l)")
-        #expect(dull.chroma >= 0.1, "C \(dull.chroma)")
-        let bright = RGBColor(hex: 0x22D3EE)
-        #expect(colorDistance(WavePaint.glowColor(bright), bright) < 0.01)
+    @Test func glowColorIsLightAndSoftlyTinted() {
+        for hex: UInt32 in [0x3A3246, 0x22D3EE, 0xFF8A3D, 0x8B5CF6, 0x7A3B12] {
+            let source = RGBColor(hex: hex).oklab
+            let glow = WavePaint.glowColor(RGBColor(hex: hex)).oklab
+            #expect(glow.l >= 0.77, "\(hex): L \(glow.l)")
+            // 35 % к белому: насыщенность 0.65 от исходной (бледная сначала доводится до 0.12).
+            let expected = 0.65 * max(source.chroma, 0.12)
+            #expect(abs(glow.chroma - expected) < 0.03, "\(hex): C \(glow.chroma) vs \(expected)")
+            // Оттенок не меняется: теплый остается теплым.
+            let turn = abs(atan2(glow.b, glow.a) - atan2(source.b, source.a))
+            #expect(min(turn, 2 * .pi - turn) < 0.12, "\(hex): hue turn \(turn)")
+        }
         let gray = WavePaint.glowColor(RGBColor(hex: 0x404040)).oklab
-        #expect(gray.chroma < 0.01 && gray.l >= 0.71)
+        #expect(gray.chroma < 0.01 && gray.l >= 0.77)
+    }
+
+    @Test func gradientLocationsResolveBothFades() {
+        let wing = WavePaint.locations(for: .wing)
+        #expect(wing.first == 0 && wing.last == 1)
+        #expect(zip(wing, wing.dropFirst()).allSatisfy { $0 < $1 })
+        #expect(wing.filter { $0 > 0 && $0 <= WavePaint.fadeInWidth }.count >= 3)
+        #expect(wing.filter { $0 >= WavePaint.fadeOutStart && $0 < 1 }.count >= 4)
+        #expect(wing.contains(WavePaint.fadeOutStart))
+        // Шаг течения цвета не больше 1/8.
+        #expect(zip(wing, wing.dropFirst()).allSatisfy { $1 - $0 <= 0.125 + 1e-12 })
+
+        let panel = WavePaint.locations(for: .panel)
+        #expect(panel.first == 0 && panel.last == 1 && panel.contains(0.5))
+        #expect(zip(panel, panel.dropFirst()).allSatisfy { $0 < $1 })
+        for (a, b) in zip(panel, panel.reversed()) {
+            #expect(abs(a + b - 1) < 1e-12)
+        }
+
+        // На этих точках у выреза видно проявление, у края плавное растворение.
+        let stops = WavePaint.stops(palette: Self.warm, layer: .mid, level: 1, time: 0, locations: wing, profile: .wing)
+        let notch = stops.filter { $0.location <= WavePaint.fadeInWidth }.map(\.opacity)
+        #expect(zip(notch, notch.dropFirst()).allSatisfy { $0 < $1 })
+        let outer = stops.filter { $0.location >= WavePaint.fadeOutStart }.map(\.opacity)
+        #expect(outer.first == WavePaint.fullOpacity && outer.last == 0)
+        #expect(zip(outer, outer.dropFirst()).allSatisfy { $0 > $1 })
+    }
+
+    @Test func wingSwingIsBoostedWithSoftCap() {
+        #expect(WaveShape.softLimit(0.5) == 0.5)
+        #expect(WaveShape.softLimit(-0.8) == -0.8)
+        var previous = -10.0
+        for i in 0...400 {
+            let v = -2 + Double(i) / 100
+            let y = WaveShape.softLimit(v)
+            #expect(y > previous && abs(y) < 1)
+            #expect(abs(WaveShape.softLimit(-v) + y) < 1e-12)
+            previous = y
+        }
+        // Касательная на изломе непрерывна.
+        let left = (WaveShape.softLimit(0.8) - WaveShape.softLimit(0.799)) / 0.001
+        let right = (WaveShape.softLimit(0.801) - WaveShape.softLimit(0.8)) / 0.001
+        #expect(abs(left - right) < 0.01)
+        // Тихая волна в крыле в 1.3 раза выше той же волны без усиления.
+        for layer in WaveLayer.allCases {
+            var wingPeak: Float = 0
+            for i in 0..<64 {
+                let phase = Double(i) / 64 * 2 * Double.pi
+                let y = WaveShape.samples(layer: layer, amplitude: 0.4, phase: phase, count: 201, profile: .wing)
+                wingPeak = max(wingPeak, y.map { abs($0) }.max()!)
+            }
+            #expect(wingPeak > 0.45 && wingPeak <= 0.53, "\(layer): \(wingPeak)")
+        }
     }
 
     @Test func paintSurvivesBadInput() {

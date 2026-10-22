@@ -38,8 +38,9 @@ nonisolated struct WaveSet: Sendable {
     /// Точек на крыло и на всю ширину панели.
     static let wingPoints = 64
     static let panelPoints = 128
-    static let wingStops = 9
-    static let panelStops = 17
+    /// Положения точек градиента: частые на проявлении у выреза и растворении у края.
+    static let wingLocations = WavePaint.locations(for: .wing)
+    static let panelLocations = WavePaint.locations(for: .panel)
     /// Ниже этого уровня у слоя нет свечения.
     static let glowLevel: Float = 0.05
 
@@ -48,7 +49,7 @@ nonisolated struct WaveSet: Sendable {
 
     init(frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle) {
         let points = style == .wing ? Self.wingPoints : Self.panelPoints
-        let stopCount = style == .wing ? Self.wingStops : Self.panelStops
+        let locations = style == .wing ? Self.wingLocations : Self.panelLocations
         self.style = style
         layers = WaveLayer.allCases.map { layer in
             let level = layer.rawValue < frame.layers.count ? frame.layers[layer.rawValue] : 0
@@ -59,7 +60,7 @@ nonisolated struct WaveSet: Sendable {
                     layer: layer, amplitude: level, phase: motion.phase(layer), count: points, profile: style.profile
                 ),
                 stops: WavePaint.stops(
-                    palette: palette, layer: layer, level: level, time: time, count: stopCount, profile: style.profile
+                    palette: palette, layer: layer, level: level, time: time, locations: locations, profile: style.profile
                 )
             )
         }

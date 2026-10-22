@@ -158,15 +158,26 @@ smoke_launch() {
     "$APP/Contents/MacOS/WaveFeels" --exit-after 3 --no-capture
 }
 
-# Сколько PNG должно получиться: 9 состояний и светлые версии 02 и 04.
-SNAPSHOT_COUNT=11
-
+# Приложение до отрисовки пишет manifest.txt со списком PNG; шаг проходит, только если
+# список не пуст и каждый файл из него на месте и не пустой.
 render_snapshots() {
-    "$APP/Contents/MacOS/WaveFeels" --render-snapshots "$OUT/snapshots" --no-capture --exit-after 60 || return $?
-    local count
-    count=$(find "$OUT/snapshots" -type f -name '*.png' | wc -l | tr -d ' ')
-    echo "snapshots: $count of $SNAPSHOT_COUNT"
-    [[ $count -ge $SNAPSHOT_COUNT ]]
+    local dir="$OUT/snapshots" manifest expected=0 missing=0 name
+    manifest="$dir/manifest.txt"
+    "$APP/Contents/MacOS/WaveFeels" --render-snapshots "$dir" --no-capture --exit-after 60 || return $?
+    if [[ ! -f "$manifest" ]]; then
+        echo "snapshots: manifest.txt missing"
+        return 1
+    fi
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        expected=$((expected + 1))
+        if [[ ! -s "$dir/$name" ]]; then
+            echo "snapshots: missing $name"
+            missing=$((missing + 1))
+        fi
+    done < "$manifest"
+    echo "snapshots: $((expected - missing)) of $expected"
+    [[ $expected -gt 0 && $missing -eq 0 ]]
 }
 
 has_snapshot_renderer() {

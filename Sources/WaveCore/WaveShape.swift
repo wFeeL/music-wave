@@ -55,9 +55,13 @@ public enum WaveShape {
     /// от `panelTaperStart` до нуля.
     static let panelFloor = 0.6
     static let panelTaperStart = 0.75
+    /// Крыло: размах в 1.3 раза больше, выше `wingKnee` он плавно упирается в 1.
+    static let wingGain = 1.3
+    static let wingKnee = 0.8
 
-    /// Значения y в -1...1. `.wing`: x = i / (count - 1) от выреза к краю. `.panel`:
-    /// x = -1 + 2i / (count - 1) через всю ширину. `amplitude` ограничивается диапазоном 0...1.
+    /// Значения y в -1...1. `.wing`: x = i / (count - 1) от выреза к краю, размах усилен в
+    /// `wingGain` раз с мягким пределом. `.panel`: x = -1 + 2i / (count - 1) через всю ширину.
+    /// `amplitude` ограничивается диапазоном 0...1.
     public static func samples(
         layer: WaveLayer, amplitude: Float, phase: Double, count: Int, profile: WaveProfile = .wing
     ) -> [Float] {
@@ -95,8 +99,19 @@ public enum WaveShape {
                 envelope = body * WavePaint.smoothstep(1, panelTaperStart, u)
             }
             let carrier = (1 - h) * sin(twoPi * c * u - phase + p) + h * sin(twoPi * 2.3 * c * u - 1.7 * phase)
-            return Float(amp * envelope * carrier)
+            let y = amp * envelope * carrier
+            return Float(profile == .wing ? softLimit(wingGain * y) : y)
         }
+    }
+
+    /// Линейно до `wingKnee`, дальше плавно (с той же касательной) к ±1: громкая волна не
+    /// упирается в край крыла углом.
+    static func softLimit(_ v: Double) -> Double {
+        let magnitude = abs(v)
+        guard magnitude > wingKnee else { return v }
+        let headroom = 1 - wingKnee
+        let limited = wingKnee + headroom * tanh((magnitude - wingKnee) / headroom)
+        return v < 0 ? -limited : limited
     }
 }
 
@@ -188,15 +203,44 @@ public enum WavePaint {
     static let fadeInWidth = 0.04
     /// Отсюда до внешнего края линия растворяется.
     static let fadeOutStart = 0.82
-    /// Свечение под островом: светлота и насыщенность не ниже этих.
-    static let glowLightness: Float = 0.72
+    /// Свечение под островом: насыщенность не ниже `glowChroma`, затем цвет на `glowWhiteMix`
+    /// смешивается с белым и светлота поднимается до `glowLightness`.
     static let glowChroma: Float = 0.12
+    static let glowWhiteMix: Float = 0.35
+    static let glowLightness: Float = 0.78
+
+    /// Расстояния от выреза (или от середины панели), где стоят точки градиента: шаг 1/8 для
+    /// течения цвета, плюс частые точки на проявлении у выреза (0...0.04) и на растворении у
+    /// внешнего края (0.82...1), иначе линейная интерполяция между редкими точками их съедает.
+    static let fadeDistances: [Double] = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.82, 0.86, 0.9, 0.95, 1]
+    static let notchDistances: [Double] = [0.01, 0.02, 0.04]
+
+    /// Положения точек градиента для профиля: в крыле от выреза к краю, в панели через всю
+    /// ширину, симметрично от середины.
+    public static func locations(for profile: WaveProfile) -> [Double] {
+        switch profile {
+        case .wing:
+            return (fadeDistances + notchDistances).sorted()
+        case .panel:
+            let right = fadeDistances.map { 0.5 + $0 / 2 }
+            let left = fadeDistances.dropFirst().reversed().map { 0.5 - $0 / 2 }
+            return left + right
+        }
+    }
 
     /// `count` точек градиента с шагом `1 / (count - 1)`; меньше двух точек дают пустой массив.
     public static func stops(
         palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, count: Int, profile: WaveProfile = .wing
     ) -> [Stop] {
         guard count >= 2 else { return [] }
+        let locations = (0..<count).map { Double($0) / Double(count - 1) }
+        return stops(palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile)
+    }
+
+    /// Точки градиента в заданных положениях 0...1 (по возрастанию).
+    public static func stops(
+        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, locations: [Double], profile: WaveProfile
+    ) -> [Stop] {
         let colors = distinct(palette.isEmpty ? PaletteExtractor.fallback : palette)
         let index = layer.rawValue
         let own = colors[index % colors.count]
@@ -208,8 +252,8 @@ public enum WavePaint {
         let opacity = (restOpacity + (fullOpacity - restOpacity) * smoothstep(0, opacityKnee, level)) * layerOpacity[index]
         let shift = time.isFinite ? (flowSpeed * time).truncatingRemainder(dividingBy: 1) : 0
 
-        return (0..<count).map { i in
-            let location = Double(i) / Double(count - 1)
+        return locations.map { raw in
+            let location = raw.isFinite ? min(max(raw, 0), 1) : 0
             let u: Double
             let fadeIn: Double
             switch profile {
@@ -243,17 +287,21 @@ public enum WavePaint {
         return labs
     }
 
-    /// Цвет свечения под островом: цвет палитры, поднятый в OKLab до светлоты `glowLightness`
-    /// и насыщенности `glowChroma`, если он темнее или бледнее. Серый остается серым.
+    /// Цвет свечения под островом. Цвет палитры в OKLab: бледный доводится до насыщенности
+    /// `glowChroma`, затем на 35 % смешивается с белым, светлота не ниже `glowLightness`.
+    /// Теплые палитры так светятся розово-золотым, а не бурым. Серый остается серым.
     public static func glowColor(_ color: RGBColor) -> RGBColor {
         var lab = color.oklab
-        lab.l = max(lab.l, glowLightness)
         let chroma = lab.chroma
         if chroma > 1e-4, chroma < glowChroma {
             let scale = glowChroma / chroma
             lab.a *= scale
             lab.b *= scale
         }
+        lab.l += (1 - lab.l) * glowWhiteMix
+        lab.a *= 1 - glowWhiteMix
+        lab.b *= 1 - glowWhiteMix
+        lab.l = max(lab.l, glowLightness)
         return RGBColor(oklab: lab)
     }
 

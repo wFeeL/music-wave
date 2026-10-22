@@ -44,9 +44,10 @@ public struct NotchLayout: Sendable, Equatable {
         self.notch = notch
     }
 
-    /// Свернутый остров: вырез плюс крылья по бокам. Верх и высота как у выреза.
+    /// Свернутый остров: вырез плюс крылья по бокам. Верх и высота как у выреза. У капсулы
+    /// крыльев нет: свернутая капсула ровно `NotchGeometry.pillSize`.
     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
-        let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+        let wing = hasNotch ? min(max(wingWidth, 0), NotchGeometry.maxWingWidth) : 0
         return CGRect(
             x: notch.minX - wing, y: notch.minY,
             width: notch.width + 2 * wing, height: notch.height
@@ -62,12 +63,12 @@ public struct NotchLayout: Sendable, Equatable {
         )
     }
 
-    /// Рамка панели: раскрытый и самый широкий свернутый остров плюс запас снизу под свечение,
-    /// по горизонтали не выходит за экран.
+    /// Рамка панели: раскрытый и самый широкий свернутый остров плюс запас снизу под свечение
+    /// и по бокам под тень и «вздох», по горизонтали не выходит за экран.
     public var panelFrame: CGRect {
         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
-        let minX = max(union.minX, screenFrame.minX)
-        let maxX = min(union.maxX, screenFrame.maxX)
+        let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
+        let maxX = min(union.maxX + NotchGeometry.panelSideMargin, screenFrame.maxX)
         return CGRect(
             x: minX, y: union.minY - NotchGeometry.glowMargin,
             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
@@ -123,6 +124,8 @@ public enum NotchGeometry {
     static let hoverTopOvershoot: CGFloat = 2
     /// Запас под панелью для свечения.
     static let glowMargin: CGFloat = 40
+    /// Запас панели по бокам: тень раскрытого острова и «вздох» не обрезаются краем окна.
+    public static let panelSideMargin: CGFloat = 24
     /// Отступ капсулы от строки меню на экране без выреза.
     static let pillGap: CGFloat = 8
     static let fakeNotchSize = CGSize(width: 185, height: 32)

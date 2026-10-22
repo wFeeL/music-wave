@@ -7,8 +7,8 @@ import WaveCore
 /// Свернутый остров: черная форма на вырез и крылья, волны только в крыльях, зеркально, x = 0
 /// у края выреза; над самим вырезом ничего не рисуется. Раскрытый: черная панель с мягкой
 /// тенью, волны во всю ширину вдоль нижнего края, верх свободен под содержимое панели.
-/// Капсула на экране без выреза: волны идут через нее одной линией от середины, по краю
-/// тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
+/// Капсула на экране без выреза (ровно `NotchGeometry.pillSize`, без крыльев): волны идут
+/// через нее одной линией от середины, по краю свернутой капсулы тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
 ///
 /// Кадры идут от `TimelineView(.animation)`, на паузе, пока остров скрыт; в режиме
 /// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет последний кадр анализа
@@ -46,7 +46,7 @@ struct IslandView: View {
     static let expandedShadowOpacity = 0.25
     static let expandedShadowRadius: CGFloat = 16
     static let expandedShadowOffset: CGFloat = 4
-    /// Обводка капсулы.
+    /// Обводка свернутой капсулы.
     static let pillStrokeWidth: CGFloat = 0.5
     static let pillStrokeOpacity = 0.08
 
@@ -115,6 +115,7 @@ struct IslandView: View {
                             .strokeBorder(Color.white.opacity(Self.pillStrokeOpacity), lineWidth: Self.pillStrokeWidth)
                             .frame(width: rect.width, height: rect.height)
                             .offset(x: rect.minX, y: rect.minY)
+                            .opacity(state == .expanded ? 0 : 1)
                     }
                 }
             }

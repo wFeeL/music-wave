@@ -84,6 +84,10 @@ enum SnapshotRenderer {
         ]
     }
 
+    /// Список снимков в каталоге: имена PNG по строке. Пишется до отрисовки, CI сверяет с ним,
+    /// все ли файлы на месте.
+    static let manifestName = "manifest.txt"
+
     /// Рисует все снимки в `directory` и возвращает пути. `demo` по умолчанию из ресурсов приложения.
     @MainActor
     static func renderAll(to directory: URL, demo: URL? = nil) throws -> [URL] {
@@ -114,6 +118,8 @@ enum SnapshotRenderer {
         ]
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let manifest = scenes.map { "\($0.name).png\n" }.joined()
+        try Data(manifest.utf8).write(to: directory.appendingPathComponent(manifestName), options: .atomic)
         let defaults = snapshotDefaults()
         let model = AppModel(defaults: defaults)
         var written: [URL] = []

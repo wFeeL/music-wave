@@ -25,6 +25,13 @@ struct SnapshotRendererTests {
             #expect(size > 2048, "\(name): \(size) байт")
         }
 
+        let manifest = try String(
+            contentsOf: directory.appendingPathComponent(SnapshotRenderer.manifestName), encoding: .utf8
+        )
+        let listed = manifest.split(separator: "\n").map(String.init)
+        #expect(listed == written.map(\.lastPathComponent))
+        #expect(listed.count >= Self.names.count)
+
         let wings = SnapshotRenderer.wingSampleRects()
         let loud = try Bitmap(url: directory.appendingPathComponent("02-loud-beat.png"))
         let silent = try Bitmap(url: directory.appendingPathComponent("01-silent.png"))

@@ -280,6 +280,8 @@ public func mixPalettes(_ a: [RGBColor], _ b: [RGBColor], t: Float) -> [RGBColor
 
 /// Плавная смена палитры: к новой цели за `duration` секунд с ease-in-out через `mixPalettes`.
 /// Новая цель посреди перехода начинает свой переход от того, что видно сейчас, без скачка.
+/// Часы любые, в том числе настенные: если они пошли назад, переход начинается заново с той
+/// палитры, от которой шел, и не замирает до тех пор, пока часы не догонят старое время.
 public struct PaletteFade: Sendable {
     public static let duration = 0.8
 
@@ -292,7 +294,7 @@ public struct PaletteFade: Sendable {
         to = palette
     }
 
-    /// Палитра на момент `now` (секунды, любые монотонные часы).
+    /// Палитра на момент `now`, секунды.
     public mutating func palette(target: [RGBColor], now: Double) -> [RGBColor] {
         if target != to {
             from = shown(at: now)
