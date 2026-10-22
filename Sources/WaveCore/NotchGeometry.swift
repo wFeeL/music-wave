@@ -83,6 +83,34 @@ public struct NotchLayout: Sendable, Equatable {
         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
     }
+
+    /// Что делать с курсором в точке `point` (глобальные координаты AppKit) при состоянии `state`.
+    public func pointer(at point: CGPoint, state: IslandState) -> NotchPointer {
+        let expanded = state == .expanded
+        let inHoverZone = hoverZone(expanded: expanded).contains(point)
+        return NotchPointer(
+            inHoverZone: inHoverZone,
+            acceptsClicks: expanded && expandedIsland.contains(point),
+            needsPolling: expanded || inHoverZone
+        )
+    }
+}
+
+/// Решение по положению курсора у выреза.
+public struct NotchPointer: Sendable, Equatable {
+    /// Курсор в зоне наведения, идет в `IslandInputs.pointerInHoverZone`.
+    public var inHoverZone: Bool
+    /// Окно принимает клики. Только раскрытый остров и только над ним самим: свернутый остров
+    /// и все вокруг пропускают клики в строку меню.
+    public var acceptsClicks: Bool
+    /// Нужен частый опрос курсора: глобальный монитор не видит событий над своими окнами.
+    public var needsPolling: Bool
+
+    public init(inHoverZone: Bool, acceptsClicks: Bool, needsPolling: Bool) {
+        self.inHoverZone = inHoverZone
+        self.acceptsClicks = acceptsClicks
+        self.needsPolling = needsPolling
+    }
 }
 
 public enum NotchGeometry {
@@ -122,6 +150,25 @@ public enum NotchGeometry {
             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
         )
     }
+
+    /// Рамка окна из `kCGWindowBounds` (начало сверху слева основного экрана, ось Y вниз)
+    /// в координатах AppKit (начало снизу слева основного экрана, ось Y вверх).
+    public static func appKitRect(fromWindowServer rect: CGRect, primaryScreenHeight: CGFloat) -> CGRect {
+        CGRect(x: rect.minX, y: primaryScreenHeight - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    /// Окно (координаты AppKit) занимает весь экран: по ширине и до низа целиком, сверху
+    /// допускается полоса до `topAllowance` (полноэкранное окно может стоять под вырезом).
+    public static func windowCoversScreen(_ window: CGRect, screen: CGRect, topAllowance: CGFloat) -> Bool {
+        let tolerance = fullscreenTolerance
+        return window.minX <= screen.minX + tolerance
+            && window.maxX >= screen.maxX - tolerance
+            && window.minY <= screen.minY + tolerance
+            && window.maxY >= screen.maxY - max(topAllowance, 0) - tolerance
+    }
+
+    /// Допуск сравнения рамок полноэкранного окна и экрана, pt.
+    static let fullscreenTolerance: CGFloat = 1
 
     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)

@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var arguments = LaunchArguments()
     private(set) var model: AppModel?
     private(set) var windows: WindowsController?
+    private(set) var notch: NotchWindowController?
     /// «Диагностика…» нажата до готовности модели: окно откроется сразу после запуска модели.
     private var diagnosticsRequested = false
 
@@ -33,9 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await Self.warmUpCoreAudio()
             let model = AppModel()
             let windows = WindowsController(model: model)
+            let notch = NotchWindowController(model: model, arguments: arguments)
             self.model = model
             self.windows = windows
+            self.notch = notch
             model.start(arguments: arguments)
+            notch.show()
             if self.diagnosticsRequested {
                 self.diagnosticsRequested = false
                 windows.showDiagnostics()
@@ -44,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        notch?.stop()
         model?.stop()
         Log.flush()
     }

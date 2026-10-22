@@ -176,4 +176,90 @@ struct NotchGeometryTests {
         #expect(layout.panelFrame.minX == 0)
         #expect(layout.panelFrame.maxX == 400)
     }
+
+    // MARK: - Курсор
+
+    @Test func collapsedNeverAcceptsClicks() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        for state in [IslandState.hidden, .collapsed] {
+            for point in [
+                CGPoint(x: layout.notch.midX, y: layout.notch.midY),
+                CGPoint(x: layout.expandedIsland.midX, y: layout.expandedIsland.midY),
+                CGPoint(x: layout.notch.minX - 10, y: 950),
+            ] {
+                #expect(!layout.pointer(at: point, state: state).acceptsClicks)
+            }
+        }
+    }
+
+    @Test func pointerOverNotchStartsPolling() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let pointer = layout.pointer(at: CGPoint(x: layout.notch.midX, y: 956), state: .collapsed)
+        #expect(pointer == NotchPointer(inHoverZone: true, acceptsClicks: false, needsPolling: true))
+    }
+
+    @Test func pointerOverWingsAndMenuBarIsIgnored() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let wing = CGPoint(x: layout.notch.minX - 10, y: layout.notch.midY)
+        let statusItem = CGPoint(x: layout.notch.maxX + 40, y: 955)
+        for point in [wing, statusItem] {
+            #expect(layout.pointer(at: point, state: .collapsed) == NotchPointer(
+                inHoverZone: false, acceptsClicks: false, needsPolling: false
+            ))
+        }
+    }
+
+    @Test func expandedAcceptsClicksOnlyInsideIsland() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let island = layout.expandedIsland
+        let inside = layout.pointer(at: CGPoint(x: island.minX + 5, y: island.minY + 5), state: .expanded)
+        #expect(inside == NotchPointer(inHoverZone: true, acceptsClicks: true, needsPolling: true))
+        let below = layout.pointer(at: CGPoint(x: island.midX, y: island.minY - 5), state: .expanded)
+        #expect(below == NotchPointer(inHoverZone: false, acceptsClicks: false, needsPolling: true))
+        let aside = layout.pointer(at: CGPoint(x: island.maxX + 5, y: island.midY), state: .expanded)
+        #expect(!aside.acceptsClicks)
+        #expect(aside.needsPolling)
+    }
+
+    // MARK: - Полноэкранные окна
+
+    @Test func windowServerRectToAppKit() {
+        // Основной экран 1470 × 956; окно 100 × 50 в 10 pt от левого и 20 pt от верхнего края.
+        let rect = NotchGeometry.appKitRect(
+            fromWindowServer: CGRect(x: 10, y: 20, width: 100, height: 50), primaryScreenHeight: 956
+        )
+        #expect(rect == CGRect(x: 10, y: 886, width: 100, height: 50))
+    }
+
+    @Test func windowServerRectOnSecondaryScreenAbove() {
+        // Второй экран 1920 × 1080 стоит над основным: в AppKit y от 956, в CGWindow y отрицательный.
+        let rect = NotchGeometry.appKitRect(
+            fromWindowServer: CGRect(x: 0, y: -1080, width: 1920, height: 1080), primaryScreenHeight: 956
+        )
+        #expect(rect == CGRect(x: 0, y: 956, width: 1920, height: 1080))
+    }
+
+    @Test func fullFrameWindowCoversScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        #expect(NotchGeometry.windowCoversScreen(screen, screen: screen, topAllowance: 32))
+        #expect(NotchGeometry.windowCoversScreen(screen.insetBy(dx: -0.5, dy: -0.5), screen: screen, topAllowance: 0))
+    }
+
+    @Test func windowBelowNotchCoversScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        let belowNotch = CGRect(x: 0, y: 0, width: 1470, height: 924)
+        #expect(NotchGeometry.windowCoversScreen(belowNotch, screen: screen, topAllowance: 32))
+        #expect(!NotchGeometry.windowCoversScreen(belowNotch, screen: screen, topAllowance: 0))
+    }
+
+    @Test func ordinaryWindowsDoNotCoverScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        let zoomedAboveDock = CGRect(x: 0, y: 70, width: 1470, height: 854)
+        let narrower = CGRect(x: 10, y: 0, width: 1460, height: 956)
+        let otherScreen = CGRect(x: 1470, y: 0, width: 1470, height: 956)
+        let belowMenuBar = CGRect(x: 0, y: 0, width: 1470, height: 914)
+        for window in [zoomedAboveDock, narrower, otherScreen, belowMenuBar] {
+            #expect(!NotchGeometry.windowCoversScreen(window, screen: screen, topAllowance: 32))
+        }
+    }
 }
