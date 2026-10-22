@@ -1,0 +1,137 @@
+import Foundation
+import Testing
+@testable import WaveCore
+
+struct BeatGlowTests {
+    private static let refresh = 1.0 / 60
+
+    private static func schedule(_ events: [GlowEvent], period: Double? = 0.5) -> BeatSchedule {
+        BeatSchedule(events: events, bpm: period.map { 60 / $0 }, period: period, confidence: 1, locked: true)
+    }
+
+    private static func event(id: UInt64, time: Double, amplitude: Float = 1) -> GlowEvent {
+        GlowEvent(id: id, time: time, amplitude: amplitude, predicted: true)
+    }
+
+    @Test func decayFollowsTempo() {
+        #expect(abs(BeatGlow.decay(period: 0.5) - 0.15) < 1e-12)
+        #expect(BeatGlow.decay(period: 0.2) == 0.08)
+        #expect(BeatGlow.decay(period: 1.0) == 0.18)
+        #expect(BeatGlow.decay(period: nil) == 0.12)
+    }
+
+    @Test func peaksAtLeadTime() {
+        let schedule = Self.schedule([Self.event(id: 1, time: 10)])
+        let peak = BeatGlow.value(at: 10.0 - 0.015 - Self.refresh / 2, schedule: schedule, refreshPeriod: Self.refresh)
+        #expect(abs(peak - 1) <= 1e-6)
+        #expect(BeatGlow.value(at: 9.97, schedule: schedule, refreshPeriod: Self.refresh) == 0)
+        // Через одну постоянную спада яркость падает в e раз.
+        let later = BeatGlow.value(
+            at: 10.0 - 0.015 - Self.refresh / 2 + 0.15, schedule: schedule, refreshPeriod: Self.refresh
+        )
+        #expect(abs(later - Float(exp(-1.0))) < 1e-4)
+        // Изменяемый вариант для события, увиденного заранее, дает ту же форму.
+        var glow = BeatGlow()
+        #expect(glow.value(at: 9.9, schedule: schedule, refreshPeriod: Self.refresh) == 0)
+        let mutatingPeak = glow.value(
+            at: 10.0 - 0.015 - Self.refresh / 2, schedule: schedule, refreshPeriod: Self.refresh
+        )
+        #expect(abs(mutatingPeak - 1) <= 1e-6)
+    }
+
+    @Test func lateEventStartsBright() {
+        let event = Self.event(id: 7, time: 10, amplitude: 0.8)
+        let schedule = Self.schedule([event])
+        // Начало по расписанию 10 - λ - R/2; первый кадр, где событие видно, на 30 мс позже.
+        let firstSeen = 10 - BeatGlow.lead - Self.refresh / 2 + 0.030
+        var glow = BeatGlow()
+        #expect(glow.value(at: firstSeen - 0.1, schedule: .empty, refreshPeriod: Self.refresh) == 0)
+        let value = glow.value(at: firstSeen, schedule: schedule, refreshPeriod: Self.refresh)
+        #expect(abs(value - 0.8) <= 1e-6)
+        // Дальше спадает от этого кадра, а не от начала по расписанию.
+        let next = glow.value(at: firstSeen + Self.refresh, schedule: schedule, refreshPeriod: Self.refresh)
+        #expect(abs(next - 0.8 * Float(exp(-Self.refresh / 0.15))) < 1e-4)
+        // Статический вариант памяти не имеет и показывает уже спавшую вспышку.
+        #expect(BeatGlow.value(at: firstSeen, schedule: schedule, refreshPeriod: Self.refresh) < 0.8 * 0.85)
+    }
+
+    @Test func staleEventDoesNotFlash() {
+        // Событие, впервые увиденное через 1 с после начала (новое состояние рендера при готовом
+        // расписании), не вспыхивает: это не опоздание, а прошлое.
+        let schedule = Self.schedule([Self.event(id: 3, time: 10)])
+        var glow = BeatGlow()
+        let value = glow.value(at: 11, schedule: schedule, refreshPeriod: Self.refresh)
+        #expect(value < 0.01)
+    }
+
+    /// Кадры через 1 мс: сдвиг приходит, когда вспышка горит меньше 3 мс, и без памяти она погасла
+    /// бы и вспыхнула снова.
+    @Test func sameIdDoesNotFlashTwice() {
+        var glow = BeatGlow()
+        var schedule = Self.schedule([Self.event(id: 5, time: 10)])
+        var values: [Float] = []
+        var stateless: [Float] = []
+        var t = 9.95
+        var moved = false
+        while t < 10.2 {
+            // Пока событие светится, оно сдвигается на 3 мс позже с тем же id.
+            if !moved, let last = values.last, last > 0.5 {
+                schedule.events[0].time += 0.003
+                moved = true
+            }
+            values.append(glow.value(at: t, schedule: schedule, refreshPeriod: Self.refresh))
+            stateless.append(BeatGlow.value(at: t, schedule: schedule, refreshPeriod: Self.refresh))
+            t += 0.001
+        }
+        #expect(moved)
+        let peak = values.firstIndex { $0 > 0.5 } ?? values.count
+        #expect(peak < values.count)
+        for index in (peak + 1)..<values.count {
+            #expect(values[index] <= values[index - 1], "rise at frame \(index): \(values[index - 1]) -> \(values[index])")
+        }
+        // Проверка чувствительна: без памяти та же последовательность дает вторую вспышку.
+        #expect(stateless[(peak + 1)...].contains(0))
+    }
+
+    @Test func neverExceedsOne() {
+        let schedule = Self.schedule([Self.event(id: 1, time: 10), Self.event(id: 2, time: 10.004)])
+        var glow = BeatGlow()
+        var t = 9.95
+        while t < 10.3 {
+            #expect(BeatGlow.value(at: t, schedule: schedule, refreshPeriod: Self.refresh) <= 1)
+            #expect(glow.value(at: t, schedule: schedule, refreshPeriod: Self.refresh) <= 1)
+            t += 0.001
+        }
+    }
+
+    @Test func bassAccentClamps() {
+        #expect(BeatGlow.accented([0.9, 0.2, 0.1], glow: 1) == [1, 0.2, 0.1])
+        #expect(BeatGlow.accented([0.9, 0.2, 0.1], glow: 0.5) == [min(0.9 + 0.075, 1), 0.2, 0.1])
+        #expect(BeatGlow.accented([0.3, 0.2, 0.1], glow: 0) == [0.3, 0.2, 0.1])
+        #expect(BeatGlow.accented([], glow: 1) == [])
+    }
+
+    @Test func shiftKeepsIds() {
+        let schedule = Self.schedule([
+            GlowEvent(id: 1 | (1 << 63), time: 9.5, amplitude: 0.6, predicted: false),
+            Self.event(id: 2, time: 10),
+            Self.event(id: 3, time: 10.5),
+        ])
+        let shifted = schedule.shifted(by: 0.02)
+        #expect(shifted.events.map(\.id) == schedule.events.map(\.id))
+        #expect(zip(shifted.events, schedule.events).allSatisfy { abs($0.time - ($1.time + 0.02)) < 1e-12 })
+        #expect(shifted.events.map(\.amplitude) == schedule.events.map(\.amplitude))
+        #expect(shifted.bpm == schedule.bpm && shifted.period == schedule.period)
+        #expect(shifted.confidence == schedule.confidence && shifted.locked == schedule.locked)
+        #expect(BeatSchedule.empty.events.isEmpty && BeatSchedule.empty.period == nil && !BeatSchedule.empty.locked)
+    }
+
+    @Test func forgetsOldIds() {
+        var glow = BeatGlow()
+        let schedule = Self.schedule([Self.event(id: 9, time: 10)])
+        _ = glow.value(at: 10, schedule: schedule, refreshPeriod: Self.refresh)
+        #expect(glow.rememberedIDs == 1)
+        _ = glow.value(at: 12.5, schedule: .empty, refreshPeriod: Self.refresh)
+        #expect(glow.rememberedIDs == 0)
+    }
+}
