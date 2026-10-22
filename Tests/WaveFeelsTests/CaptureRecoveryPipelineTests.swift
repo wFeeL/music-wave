@@ -105,6 +105,45 @@ struct CaptureRecoveryPipelineTests {
         #expect(!pipeline.recoveryExhausted)
         #expect(!CaptureHints(access: .authorized, recoveryExhausted: pipeline.recoveryExhausted).stalled)
     }
+
+    /// В приостановке вывод звука перечитывается на смене списка и при тех же номерах
+    /// процессов, а перезапуск coreaudiod ставит подписки на вывод заново.
+    @Test func suspendedOutputStateRefreshesWithSameProcessIDs() async throws {
+        let fake = FakeTapCapture(behavior: .silent)
+        let list = FakeProcessList([FakeProcessList.player])
+        let processes = AudioProcessList()
+        processes.snapshotOverride = { list.processes }
+        processes.runningOutputOverride = { _ in list.outputting }
+        let output = OutputDeviceMonitor()
+        let pipeline = AudioPipeline(
+            store: FrameStore(),
+            processes: processes,
+            output: output,
+            makeCapture: { _ in fake }
+        )
+        defer { pipeline.stop() }
+        pipeline.source = FakeProcessList.source
+        pipeline.start()
+        let running = PipelineStatus.capturing(.running(sampleRate: FakeTapCapture.sampleRate, processCount: 1))
+        #expect(await waitUntil(.seconds(10)) { pipeline.status == running })
+
+        // Процесс выводил звук и при входе в приостановку: он ее не прерывает.
+        pipeline.suspendIdle()
+        #expect(pipeline.status == .suspended)
+        #expect(pipeline.sourceProcessOutputting())
+        let subscriptions = pipeline.outputWatchSubscriptionsForTesting
+
+        // Вывод кончился, список сменился с теми же номерами.
+        list.outputting = false
+        processes.onChange?()
+        #expect(!pipeline.sourceProcessOutputting())
+        #expect(pipeline.outputWatchSubscriptionsForTesting == subscriptions)
+
+        // coreaudiod перезапущен, номера те же: подписки ставятся заново.
+        output.onServiceRestart?()
+        #expect(pipeline.outputWatchSubscriptionsForTesting == subscriptions + 1)
+        #expect(pipeline.status == .suspended)
+    }
 }
 
 /// Список процессов для `AudioProcessList.snapshotOverride`: тест меняет его и сам вызывает
@@ -125,6 +164,8 @@ final class FakeProcessList {
     )
 
     var processes: [AudioProcessInfo]
+    /// Ответ `AudioProcessList.runningOutputOverride` для любого процесса.
+    var outputting = true
 
     init(_ processes: [AudioProcessInfo]) {
         self.processes = processes

@@ -11,6 +11,8 @@ final class AudioProcessList {
     /// Тесты: свой список процессов вместо Core Audio. Смену списка тест сообщает сам,
     /// вызывая `onChange`.
     var snapshotOverride: (@MainActor () -> [AudioProcessInfo])?
+    /// Тесты: выводит ли процесс звук, вместо `kAudioProcessPropertyIsRunningOutput`.
+    var runningOutputOverride: (@MainActor (AudioObjectID) -> Bool)?
 
     private var token: CAListenerToken?
 
@@ -44,6 +46,14 @@ final class AudioProcessList {
                 isRunningOutput: output != 0
             )
         }
+    }
+
+    /// Процесс сейчас выводит звук: `kAudioProcessPropertyIsRunningOutput` читается заново,
+    /// а не берется из снимка.
+    func isRunningOutput(_ object: AudioObjectID) -> Bool {
+        if let runningOutputOverride { return runningOutputOverride(object) }
+        let running: UInt32 = CAProperty.read(object, kAudioProcessPropertyIsRunningOutput, default: 0)
+        return running != 0
     }
 
     /// Приложения, у которых есть процессы со звуком: сначала те, что выводят звук сейчас,

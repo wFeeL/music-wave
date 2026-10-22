@@ -150,6 +150,8 @@ final class AudioPipeline {
     @ObservationIgnored private var outputWatchTokens: [CAListenerToken] = []
     /// Процессы, на которые сейчас подписан `outputWatchTokens`.
     @ObservationIgnored private var outputWatchIDs: [AudioObjectID] = []
+    /// Сколько раз ставились подписки на вывод (для тестов).
+    @ObservationIgnored private var outputWatchSubscriptions = 0
     @ObservationIgnored private var outputStart = OutputStartDetector(outputting: [])
     /// В приостановке: выводит ли звук хотя бы один процесс источника. Ставится при входе в
     /// приостановку, обновляют подписки на `kAudioProcessPropertyIsRunningOutput` и смена
@@ -477,11 +479,14 @@ final class AudioPipeline {
         processes.stop()
         processes.start()
         pushSettings()
-        processesChanged()
+        processesChanged(resubscribe: true)
         rebuild(reason: "перезапуск coreaudiod")
     }
 
-    private func processesChanged() {
+    /// В приостановке вывод звука процессами источника перечитывается на каждой смене списка,
+    /// даже если номера процессов те же. `resubscribe`: подписки на вывод ставятся заново и при
+    /// тех же номерах (после перезапуска coreaudiod прежние подписки не действуют).
+    private func processesChanged(resubscribe: Bool = false) {
         guard mode == .live || mode == .suspended else { return }
         let snapshot = processes.snapshot()
         let ids = ProcessMatcher.matches(source, in: snapshot)
@@ -492,7 +497,7 @@ final class AudioPipeline {
         }
         if mode == .suspended {
             // Новый помощник источника тоже может начать выводить звук.
-            if matchedProcesses.map(\.objectID) != outputWatchIDs {
+            if resubscribe || matchedProcesses.map(\.objectID) != outputWatchIDs {
                 watchOutput()
             }
             checkOutputStart()
@@ -512,6 +517,7 @@ final class AudioPipeline {
     /// Подписки на процессы источника, заново.
     private func watchOutput() {
         stopOutputWatch()
+        outputWatchSubscriptions += 1
         outputWatchIDs = matchedProcesses.map(\.objectID)
         outputWatchTokens = matchedProcesses.map { process in
             CAProperty.listen(process.objectID, kAudioProcessPropertyIsRunningOutput, queue: .main) { [weak self] in
@@ -551,11 +557,8 @@ final class AudioPipeline {
     /// Совпавшие процессы источника, которые сейчас выводят звук.
     private func outputtingProcessIDs() -> Set<AudioObjectID> {
         var result = Set<AudioObjectID>()
-        for process in matchedProcesses {
-            let running: UInt32 = CAProperty.read(process.objectID, kAudioProcessPropertyIsRunningOutput, default: 0)
-            if running != 0 {
-                result.insert(process.objectID)
-            }
+        for process in matchedProcesses where processes.isRunningOutput(process.objectID) {
+            result.insert(process.objectID)
         }
         return result
     }
@@ -650,8 +653,7 @@ final class AudioPipeline {
         if !adapterAvailable, source != .systemWide {
             let refreshed = matchedProcesses.map { process -> AudioProcessInfo in
                 var copy = process
-                let running: UInt32 = CAProperty.read(process.objectID, kAudioProcessPropertyIsRunningOutput, default: 0)
-                copy.isRunningOutput = running != 0
+                copy.isRunningOutput = self.processes.isRunningOutput(process.objectID)
                 return copy
             }
             setMatched(refreshed)
@@ -743,4 +745,5 @@ extension AudioPipeline {
     var analysisEngineForTesting: AnalysisEngine { engine }
     var demoForTesting: DemoAudioSource? { demo }
     var ringForTesting: SampleRingBuffer { ring }
+    var outputWatchSubscriptionsForTesting: Int { outputWatchSubscriptions }
 }
