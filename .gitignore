@@ -11,3 +11,7 @@ docs/
 .superpowers/
 .github/tester-prompt.md
 .github/workflows/tester.yml
+
+# Ключ подписи хранится только вне репозитория (см. README, «Сертификат подписи»)
+signing/wavefeels-signing.p12
+signing/password.txt

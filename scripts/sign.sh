@@ -2,8 +2,10 @@
 # Подписывает приложение самоподписанным сертификатом WaveFeels Self-Signed.
 # Использование: scripts/sign.sh <path/to/WaveFeels.app>
 #
-# Сертификат: секреты SIGNING_P12_BASE64 + SIGNING_P12_PASSWORD, если заданы, иначе
-# signing/wavefeels-signing.p12 + signing/password.txt. Нет ни того, ни другого:
+# Сертификат: секреты SIGNING_P12_BASE64 + SIGNING_P12_PASSWORD, если заданы, иначе пара
+# wavefeels-signing.p12 + password.txt из каталога, который находит find_signing_dir
+# (scripts/signing-source.sh: $WAVEFEELS_SIGNING_DIR, ~/Library/Application Support/WaveFeels/signing,
+# старый signing/ в репозитории). Ключ в git не хранится. Нет ни того, ни другого:
 # ad-hoc с предупреждением. Сертификат есть, но подпись не удалась: код 1 (тихий
 # откат на ad-hoc запрещен, он сбрасывает разрешение на звук).
 # Шаг доверия (add-trusted-cert) не используется: codesign подписывает по SHA-1,
@@ -16,6 +18,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/signing-source.sh
+source scripts/signing-source.sh
 
 if [[ $# -ne 1 || ! -d "$1" ]]; then
     echo "usage: $0 <path/to/WaveFeels.app>" >&2
@@ -61,10 +65,10 @@ if [[ -n "${SIGNING_P12_BASE64:-}" ]]; then
     P12="$WORK/signing.p12"
     printf '%s' "$SIGNING_P12_BASE64" | base64 --decode > "$P12"
     PW=$SIGNING_P12_PASSWORD
-elif [[ -f signing/wavefeels-signing.p12 && -f signing/password.txt ]]; then
-    echo "certificate source: signing/ files"
-    P12=signing/wavefeels-signing.p12
-    PW=$(tr -d '\r\n' < signing/password.txt)
+elif SIGNING_DIR=$(find_signing_dir); then
+    echo "certificate source: $SIGNING_DIR"
+    P12=$SIGNING_DIR/$SIGNING_P12_NAME
+    PW=$(tr -d '\r\n' < "$SIGNING_DIR/$SIGNING_PASSWORD_NAME")
 fi
 
 sign_nested() {
@@ -92,7 +96,7 @@ report() {
 }
 
 if [[ -z "$P12" ]]; then
-    echo "WARNING: no signing certificate (no secrets, no signing/ files), signing ad-hoc;"
+    echo "WARNING: no signing certificate (no secrets, no signing key found), signing ad-hoc;"
     echo "WARNING: audio capture permission will reset after every install"
     sign_nested --sign -
     codesign --force --timestamp=none --sign - --identifier "$IDENTIFIER" "$APP"
@@ -122,11 +126,6 @@ if [[ -z "$SHA" ]]; then
     exit 1
 fi
 echo "signing identity: $CERT_NAME ($SHA)"
-
-# Хэш без пробелов, табуляций, переводов строк, двоеточий и обертки H"...", строчными буквами.
-normalize_hash() {
-    printf '%s' "$1" | tr -d ' \t\r\n:' | tr '[:upper:]' '[:lower:]' | sed -E 's/^h"(.*)"$/\1/'
-}
 
 EXPECTED_LEAF=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")
 if [[ -z "$EXPECTED_LEAF" && -f signing/expected-leaf.txt ]]; then

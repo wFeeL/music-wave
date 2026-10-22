@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Собирает и подписывает WaveFeels на маке владельца, без GitHub Actions.
-# Использование: scripts/build-local.sh [--test] [--install] [--version X.Y.Z]
+# Использование: scripts/build-local.sh [--test] [--install] [--version X.Y.Z] [--signing-dir ПАПКА]
 #   --test     перед сборкой swift build --build-tests и swift test --skip-build;
 #   --install  закрыть запущенный WaveFeels, заменить /Applications/WaveFeels.app и открыть его;
+#   --signing-dir  папка с wavefeels-signing.p12 и password.txt: ключ копируется в
+#              ~/Library/Application Support/WaveFeels/signing, дальше он берется оттуда;
 #   --version  версия приложения, иначе самый новый тег v* (без v и суффикса, не ниже 1.0.0),
 #              иначе 1.0.0. Номер сборки: date +%Y%m%d%H.
 # Цепочка та же, что в ci-mac.sh: swift build -c release, адаптер, bundle.sh, sign.sh.
@@ -12,13 +14,19 @@
 # Рассчитан на одни Command Line Tools: без actool иконка остается в .icns (RELEASE не задается),
 # если swift test не находит фреймворк тестов, тесты пропускаются с подсказкой.
 # git не обязателен: из архива GitHub (Download ZIP) без .git версия будет 1.0.0.
-# Подпись: sign.sh с сертификатом из signing/ во временной связке ключей; после выхода список
-# связок ключей пользователя проверяется еще раз, даже если сборку прервали.
+# Подпись: sign.sh с сертификатом во временной связке ключей; после выхода список связок
+# ключей пользователя проверяется еще раз, даже если сборку прервали. Ключ в git не хранится,
+# его ищет find_signing_dir (scripts/signing-source.sh). Если ключа нигде нет, а в
+# ~/Downloads/music-wave-develop*/signing/ лежит старая копия с тем же хэшем сертификата, она
+# импортируется. Иначе скрипт останавливается до сборки: подпись ad-hoc не используется.
 # Весь вывод дублируется в dist/build-local.log. Скрипт рассчитан на bash 3.2 и BSD-утилиты.
 set -euo pipefail
 
+START_DIR=$PWD
 cd "$(dirname "$0")/.."
 ROOT=$PWD
+# shellcheck source=scripts/signing-source.sh
+source scripts/signing-source.sh
 
 MIN_VERSION=1.0.0
 APP="$ROOT/dist/WaveFeels.app"
@@ -27,6 +35,7 @@ INSTALLED=/Applications/WaveFeels.app
 usage() {
     cat <<'EOF'
 Использование: bash scripts/build-local.sh [--test] [--install] [--version X.Y.Z]
+                                           [--signing-dir ПАПКА]
 
 Собирает WaveFeels на этом маке и подписывает тем же сертификатом, что и
 сборки из релизов, поэтому разрешение на запись звука сохраняется.
@@ -36,6 +45,11 @@ usage() {
   --install         заменить WaveFeels в «Программах» новой сборкой и открыть
   --version X.Y.Z   версия приложения, по умолчанию из последнего тега v*,
                     но не ниже 1.0.0; без git 1.0.0
+  --signing-dir ПАПКА
+                    папка с wavefeels-signing.p12 и password.txt, например
+                    ~/Downloads/music-wave-develop/signing. Ключ копируется в
+                    «~/Library/Application Support/WaveFeels/signing», это нужно
+                    один раз, дальше он берется оттуда
   -h, --help        показать эту справку
 
 Нужны Command Line Tools: xcode-select --install.
@@ -51,6 +65,7 @@ RUN_TESTS=0
 INSTALL=0
 OPENED=0
 VERSION=""
+SIGNING_DIR_ARG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --test) RUN_TESTS=1 ;;
@@ -64,6 +79,15 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --version=*) VERSION=${1#--version=} ;;
+        --signing-dir)
+            if [[ $# -lt 2 ]]; then
+                echo "После --signing-dir нужна папка с ключом, например --signing-dir ~/Downloads/music-wave-develop/signing" >&2
+                exit 2
+            fi
+            SIGNING_DIR_ARG=$2
+            shift
+            ;;
+        --signing-dir=*) SIGNING_DIR_ARG=${1#--signing-dir=} ;;
         -h | --help)
             usage
             exit 0
@@ -77,6 +101,23 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+if [[ -n "$SIGNING_DIR_ARG" ]]; then
+    # Тильда в кавычках не раскрывается, относительный путь считается от папки запуска.
+    if [[ "$SIGNING_DIR_ARG" == "~" || "$SIGNING_DIR_ARG" == "~/"* ]]; then
+        SIGNING_DIR_ARG="$HOME${SIGNING_DIR_ARG:1}"
+    elif [[ "$SIGNING_DIR_ARG" != /* ]]; then
+        SIGNING_DIR_ARG="$START_DIR/$SIGNING_DIR_ARG"
+    fi
+    # Можно указать и папку, внутри которой лежит signing/.
+    if ! signing_dir_has_pair "$SIGNING_DIR_ARG" && signing_dir_has_pair "$SIGNING_DIR_ARG/signing"; then
+        SIGNING_DIR_ARG="$SIGNING_DIR_ARG/signing"
+    fi
+    if ! signing_dir_has_pair "$SIGNING_DIR_ARG"; then
+        echo "В папке «$SIGNING_DIR_ARG» нет двух файлов: wavefeels-signing.p12 и password.txt." >&2
+        exit 2
+    fi
+fi
 
 if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "Версия должна выглядеть как 1.0.0, получено: $VERSION" >&2
@@ -270,12 +311,50 @@ if [[ ! -x /usr/bin/perl ]]; then
     add_warning "нет /usr/bin/perl, Now Playing не заработает"
 fi
 
-if [[ -z "${SIGNING_P12_BASE64:-}" ]] &&
-    [[ ! -f signing/wavefeels-signing.p12 || ! -f signing/password.txt ]]; then
-    fail "Нет сертификата подписи: нужны файлы signing/wavefeels-signing.p12 и signing/password.txt. Положите их в папку signing и запустите скрипт снова. С другой подписью macOS снова спросит доступ к звуку."
+# --- ключ подписи ---
+
+STEP="ключ подписи"
+EXPECTED_LEAF=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")
+if [[ -z "$EXPECTED_LEAF" && -f signing/expected-leaf.txt ]]; then
+    EXPECTED_LEAF=$(normalize_hash "$(cat signing/expected-leaf.txt)")
 fi
-if [[ -z "${SIGNING_EXPECTED_LEAF:-}" && ! -f signing/expected-leaf.txt ]]; then
+if [[ -z "$EXPECTED_LEAF" ]]; then
     fail "Нет файла signing/expected-leaf.txt, без него подпись не проверить. Скачайте код заново целиком."
+fi
+
+# Сверяет хэш сертификата в папке $1 с ожидаемым и копирует ключ в Application Support.
+# Чужой сертификат не импортируется: с ним macOS снова спросит доступ к звуку.
+import_checked_key() { # папка
+    local src=$1 rc=0
+    signing_leaf_matches "$src" "$EXPECTED_LEAF" || rc=$?
+    case $rc in
+        0) echo "Хэш сертификата совпал с ожидаемым." ;;
+        1) fail "Сертификат в «$src» не тот, которым подписано установленное приложение. С ним macOS снова спросит доступ к звуку, поэтому ключ не импортирован. Нужна копия с ключом WaveFeels Self-Signed." ;;
+        *)
+            warn "Хэш сертификата до подписи проверить не удалось (openssl не прочитал файл). Проверка пройдет после подписи."
+            ;;
+    esac
+    if ! import_signing_dir "$src"; then
+        fail "Не удалось скопировать ключ в «$(signing_app_support_dir)»."
+    fi
+    echo "Ключ сохранен в «$(signing_app_support_dir)», дальше он берется оттуда."
+    # Явно выбранный ключ не должен проигрывать переменной WAVEFEELS_SIGNING_DIR.
+    WAVEFEELS_SIGNING_DIR=$(signing_app_support_dir)
+    export WAVEFEELS_SIGNING_DIR
+}
+
+if [[ -n "$SIGNING_DIR_ARG" ]]; then
+    say "Импортирую ключ подписи из «$SIGNING_DIR_ARG»"
+    import_checked_key "$SIGNING_DIR_ARG"
+elif [[ -n "${SIGNING_P12_BASE64:-}" ]]; then
+    echo "Ключ подписи: из переменных SIGNING_P12_BASE64 и SIGNING_P12_PASSWORD"
+elif KEY_DIR=$(find_signing_dir); then
+    echo "Ключ подписи: $KEY_DIR"
+elif OLD_COPY=$(find_downloads_signing_dir "$EXPECTED_LEAF"); then
+    say "Нашел старую копию с ключом подписи: «$OLD_COPY»"
+    import_checked_key "$OLD_COPY"
+else
+    fail "Не нашел ключ подписи. Запустите: bash scripts/build-local.sh --signing-dir <папка со старой копией>/signing --install"
 fi
 
 # --- версия ---
