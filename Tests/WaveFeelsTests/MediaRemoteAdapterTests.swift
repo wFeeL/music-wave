@@ -81,7 +81,86 @@ struct MediaRemoteAdapterTests {
         #expect(adapter.lastTestExitCode == SIGKILL)
         #expect(adapter.availability == .available)
         #expect(fake.defaults.integer(forKey: MediaRemoteAdapter.testExitCodeKey) == Int(SIGKILL))
-        #expect(fake.defaults.string(forKey: MediaRemoteAdapter.testedBuildKey) == "1")
+        let key = MediaRemoteAdapter.testCacheKey(build: "1", system: ProcessInfo.processInfo.operatingSystemVersionString)
+        #expect(fake.defaults.string(forKey: MediaRemoteAdapter.testedBuildKey) == key)
+    }
+
+    /// Результат `test` хранится для пары «сборка приложения и сборка macOS»: после обновления
+    /// системы проверка идет заново, при той же паре берется из кэша.
+    @Test @MainActor func testCacheIsKeyedByOSBuild() async throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'test') { exit 7; }
+            if ($cmd eq 'stream') { print $empty; sleep 30; }
+            """#)
+        defer { fake.remove() }
+        fake.defaults.set(0, forKey: MediaRemoteAdapter.testExitCodeKey)
+        fake.defaults.set(MediaRemoteAdapter.testCacheKey(build: "1", system: "macOS old"), forKey: MediaRemoteAdapter.testedBuildKey)
+
+        let updated = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, system: "macOS new")
+        updated.start()
+        #expect(updated.availability == .checking)
+        let tested = await waitUntil(.seconds(30)) { updated.lastTestExitCode == 7 }
+        updated.stop()
+        #expect(tested)
+        #expect(updated.availability == .unavailable(exitCode: 7, stderr: ""))
+        #expect(fake.calls("test") == 1)
+        let key = MediaRemoteAdapter.testCacheKey(build: "1", system: "macOS new")
+        #expect(fake.defaults.string(forKey: MediaRemoteAdapter.testedBuildKey) == key)
+
+        let again = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, system: "macOS new")
+        again.start()
+        defer { again.stop() }
+        #expect(again.availability == .unavailable(exitCode: 7, stderr: ""))
+        #expect(again.lastTestExitCode == 7)
+        #expect(fake.calls("test") == 1)
+    }
+
+    /// «Тишина адаптера»: работающий адаптер уходит в запасной режим, треки других приложений
+    /// его не возвращают, трек источника (`clearSilence`) и новый запуск возвращают.
+    @Test @MainActor func silentAdapterStaysInFallbackUntilSourceTrackOrRestart() async throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'stream' && $launch == 1) { print track('One'); wait_for('go1'); print track('Two'); sleep 30; }
+            if ($cmd eq 'stream') { print track('Three'); sleep 30; }
+            """#)
+        defer { fake.remove() }
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults)
+        adapter.start()
+        defer { adapter.stop() }
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "One" })
+        #expect(adapter.isAvailable)
+
+        adapter.markSilent()
+        #expect(adapter.availability == .silent)
+        #expect(!adapter.isAvailable)
+        fake.touch("go1")
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "Two" })
+        #expect(adapter.availability == .silent)
+
+        adapter.clearSilence()
+        #expect(adapter.availability == .available)
+
+        adapter.markSilent()
+        adapter.stop()
+        adapter.start()
+        #expect(adapter.availability == .available)
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "Three" })
+        #expect(adapter.availability == .available)
+    }
+
+    /// Пометить молчащим можно только работающий адаптер.
+    @Test @MainActor func onlyAvailableAdapterCanBeMarkedSilent() throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'test') { sleep 30; }
+            """#)
+        defer { fake.remove() }
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults)
+        adapter.start()
+        defer { adapter.stop() }
+        #expect(adapter.availability == .checking)
+        adapter.markSilent()
+        #expect(adapter.availability == .checking)
+        adapter.clearSilence()
+        #expect(adapter.availability == .checking)
     }
 
     @Test @MainActor func longLivedStreamDeathsDoNotAccumulate() async throws {
@@ -260,8 +339,13 @@ private struct FakeAdapter {
 
     /// Сколько раз запускался `stream`.
     func streamLaunches() -> Int {
+        calls("stream")
+    }
+
+    /// Сколько раз скрипт запускался с командой `command`.
+    func calls(_ command: String) -> Int {
         let text = (try? String(contentsOf: app.appendingPathComponent("calls.log"), encoding: .utf8)) ?? ""
-        return text.split(separator: "\n").filter { $0 == "stream" }.count
+        return text.split(separator: "\n").filter { $0 == command }.count
     }
 
     func remove() {

@@ -11,17 +11,18 @@ typealias PaletteColor = WaveCore.RGBColor
 ///
 /// Цикл 10 Гц на главном акторе: уровень из `FrameStore` идет в `ActivityGate`, Now Playing
 /// источника в `IslandInputs`, затем `IslandStateMachine`. Там же настройки и то, скрыт ли
-/// остров (тогда анализ идет реже), передаются в `AudioPipeline`, а после 10 с тишины захват
-/// приостанавливается, если Now Playing работает и сообщит о старте воспроизведения. Сон
-/// останавливает захват и адаптер, пробуждение через 1 с запускает их заново (`systemWillSleep`,
-/// `systemDidWake`, подписки в `AppDelegate`).
+/// остров (тогда анализ идет реже), передаются в `AudioPipeline`. После 10 с тишины захват
+/// приостанавливается, только если Now Playing работает и с выбора источника хотя бы раз
+/// прислал его трек (`IdleCapturePolicy`); пока захват стоит, конвейер сам следит, не начал ли
+/// источник выводить звук. Если источник звучит 2 минуты, а Now Playing о нем молчит, адаптер
+/// считается неработающим («тишина адаптера», `AdapterSilenceMonitor`). Сон останавливает захват
+/// и адаптер, пробуждение через 1 с запускает их заново (`systemWillSleep`, `systemDidWake`,
+/// подписки в `AppDelegate`).
 /// Подписок и задач в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
 @Observable
 final class AppModel {
     static let tickInterval: Duration = .milliseconds(100)
-    /// Сколько секунд тишины до остановки IOProc.
-    static let idleSuspendDelay = 10.0
     static let logTailLines = 200
     static let privacyAudioCaptureURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"
     static let privacyScreenCaptureURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
@@ -87,7 +88,11 @@ final class AppModel {
     @ObservationIgnored var defaultSourceResolver: (@MainActor () -> AudioSource)?
     @ObservationIgnored private var appliedSource: AudioSource?
     @ObservationIgnored private var sourceAppRunning = false
-    @ObservationIgnored private var silentSince: Double?
+    /// Когда остановить IOProc в тишине (через 10 с) и когда вернуть.
+    @ObservationIgnored private var idlePolicy = IdleCapturePolicy()
+    /// С выбора источника (и с последнего пробуждения) Now Playing хотя бы раз прислал его трек.
+    @ObservationIgnored private var sourceTrackSeen = false
+    @ObservationIgnored private var adapterSilence = AdapterSilenceMonitor()
     @ObservationIgnored private var watchdogExhausted = false
     @ObservationIgnored private var cachedSigning: String?
     @ObservationIgnored private var pulse = BeatPulse()
@@ -200,7 +205,7 @@ final class AppModel {
     private func stopSources() {
         pipeline.stop()
         adapter.stop()
-        silentSince = nil
+        idlePolicy.reset()
     }
 
     // MARK: - Сон и блокировка экрана
@@ -214,7 +219,7 @@ final class AppModel {
         log("сон: захват и Now Playing остановлены")
         pipeline.stopForSleep()
         adapter.stop()
-        silentSince = nil
+        idlePolicy.reset()
     }
 
     /// `NSWorkspace.didWakeNotification`: через `wakeDelay` возвращается режим до сна (захват
@@ -243,7 +248,10 @@ final class AppModel {
             adapter.stop()
         }
         asleep = false
-        silentSince = nil
+        idlePolicy.reset()
+        // Адаптер перезапускается: его проверка и «тишина адаптера» начинаются заново.
+        sourceTrackSeen = false
+        adapterSilence.reset()
         defaultSourceStale = true
         applySettings()
         refreshSourceAppRunning()
@@ -274,7 +282,7 @@ final class AppModel {
     func setPaused(_ paused: Bool) {
         guard paused != settings.paused else { return }
         settings.paused = paused
-        silentSince = nil
+        idlePolicy.reset()
         log(paused ? "визуализация приостановлена" : "визуализация возобновлена")
         applySettings()
     }
@@ -466,6 +474,12 @@ final class AppModel {
         let info = adapter.info
         let sourceInfo = info.flatMap { Self.belongs($0, to: source) ? $0 : nil }
         let sourcePlaying = sourceInfo?.isPlaying ?? false
+        if sourceInfo != nil {
+            sourceTrackSeen = true
+            if adapter.availability == .silent {
+                adapter.clearSilence()
+            }
+        }
         if let sourceInfo, sourceInfo != lastTrack {
             lastTrack = sourceInfo
             updateArtwork()
@@ -480,6 +494,7 @@ final class AppModel {
         if !settings.paused {
             manageIdleCapture(audioActive: audioActive, sourcePlaying: sourcePlaying, now: now)
         }
+        watchAdapterSilence(audioActive: audioActive, now: now)
 
         let inputs = IslandInputs(
             audioActive: audioActive,
@@ -519,6 +534,8 @@ final class AppModel {
         let source = effectiveSource
         if source != appliedSource {
             appliedSource = source
+            sourceTrackSeen = false
+            adapterSilence.reset()
             pipeline.source = source
             if let track = lastTrack, !Self.belongs(track, to: source) {
                 lastTrack = nil
@@ -537,28 +554,44 @@ final class AppModel {
         pipeline.paused = settings.paused
     }
 
-    /// После 10 с тишины IOProc останавливается, но только если Now Playing работает: без него
-    /// о начале музыки узнает лишь tap. Возобновление по старту воспроизведения или если
-    /// адаптер перестал работать.
+    /// После 10 с тишины IOProc останавливается, но только если Now Playing работает и с выбора
+    /// источника хотя бы раз прислал его трек: иначе о начале музыки узнает лишь tap (Telegram,
+    /// игры, весь звук без плеера). Возобновление по звуку, по старту воспроизведения, когда
+    /// приостановка перестала быть оправданной, а еще сам конвейер возобновляет захват, когда
+    /// процесс источника начал выводить звук (`AudioPipeline.suspendIdle()`).
     private func manageIdleCapture(audioActive: Bool, sourcePlaying: Bool, now: Double) {
-        let suspended = pipeline.status == .suspended
-        if audioActive || sourcePlaying {
-            silentSince = nil
-            if suspended { pipeline.resume() }
-            return
-        }
-        if suspended {
-            if !adapter.isAvailable {
-                silentSince = nil
-                pipeline.resume()
-            }
-            return
-        }
-        let since = silentSince ?? now
-        silentSince = since
-        if now - since >= Self.idleSuspendDelay, adapter.isAvailable {
+        let inputs = IdleCapturePolicy.Inputs(
+            audioActive: audioActive,
+            sourcePlaying: sourcePlaying,
+            adapterAvailable: adapter.isAvailable,
+            sourceReportsNowPlaying: sourceTrackSeen,
+            suspended: pipeline.status == .suspended
+        )
+        switch idlePolicy.update(inputs, now: now) {
+        case .none:
+            break
+        case .suspend:
             pipeline.suspendIdle()
+        case .resume:
+            pipeline.resume()
         }
+    }
+
+    /// «Тишина адаптера»: источник по tap звучит 2 минуты, а Now Playing ни разу не прислал его
+    /// трек. Адаптер помечается неработающим, приложение переходит в запасной режим; трек
+    /// источника, пробуждение или перезапуск приложения возвращают его. В демо tap не слышит
+    /// источник, поэтому там не считается.
+    private func watchAdapterSilence(audioActive: Bool, now: Double) {
+        guard arguments.demoFile == nil else { return }
+        let silent = adapterSilence.update(
+            sourceAudible: audioActive,
+            trackSeen: sourceTrackSeen,
+            adapterAvailable: adapter.isAvailable,
+            now: now
+        )
+        guard silent else { return }
+        log("тишина адаптера: источник \(effectiveSource.displayName) звучит \(Int(adapterSilence.limit)) с без данных Now Playing")
+        adapter.markSilent()
     }
 
     // MARK: - Запущенные приложения
@@ -1023,6 +1056,7 @@ extension AppModel {
         case .checking: "проверка"
         case .available: "работает"
         case .unavailable(let exitCode, _): "не работает, код \(exitCode)"
+        case .silent: "не работает: тишина адаптера (источник звучит 2 мин, а данных о его треке нет)"
         }
     }
 

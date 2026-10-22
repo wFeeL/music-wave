@@ -17,6 +17,10 @@ enum AdapterAvailability: Equatable, Sendable {
     case checking
     case available
     case unavailable(exitCode: Int32, stderr: String)
+    /// «Тишина адаптера»: процессы живы, но о выбранном источнике, который звучит, Now Playing
+    /// так ничего и не прислал (`AppModel`, `AdapterSilenceMonitor`). Запасной режим до трека
+    /// источника, пробуждения или перезапуска приложения.
+    case silent
 }
 
 /// Сроки адаптера. Значения по умолчанию рабочие; тесты подставляют короткие.
@@ -40,13 +44,16 @@ struct AdapterTiming: Sendable {
 /// «Сейчас играет» через ungive/mediaremote-adapter: `/usr/bin/perl` запускает скрипт адаптера,
 /// тот загружает `MediaRemoteAdapter.framework` из бандла.
 ///
-/// `start()` один раз на версию приложения (`CFBundleVersion`) запускает `test`: при тишине он
-/// показывает в Пункте управления фиктивную запись, поэтому результат кэшируется. Завис `test`:
+/// `start()` один раз на версию приложения (`CFBundleVersion`) и сборку macOS запускает `test`:
+/// при тишине он показывает в Пункте управления фиктивную запись, поэтому результат кэшируется,
+/// а после обновления системы проверка идет заново. Завис `test`:
 /// SIGTERM через 10 с, SIGKILL еще через 2 с, поток стартует в любом случае. Затем идет
 /// `stream --micros --debounce=100`; первая строка с настоящим треком тоже считается
 /// подтверждением, что адаптер работает. Умерший поток перезапускается через 2, 4, 8 с, не больше
 /// 5 раз подряд (поток, проживший минуту, счетчик обнуляет); после перезапуска прежний трек
-/// держится до первого настоящего трека, но не дольше 3 с. Дочерние процессы завершаются
+/// держится до первого настоящего трека, но не дольше 3 с. `markSilent()` переводит работающий
+/// адаптер в запасной режим («тишина адаптера»), трек выбранного источника (`clearSilence()`)
+/// или новый `start()` его возвращают. Дочерние процессы завершаются
 /// (SIGTERM) только в `stop()`, очистки в `deinit` нет: владелец вызывает `stop()` перед выходом.
 @MainActor
 @Observable
@@ -69,6 +76,8 @@ final class MediaRemoteAdapter {
 
     private let paths: AdapterPaths?
     private let build: String?
+    /// Сборка macOS: вместе с `build` образует ключ кэша проверки.
+    private let system: String
     private let defaults: UserDefaults
     private let timing: AdapterTiming
 
@@ -94,11 +103,29 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var commands: [Int: AdapterProcess] = [:]
 
-    init(bundle: Bundle, defaults: UserDefaults = .standard, timing: AdapterTiming = .standard) {
+    /// `system`: описание версии macOS со сборкой; тесты подставляют свое.
+    init(
+        bundle: Bundle,
+        defaults: UserDefaults = .standard,
+        timing: AdapterTiming = .standard,
+        system: String = ProcessInfo.processInfo.operatingSystemVersionString
+    ) {
         paths = AdapterPaths(bundle: bundle)
         build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        self.system = system
         self.defaults = defaults
         self.timing = timing
+    }
+
+    /// Ключ кэша проверки: номер сборки приложения и версия macOS со сборкой
+    /// («Version 26.0 (Build 25A354)»). Новая сборка любого из двух запускает `test` заново.
+    nonisolated static func testCacheKey(build: String, system: String) -> String {
+        "\(build) | \(system)"
+    }
+
+    /// Ключ кэша для этого приложения и этой системы; `nil`, если номера сборки нет.
+    private var cacheKey: String? {
+        build.map { Self.testCacheKey(build: $0, system: system) }
     }
 
     func start() {
@@ -111,11 +138,11 @@ final class MediaRemoteAdapter {
             log("адаптер недоступен: \(Self.missingFilesMessage)")
             return
         }
-        if let build, defaults.string(forKey: Self.testedBuildKey) == build {
+        if let cacheKey, defaults.string(forKey: Self.testedBuildKey) == cacheKey {
             let code = Int32(truncatingIfNeeded: defaults.integer(forKey: Self.testExitCodeKey))
             lastTestExitCode = code
             availability = code == 0 ? .available : .unavailable(exitCode: code, stderr: "")
-            log("проверка адаптера из кэша (сборка \(build)): код \(code)")
+            log("проверка адаптера из кэша (\(cacheKey)): код \(code)")
             launchStream(restart: false)
         } else {
             availability = .checking
@@ -169,6 +196,23 @@ final class MediaRemoteAdapter {
             try? await Task.sleep(for: timing.sendTimeout)
             self?.commands[token]?.terminate()
         }
+    }
+
+    /// «Тишина адаптера»: работающий адаптер переводится в запасной режим. Поток продолжает
+    /// работать, но его треки других приложений доступность не возвращают; вернет ее
+    /// `clearSilence()` (трек выбранного источника) или следующий `start()` (пробуждение,
+    /// перезапуск приложения).
+    func markSilent() {
+        guard availability == .available else { return }
+        availability = .silent
+        log("адаптер помечен неработающим: тишина адаптера")
+    }
+
+    /// Пришел трек выбранного источника: адаптер снова работает.
+    func clearSilence() {
+        guard availability == .silent else { return }
+        availability = .available
+        log("тишина адаптера кончилась: пришел трек источника")
     }
 
     /// Защита от бессмысленной длительности: бесконечная, отрицательная или больше суток
@@ -245,9 +289,9 @@ final class MediaRemoteAdapter {
         testTimer?.cancel()
         testTimer = nil
         lastTestExitCode = status
-        if let build {
+        if let cacheKey {
             defaults.set(Int(status), forKey: Self.testExitCodeKey)
-            defaults.set(build, forKey: Self.testedBuildKey)
+            defaults.set(cacheKey, forKey: Self.testedBuildKey)
         }
         if status == 0 {
             availability = .available
@@ -328,7 +372,8 @@ final class MediaRemoteAdapter {
         }
         guard parsed != nil else { return }
         restarts = 0
-        if availability != .available {
+        // Из «тишины адаптера» выводит только трек выбранного источника (`clearSilence()`).
+        if availability != .available, availability != .silent {
             availability = .available
             log("адаптер доступен: поток выдал трек")
         }
