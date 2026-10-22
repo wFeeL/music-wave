@@ -6,14 +6,15 @@
 #            ядра считается провалом. Остров обязан появиться (строка «остров: скрыт -> свернут»
 #            в логе приложения), иначе замер ничего не говорит и тоже считается провалом.
 #   silence: --demo Demo/silence.wav --fake-notch --no-capture --exit-after <секунды+10>; среднее
-#            должно быть меньше 1 %.
+#            должно быть меньше 1 %. Остров обязан остаться скрытым: в тишине анализ идет с частотой
+#            15 Гц вместо 60 и ничего не рисуется, иначе замер не про простой.
 # Демо никогда не создает tap, поэтому захват звука в CI не запускается.
 #
 # CPU считается как прирост накопленного процессорного времени (`ps -o time=`) за окно в
 # <секунды> (по умолчанию 30) после прогрева 5 с, деленный на прошедшее время. `%cpu` из `ps` не
 # годится: это затухающее среднее. Внутри окна раз в секунду пишется загрузка за эту секунду и RSS
-# (`ps -o rss=`). В середине окна прогона play `sample <pid> 1` снимает стеки, верх дерева вызовов
-# идет в cpu-sample.txt. Фоновый сторож убивает приложение через <секунды+20> (в macOS нет timeout).
+# (`ps -o rss=`). В середине окна прогона play `sample <pid> 3 -mayDie` снимает стеки всех потоков,
+# в cpu-sample.txt идут итоги по потокам и самые частые функции на вершине стека. Фоновый сторож убивает приложение через <секунды+20> (в macOS нет timeout).
 #
 # Итог в $OUT/cpu.txt (по умолчанию ci-out/cpu.txt), он же печатается в stdout. Код 0, если оба
 # прогона в пределах, 1 при провале, 2 при ошибке вызова. Рассчитан на bash 3.2 и BSD-утилиты.
@@ -32,6 +33,7 @@ DURATION=${2:-30}
 WARMUP=5
 PLAY_LIMIT=15
 SILENCE_LIMIT=1
+SAMPLE_SECONDS=3
 SAMPLE_LIMIT=60
 
 cd "$(dirname "$0")/.." || exit 2
@@ -127,17 +129,18 @@ watchdog() { # pid, лимит в секундах
     done
 }
 
-# Верх дерева вызовов из вывода sample: заголовок, первые строки «Call graph» и самые частые
-# функции на вершине стека. Длинные строки обрезаются.
+# Сжатый вывод sample: заголовок, число сэмплов по каждому потоку (верхние строки «Call graph»
+# с именем потока и очереди) и раздел «Sort by top of stack»: самые частые функции на вершине
+# стека со счетчиками. Всего около 120 строк, длинные строки обрезаются.
 trim_sample() { # файл sample
     awk '
-        /^Call graph:/ { section = "graph"; shown = 0; print; next }
+        /^Call graph:/ { section = "graph"; print "Samples per thread:"; next }
         /^Total number in stack/ { section = "skip"; next }
         /^Sort by top of stack/ { section = "top"; shown = 0; print ""; print; next }
         /^Binary Images:/ { section = "done"; next }
         section == "" && NR <= 20 { print; next }
-        section == "graph" && shown < 120 { print substr($0, 1, 200); shown++; next }
-        section == "top" && shown < 30 && NF { print substr($0, 1, 200); shown++; next }
+        section == "graph" && /^    [0-9]+ Thread_/ && threads < 30 { print substr($0, 1, 200); threads++; next }
+        section == "top" && shown < 70 && NF { print substr($0, 1, 200); shown++; next }
     ' "$1"
 }
 
@@ -146,7 +149,7 @@ trim_sample() { # файл sample
 SAMPLE_PID=""
 SAMPLE_WD=""
 take_sample() { # pid
-    sample "$1" 1 -file "$TMP/sample.txt" > "$TMP/sample.log" 2>&1 &
+    sample "$1" "$SAMPLE_SECONDS" -mayDie -file "$TMP/sample.txt" > "$TMP/sample.log" 2>&1 &
     SAMPLE_PID=$!
     watchdog "$SAMPLE_PID" "$SAMPLE_LIMIT" > /dev/null 2>&1 &
     SAMPLE_WD=$!
@@ -158,7 +161,7 @@ finish_sample() {
     kill "$SAMPLE_WD" 2>/dev/null
     wait "$SAMPLE_WD" 2>/dev/null
     {
-        echo "# sample <pid> 1 of the play run (top of the call tree, trimmed)"
+        echo "# sample <pid> $SAMPLE_SECONDS -mayDie of the play run: samples per thread and heaviest top-of-stack frames"
         echo
         if [[ $rc -eq 0 && -s "$TMP/sample.txt" ]]; then
             trim_sample "$TMP/sample.txt"
@@ -170,7 +173,7 @@ finish_sample() {
 }
 
 # Один прогон: имя, предел среднего в процентах, сравнение (max: не больше предела, below: строго
-# меньше), проверять ли появление острова, аргументы приложения.
+# меньше), каким должен быть остров (shown или hidden), аргументы приложения.
 probe() {
     local name=$1 limit=$2 compare=$3 expect_island=$4
     shift 4
@@ -267,12 +270,15 @@ probe() {
         reasons="$reasons; average $average % is over the limit of $limit %"
     fi
     if grep -q 'остров: скрыт -> свернут' "$app_log"; then
-        report "island: shown"
-    elif [[ $expect_island -eq 1 ]]; then
-        report "island: NOT shown"
-        reasons="$reasons; island never appeared, the measurement does not cover drawing"
+        report "island: shown (expected $expect_island)"
+        if [[ $expect_island == hidden ]]; then
+            reasons="$reasons; island appeared in silence"
+        fi
     else
-        report "island: hidden"
+        report "island: hidden (expected $expect_island)"
+        if [[ $expect_island == shown ]]; then
+            reasons="$reasons; island never appeared, the measurement does not cover drawing"
+        fi
     fi
     if [[ -n "$reasons" ]]; then
         verdict="FAIL (${reasons#; })"
@@ -297,8 +303,8 @@ report "method: cumulative CPU time from ps over a ${DURATION} s window after ${
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 
 EXIT_AFTER=$((DURATION + 10))
-probe play "$PLAY_LIMIT" max 1 --demo "$DEMO_DIR/demo.wav" --fake-notch --exit-after "$EXIT_AFTER"
-probe silence "$SILENCE_LIMIT" below 0 --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture --exit-after "$EXIT_AFTER"
+probe play "$PLAY_LIMIT" max shown --demo "$DEMO_DIR/demo.wav" --fake-notch --exit-after "$EXIT_AFTER"
+probe silence "$SILENCE_LIMIT" below hidden --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture --exit-after "$EXIT_AFTER"
 
 report ""
 if [[ $FAILED -eq 0 ]]; then
