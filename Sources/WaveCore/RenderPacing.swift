@@ -126,6 +126,10 @@ public struct RenderPacing: Sendable {
     /// Интервалы всех корзин подряд для `medianInterval(last:)`.
     private var intervals = Ring<Double>(capacity: RenderPacing.window)
     private var last: Mark?
+    /// Сколько интервалов записано за все время.
+    private var recorded = 0
+    /// `recorded` на момент последнего `refreshedMedian`.
+    private var medianRecorded: Int?
 
     public init() {}
 
@@ -155,6 +159,7 @@ public struct RenderPacing: Sendable {
         )
         buckets[bucket, default: Ring(capacity: Self.window)].append(sample)
         intervals.append(interval)
+        recorded += 1
     }
 
     /// Сводка корзины при периоде экрана `refreshPeriod` (без конечного положительного 1/60 с);
@@ -191,6 +196,16 @@ public struct RenderPacing: Sendable {
         let recent = intervals.last(count).sorted()
         let middle = count / 2
         return count.isMultiple(of: 2) ? (recent[middle - 1] + recent[middle]) / 2 : recent[middle]
+    }
+
+    /// Медиана последних `count` интервалов (`medianInterval(last:)`), пересчитанная не чаще
+    /// раза в `every` новых интервалов: сортировка окна на каждом кадре не нужна. `nil`, пока
+    /// интервалов меньше `count` или пересчитывать еще рано (прежнее значение в силе).
+    public mutating func refreshedMedian(last count: Int, every: Int) -> Double? {
+        guard intervals.count >= count else { return nil }
+        if let medianRecorded, recorded - medianRecorded < every { return nil }
+        medianRecorded = recorded
+        return medianInterval(last: count)
     }
 
     /// Процентиль по ближайшему рангу в отсортированном непустом массиве.

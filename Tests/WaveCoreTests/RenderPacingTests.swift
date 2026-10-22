@@ -141,6 +141,29 @@ struct RenderPacingTests {
         #expect(abs((pacing.medianInterval(last: 1) ?? 0) - 0.050) < 1e-9)
     }
 
+    /// Медиана пересчитывается на 60-м интервале и дальше раз в 15 новых.
+    @Test func medianIsRefreshedEveryFifteenIntervals() throws {
+        var pacing = RenderPacing()
+        func refresh() -> Double? {
+            pacing.refreshedMedian(last: 60, every: 15)
+        }
+        record([Double](repeating: 0.0167, count: 59), into: &pacing)
+        #expect(refresh() == nil)
+        record([0.0167], into: &pacing, start: 10)
+        let first = try #require(refresh())
+        #expect(abs(first - 0.0167) < 1e-9)
+
+        record([Double](repeating: 0.0333, count: 14), into: &pacing, start: 30)
+        #expect(refresh() == nil)
+        record([Double](repeating: 0.0333, count: 1), into: &pacing, start: 40)
+        #expect(refresh() != nil)
+        #expect(refresh() == nil)
+
+        record([Double](repeating: 0.0333, count: 30), into: &pacing, start: 50)
+        let later = try #require(refresh())
+        #expect(abs(later - 0.0333) < 1e-9)
+    }
+
     @Test func medianSpansBuckets() throws {
         var pacing = RenderPacing()
         record([Double](repeating: 0.0333, count: 30), bucket: .collapsed, into: &pacing, start: 10)

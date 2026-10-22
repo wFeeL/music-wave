@@ -34,6 +34,8 @@ final class AppModel {
     static let maxVisualStep = 0.1
     /// Сколько последних интервалов отрисовки дают `renderPeriod`.
     static let renderPeriodSamples = 60
+    /// Медиана `renderPeriod` пересчитывается раз в столько записанных кадров.
+    static let renderPeriodRefreshFrames = 15
     /// Пределы `renderPeriod`, с: от ProMotion 120 Гц до энергосбережения 30 Гц.
     static let renderPeriodRange = (1.0 / 120)...(1.0 / 30)
     /// На сколько раньше доли «вздох» получает ее свечение при захвате ритма, с: время пружины
@@ -101,7 +103,7 @@ final class AppModel {
     @ObservationIgnored var refreshPeriod = 1.0 / 60
     /// Период отрисовки R, с: медиана последних 60 интервалов кадров в пределах 1/120...1/30
     /// (энергосбережение 30 Гц, ProMotion), до 60 кадров `refreshPeriod`. Медиана считается
-    /// при записи кадра в замер (`recordRender`), а не на каждом чтении.
+    /// при записи кадра в замер (`recordRender`) раз в 15 кадров, а не на каждом чтении.
     var renderPeriod: Double {
         measuredRenderPeriod ?? refreshPeriod
     }
@@ -1264,7 +1266,8 @@ final class AppModel {
         lastRecordedTimeline = timelineTime
         let bucket = RenderBucket.classify(state: islandState, sinceStateChange: now - islandStateChangedAt)
         renderPacing.record(now: now, timelineTime: timelineTime, bucket: bucket, analysisSequence: store.sequence)
-        if let median = renderPacing.medianInterval(last: Self.renderPeriodSamples), median.isFinite {
+        if let median = renderPacing.refreshedMedian(last: Self.renderPeriodSamples, every: Self.renderPeriodRefreshFrames),
+           median.isFinite {
             measuredRenderPeriod = min(max(median, Self.renderPeriodRange.lowerBound), Self.renderPeriodRange.upperBound)
         }
         guard islandState == .expanded, now.isFinite else {
