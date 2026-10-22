@@ -1,0 +1,110 @@
+import Testing
+@testable import WaveCore
+
+@Suite struct IslandStateMachineTests {
+    private static let step = 0.1
+
+    /// Подает одни и те же входы с шагом 0.1 с на отрезке [from, to] и возвращает последнее состояние.
+    @discardableResult
+    private func run(
+        _ machine: inout IslandStateMachine, _ inputs: IslandInputs, from: Double, to: Double
+    ) -> IslandState {
+        let count = Int(((to - from) / Self.step).rounded())
+        var result = machine.state
+        for i in 0...count {
+            result = machine.update(inputs, now: from + Double(i) * Self.step)
+        }
+        return result
+    }
+
+    private let playing = IslandInputs(audioActive: true)
+    private let silent = IslandInputs()
+
+    @Test func showsWhenAudioStarts() {
+        var machine = IslandStateMachine()
+        #expect(machine.update(silent, now: 0) == .hidden)
+        #expect(machine.update(playing, now: 0.1) == .collapsed)
+    }
+
+    @Test func hidesAfterHideDelayOfSilence() {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        #expect(run(&machine, silent, from: 1, to: 4.9 + 1) == .collapsed)
+        #expect(machine.update(silent, now: 6.1) == .hidden)
+    }
+
+    @Test func briefHoverDoesNotExpand() {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        var hover = playing
+        hover.pointerInHoverZone = true
+        #expect(run(&machine, hover, from: 1, to: 1.1) == .collapsed)
+        #expect(machine.update(playing, now: 1.2) == .collapsed)
+    }
+
+    @Test func hoverExpandsAfterDelay() {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        var hover = playing
+        hover.pointerInHoverZone = true
+        #expect(run(&machine, hover, from: 1, to: 1.2) == .expanded)
+    }
+
+    @Test func expandsOnPauseWithLastTrack() {
+        var machine = IslandStateMachine()
+        let paused = IslandInputs(sourceRunning: true, hasLastTrack: true, pointerInHoverZone: true)
+        #expect(run(&machine, paused, from: 0, to: 0.2) == .expanded)
+    }
+
+    @Test func doesNotExpandWithoutAnything() {
+        var machine = IslandStateMachine()
+        let hover = IslandInputs(pointerInHoverZone: true)
+        #expect(run(&machine, hover, from: 0, to: 2) == .hidden)
+        let noTrack = IslandInputs(sourceRunning: true, pointerInHoverZone: true)
+        #expect(run(&machine, noTrack, from: 2.1, to: 4) == .hidden)
+    }
+
+    @Test func collapsesAfterPointerLeaves() {
+        var machine = IslandStateMachine()
+        var hover = playing
+        hover.pointerInHoverZone = true
+        #expect(run(&machine, hover, from: 0, to: 1) == .expanded)
+        #expect(run(&machine, playing, from: 1.1, to: 1.3) == .expanded)
+        #expect(machine.update(playing, now: 1.45) == .collapsed)
+    }
+
+    @Test func collapsesToHiddenWhenNoContent() {
+        var machine = IslandStateMachine()
+        let hover = IslandInputs(sourceRunning: true, hasLastTrack: true, pointerInHoverZone: true)
+        #expect(run(&machine, hover, from: 0, to: 20) == .expanded)
+        #expect(run(&machine, silent, from: 20.1, to: 20.3) == .expanded)
+        #expect(machine.update(silent, now: 20.45) == .hidden)
+    }
+
+    @Test func fullscreenHidesImmediately() {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        var suppressed = playing
+        suppressed.fullscreenSuppressed = true
+        #expect(machine.update(suppressed, now: 0.1) == .hidden)
+        #expect(machine.update(playing, now: 0.2) == .collapsed)
+    }
+
+    @Test func userPauseHidesImmediately() {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        var paused = playing
+        paused.userPaused = true
+        #expect(machine.update(paused, now: 0.1) == .hidden)
+        paused.pointerInHoverZone = true
+        #expect(run(&machine, paused, from: 0.2, to: 2) == .hidden)
+    }
+
+    @Test func silenceTimerResetsWhenMusicResumes() {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        #expect(run(&machine, silent, from: 1, to: 4) == .collapsed)
+        machine.update(playing, now: 4.1)
+        #expect(run(&machine, silent, from: 4.2, to: 7.2) == .collapsed)
+    }
+}
