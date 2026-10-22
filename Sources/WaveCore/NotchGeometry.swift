@@ -131,7 +131,8 @@ public struct NotchLayout: Sendable, Equatable {
     /// Раскладка содержимого баннера в его локальных координатах: начало сверху слева
     /// `bannerIsland`, ось Y вниз. Обложка слева, текст под вырезом, волны в полосе справа от
     /// выреза. У капсулы те же прямоугольники, что у условного выреза 32 pt
-    /// (`NotchGeometry.fakeNotchSize`), только самого выреза нет.
+    /// (`NotchGeometry.fakeNotchSize`), только самого выреза нет. Низ обложки на уровне низа
+    /// текста; под более высокий вырез обложка и текст ниже на разницу.
     public var bannerContent: BannerLayout {
         let width = NotchGeometry.bannerSize.width
         let inset = NotchGeometry.bannerInset
@@ -140,10 +141,10 @@ public struct NotchLayout: Sendable, Equatable {
             ? notch.maxX - bannerIsland.minX
             : (width + NotchGeometry.fakeNotchSize.width) / 2
         let artwork = NotchGeometry.bannerArtworkSize
-        let artworkTop = (NotchGeometry.bannerSize.height - artwork) / 2
+        let artworkTop = (NotchGeometry.bannerSize.height - artwork) / 2 + 3 + bannerExtra
         let textLeft = inset + artwork + 12
         let textTop = notchHeight + 8
-        let textBottom = NotchGeometry.bannerSize.height - 8 + bannerExtra
+        let textBottom = NotchGeometry.bannerSize.height - 10 + bannerExtra
         let wavesLeft = notchRight + 10
         return BannerLayout(
             artwork: CGRect(x: inset, y: artworkTop, width: artwork, height: artwork),

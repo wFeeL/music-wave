@@ -566,9 +566,9 @@ struct NotchGeometryTests {
         #expect(layout.bannerIsland.size == CGSize(width: 400, height: 90))
         #expect(layout.bannerIsland.maxY == 956)
         let content = layout.bannerContent
-        #expect(content.artwork == CGRect(x: 16, y: 14, width: 56, height: 56))
+        #expect(content.artwork == CGRect(x: 16, y: 23, width: 56, height: 56))
         #expect(content.text.minY == 46)
-        #expect(content.text.maxY == 82)
+        #expect(content.text.maxY == 80)
         #expect(content.waves.minY == 4)
         #expect(content.waves.maxY == 34)
     }
@@ -576,8 +576,8 @@ struct NotchGeometryTests {
     @Test func bannerContentMatchesSpec() throws {
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
         let content = layout.bannerContent
-        #expect(content.artwork == CGRect(x: 16, y: 14, width: 56, height: 56))
-        #expect(content.text == CGRect(x: 84, y: 40, width: 300, height: 36))
+        #expect(content.artwork == CGRect(x: 16, y: 17, width: 56, height: 56))
+        #expect(content.text == CGRect(x: 84, y: 40, width: 300, height: 34))
         let wavesStart = layout.notch.maxX - layout.bannerIsland.minX + 10
         #expect(content.waves == CGRect(x: wavesStart, y: 4, width: 384 - wavesStart, height: 24))
     }
