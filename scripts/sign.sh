@@ -6,7 +6,8 @@
 # wavefeels-signing.p12 + password.txt из каталога, который находит find_signing_dir
 # (scripts/signing-source.sh: $WAVEFEELS_SIGNING_DIR, ~/Library/Application Support/WaveFeels/signing,
 # старый signing/ в репозитории). Ключ в git не хранится. Нет ни того, ни другого:
-# ad-hoc с предупреждением. Сертификат есть, но подпись не удалась: код 1 (тихий
+# ad-hoc с предупреждением, но не в GitHub Actions (там GITHUB_ACTIONS задан): код 1.
+# Сертификат есть, но подпись не удалась: код 1 (тихий
 # откат на ad-hoc запрещен, он сбрасывает разрешение на звук).
 # Шаг доверия (add-trusted-cert) не используется: codesign подписывает по SHA-1,
 # designated requirement задается явно.
@@ -96,6 +97,12 @@ report() {
 }
 
 if [[ -z "$P12" ]]; then
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        # CI без сертификата не должен выпускать ad-hoc сборку (release.yml опубликовал бы ее).
+        echo "error: no signing certificate in CI: set the repository secrets" >&2
+        echo "error: SIGNING_P12_BASE64 and SIGNING_P12_PASSWORD (see README, certificate section)" >&2
+        exit 1
+    fi
     echo "WARNING: no signing certificate (no secrets, no signing key found), signing ad-hoc;"
     echo "WARNING: audio capture permission will reset after every install"
     sign_nested --sign -

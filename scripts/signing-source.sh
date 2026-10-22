@@ -30,6 +30,18 @@ signing_dir_has_pair() {
     [[ -n "${1:-}" && -f "$1/$SIGNING_P12_NAME" && -f "$1/$SIGNING_PASSWORD_NAME" ]]
 }
 
+# Предупреждает, если в каталоге $1 лежит только один из двух файлов.
+warn_partial_pair() {
+    local dir=$1
+    [[ -d "$dir" ]] || return 0
+    if [[ -f "$dir/$SIGNING_P12_NAME" && ! -f "$dir/$SIGNING_PASSWORD_NAME" ]]; then
+        echo "ВНИМАНИЕ: в «$dir» нет файла $SIGNING_PASSWORD_NAME, эта папка пропущена." >&2
+    elif [[ ! -f "$dir/$SIGNING_P12_NAME" && -f "$dir/$SIGNING_PASSWORD_NAME" ]]; then
+        echo "ВНИМАНИЕ: в «$dir» нет файла $SIGNING_P12_NAME, эта папка пропущена." >&2
+    fi
+    return 0
+}
+
 # Печатает каталог с парой файлов или возвращает 1.
 find_signing_dir() {
     local candidate
@@ -45,6 +57,7 @@ find_signing_dir() {
         printf '%s\n' "$candidate"
         return 0
     fi
+    warn_partial_pair "$candidate"
     candidate=$(signing_repo_dir)
     if signing_dir_has_pair "$candidate"; then
         printf '%s\n' "$candidate"

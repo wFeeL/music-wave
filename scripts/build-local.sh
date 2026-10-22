@@ -322,8 +322,11 @@ if [[ -z "$EXPECTED_LEAF" ]]; then
     fail "Нет файла signing/expected-leaf.txt, без него подпись не проверить. Скачайте код заново целиком."
 fi
 
-# Сверяет хэш сертификата в папке $1 с ожидаемым и копирует ключ в Application Support.
-# Чужой сертификат не импортируется: с ним macOS снова спросит доступ к звуку.
+# Сверяет хэш сертификата в папке $1 с ожидаемым. Чужой сертификат не принимается: с ним
+# macOS снова спросит доступ к звуку. Подтвержденный ключ сразу копируется в Application
+# Support. Если openssl не смог прочитать файл, ключ используется только в этой сборке
+# и копируется в Application Support после успешной подписи (PENDING_KEY_DIR).
+PENDING_KEY_DIR=""
 import_checked_key() { # папка
     local src=$1 rc=0
     signing_leaf_matches "$src" "$EXPECTED_LEAF" || rc=$?
@@ -331,7 +334,11 @@ import_checked_key() { # папка
         0) echo "Хэш сертификата совпал с ожидаемым." ;;
         1) fail "Сертификат в «$src» не тот, которым подписано установленное приложение. С ним macOS снова спросит доступ к звуку, поэтому ключ не импортирован. Нужна копия с ключом WaveFeels Self-Signed." ;;
         *)
-            warn "Хэш сертификата до подписи проверить не удалось (openssl не прочитал файл). Проверка пройдет после подписи."
+            warn "Хэш сертификата до подписи проверить не удалось (openssl не прочитал файл). Проверка пройдет после подписи, в «Application Support» ключ сохранится только если она успешна."
+            PENDING_KEY_DIR=$src
+            WAVEFEELS_SIGNING_DIR=$src
+            export WAVEFEELS_SIGNING_DIR
+            return 0
             ;;
     esac
     if ! import_signing_dir "$src"; then
@@ -549,6 +556,15 @@ if ! bash scripts/sign.sh "$APP"; then
     fail "Подпись не удалась. С другой подписью macOS снова спросит доступ к звуку, поэтому сборка остановлена. Пришлите файл $LOG."
 fi
 restore_keychains
+
+# Ключ, который не удалось проверить заранее, подпись только что подтвердила.
+if [[ -n "$PENDING_KEY_DIR" ]]; then
+    if import_signing_dir "$PENDING_KEY_DIR"; then
+        echo "Подпись подтвердила ключ, он сохранен в «$(signing_app_support_dir)»."
+    else
+        warn "Не удалось сохранить ключ в «$(signing_app_support_dir)». Укажите его снова через --signing-dir при следующей сборке."
+    fi
+fi
 
 # --- установка ---
 

@@ -75,6 +75,9 @@ unset WAVEFEELS_SIGNING_DIR
 
 rm "$APP_DIR/password.txt"
 check "неполная пара в Application Support пропускается" eq "$(find_signing_dir 2> /dev/null)" "$LEGACY_DIR"
+WARN=$(find_signing_dir 2>&1 > /dev/null)
+check "неполная пара в Application Support: предупреждение с именем файла" \
+    eq "$([[ "$WARN" == *"нет файла password.txt"* ]] && echo yes)" yes
 rm -rf "$HOME/Library"
 
 # --- import_signing_dir ---
@@ -152,6 +155,16 @@ fi
 rm -rf "$HOME/Downloads"
 if find_downloads_signing_dir "$(printf '0%.0s' $(seq 1 40))" > /dev/null 2>&1; then rc=0; else rc=$?; fi
 check "Загрузки: пусто, код 1" eq "$rc" 1
+
+# --- sign.sh в CI без сертификата ---
+
+rm -rf "$HOME/Library"
+mkdir -p "$TMP/fake.app"
+CI_OUT=$(env -u SIGNING_P12_BASE64 -u SIGNING_P12_PASSWORD GITHUB_ACTIONS=true WAVEFEELS_REPO_SIGNING_DIR="$TMP/none" \
+    bash "$SCRIPT_DIR/sign.sh" "$TMP/fake.app" 2>&1) && rc=0 || rc=$?
+check "sign.sh в CI без ключа: код 1" eq "$rc" 1
+check "sign.sh в CI без ключа: сообщение про секреты" eq "$([[ "$CI_OUT" == *SIGNING_P12_BASE64* ]] && echo yes)" yes
+check "sign.sh в CI без ключа: ad-hoc не запускался" eq "$([[ "$CI_OUT" == *"signing ad-hoc"* ]] && echo yes || echo no)" no
 
 echo
 echo "прошло: $PASSES, упало: $FAILS"
