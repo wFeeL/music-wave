@@ -66,6 +66,10 @@ public struct WaveLine: Sendable, Equatable {
         self.opacity = opacity
     }
 
+    /// Есть ли у линии свечение (размытая копия толстой линии под ней): только у основных линий
+    /// баса и середины. Верх должен быть четким, эхо тоже.
+    public var glows: Bool { phaseOffset == 0 && shape != .high }
+
     /// Сдвиг фазы эха, рад.
     static let echoPhase = 0.6
     /// Эхо баса, середины и верха: (размах, прозрачность).
@@ -150,6 +154,9 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     public var amplitude: Double {
         didSet { amplitude = Self.clamped(amplitude, Limits.amplitude, Defaults.amplitude) }
     }
+    /// Рисуется ли свечение линий (размытая копия под ними). Не настройка и не сохраняется:
+    /// выключает его только `lightened()`.
+    public private(set) var glowPass = true
 
     public init(
         wingWidth: Double, colorMode: WaveColorMode, glowRadius: Double,
@@ -197,6 +204,55 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
 
     /// Линии для текущего «Количества волн».
     public var lines: [WaveLine] { WaveLine.lines(count: lineCount) }
+
+    /// Сколько линий остается в режиме энергосбережения: три основные, без эха.
+    static let lightenedLineLimit = 3
+
+    /// Вид для режима энергосбережения: эхо не рисуется (больше трех линий рисуются тремя
+    /// основными) и нет свечения линий. Остальное как в настройках, сами настройки не меняются.
+    public func lightened() -> WaveAppearance {
+        var light = self
+        light.lineCount = min(lineCount, Self.lightenedLineLimit)
+        light.glowPass = false
+        return light
+    }
+
+    /// Порог `renderCost`, выше которого вкладка «Вид» предупреждает о нагрузке на процессор.
+    public static let renderCostWarning = 2.5
+
+    /// Цена выше `renderCostWarning`.
+    public var isRenderCostHigh: Bool { renderCost > Self.renderCostWarning }
+
+    /// Примерная цена кадра относительно вида по умолчанию (1): безразмерная, не убывает ни по
+    /// одному ползунку и годится для сравнения видов, а не для процентов процессора. Грубая
+    /// модель по замеру и профилю на M2 (60 Гц): кадр стоит столько, сколько проходов по путям
+    /// линий (построение, разбиение кривых, закраска) и размытия свечения.
+    /// - Обводка линии: `0.75 + 0.25 × толщина`. Точек у линии постоянное число, путь строится
+    ///   одинаково, с толщиной растет только закрашиваемая полоса.
+    /// - Заливка (любая больше 0): еще `0.5` на линию. Путь общий с обводкой, но маска и цвет это
+    ///   две закраски площади.
+    /// - Свечение (основные бас и середина, `WaveLine.glows`): обводка × «Радиус свечения».
+    ///   Размытие разделимое, его цена на пиксель растет линейно с радиусом (поле текстуры тоже).
+    ///   Без прохода свечения (`lightened()`) ноль.
+    /// - Ширина крыла: множитель `0.75 + 0.25 × ширина / 64`. Число точек от ширины не зависит,
+    ///   растет только площадь.
+    /// Цвет и «Размах» на цену не влияют, яркость свечения не часть вида и сюда не входит.
+    /// По умолчанию (три линии, два свечения, без заливки) работа 5 условных проходов.
+    public var renderCost: Double {
+        Self.work(self) / Self.work(.standard)
+    }
+
+    private static func work(_ appearance: WaveAppearance) -> Double {
+        let lines = appearance.lines
+        let stroke = 0.75 + 0.25 * appearance.thickness
+        let strokes = Double(lines.count) * stroke
+        let fills = appearance.fill > 0 ? 0.5 * Double(lines.count) : 0
+        let glows = appearance.glowPass
+            ? Double(lines.filter(\.glows).count) * stroke * appearance.glowRadius
+            : 0
+        let span = 0.75 + 0.25 * appearance.wingWidth / Defaults.wingWidth
+        return span * (strokes + fills + glows)
+    }
 
     /// Светлота OKLab «Своего цвета» не ниже этой: на черных крыльях темная волна не видна.
     static let customMinimumLightness: Float = 0.55
