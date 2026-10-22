@@ -30,6 +30,11 @@ struct AppearanceSettingsView: View {
         Form {
             Section {
                 IslandPreview(model: model, player: player, active: active, wingLimit: wingLimit)
+                if let hint = Self.costHint(for: model.settings.appearance) {
+                    Label(hint, systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("Линии") {
                 colorRows
@@ -49,6 +54,12 @@ struct AppearanceSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             refreshScreen()
         }
+    }
+
+    /// Строка под предпросмотром, когда вид дорог в отрисовке (`WaveAppearance.isRenderCostHigh`:
+    /// примерная цена выше 2.5 при 1 у вида по умолчанию).
+    static func costHint(for appearance: WaveAppearance) -> String? {
+        appearance.isRenderCostHigh ? "Высокая нагрузка на процессор" : nil
     }
 
     // MARK: - Крылья и цвет

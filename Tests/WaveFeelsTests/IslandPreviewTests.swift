@@ -84,6 +84,19 @@ struct IslandPreviewTests {
         #expect(AppearanceSettingsView.wingCaption(wing: 200, limit: nil, hasNotch: true) == nil)
     }
 
+    /// «Высокая нагрузка на процессор» под предпросмотром только у дорогого вида.
+    @Test func costHintShowsOnlyForHeavyAppearance() {
+        #expect(AppearanceSettingsView.costHint(for: .standard) == nil)
+        let heavy = WaveAppearance(
+            wingWidth: 200, colorMode: .artwork, glowRadius: 3, lineCount: 6, fill: 1, thickness: 2, amplitude: 2
+        )
+        #expect(AppearanceSettingsView.costHint(for: heavy) == "Высокая нагрузка на процессор")
+        let moderate = WaveAppearance(
+            wingWidth: 120, colorMode: .artwork, glowRadius: 1.5, lineCount: 4, fill: 0.3, thickness: 1, amplitude: 1
+        )
+        #expect(AppearanceSettingsView.costHint(for: moderate) == nil)
+    }
+
     /// «Уменьшение движения»: ни свечения доли, ни «вздоха», хотя в демо они есть.
     @Test func previewReduceMotionHasNoGlowOrPulse() {
         let cache = PreviewTimelineCache()

@@ -331,6 +331,8 @@ enum SnapshotRenderer {
         try Data(manifest.utf8).write(to: directory.appendingPathComponent(manifestName), options: .atomic)
         let defaults = snapshotDefaults()
         let model = AppModel(defaults: defaults)
+        // Снимки не зависят от режима энергосбережения машины: в нем остров облегчен.
+        model.lowPower = false
         model.settings.source = source
         var written: [URL] = []
         for scene in scenes {
