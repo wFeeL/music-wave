@@ -31,15 +31,15 @@ struct AppearanceSettingsView: View {
             Section {
                 IslandPreview(model: model, player: player, active: active, wingLimit: wingLimit)
             }
-            Section("Остров") {
-                wingRow
+            Section("Линии") {
                 colorRows
+                waveRows
             }
             Section("Свечение") {
                 glowRows
             }
-            Section("Волны") {
-                waveRows
+            Section("Крылья") {
+                wingRow
             }
         }
         .formStyle(.grouped)
@@ -177,12 +177,6 @@ struct AppearanceSettingsView: View {
         }
         .pickerStyle(.segmented)
         SettingsSliderRow(
-            "Заливка",
-            value: Binding(get: { settings.fill }, set: { settings.fill = ($0 * 20).rounded() / 20 }),
-            in: WaveAppearance.Limits.fill,
-            text: "\(Int((settings.fill * 100).rounded())) %"
-        )
-        SettingsSliderRow(
             "Толщина линий",
             value: Binding(get: { settings.lineThickness }, set: { settings.lineThickness = ($0 * 20).rounded() / 20 }),
             in: WaveAppearance.Limits.thickness,
@@ -193,6 +187,12 @@ struct AppearanceSettingsView: View {
             value: Binding(get: { settings.waveAmplitude }, set: { settings.waveAmplitude = ($0 * 20).rounded() / 20 }),
             in: WaveAppearance.Limits.amplitude,
             text: SettingsView.multiplier(Float(settings.waveAmplitude))
+        )
+        SettingsSliderRow(
+            "Заливка",
+            value: Binding(get: { settings.fill }, set: { settings.fill = ($0 * 20).rounded() / 20 }),
+            in: WaveAppearance.Limits.fill,
+            text: "\(Int((settings.fill * 100).rounded())) %"
         )
     }
 
