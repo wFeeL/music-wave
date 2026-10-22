@@ -11,7 +11,8 @@ struct OfflineBeatChainTests {
 
     /// Прогон, записанный со старым `SyncHarness` до переноса цепочки в WaveCore (четыре на пол
     /// 120 BPM, 12 с, `seed` 3, фаза рендера 0.3): перенос не должен менять ни одной вспышки. Записан
-    /// заново при настройке 1.1 (`beatDelay` 12 мс, захват после трех попаданий, смесь за долю):
+    /// заново при настройке 1.1 (`beatDelay` 12 мс, захват после трех попаданий, смесь за долю,
+    /// приглушенные онсеты без захвата):
     /// захват на 0.5 с раньше, вспышки с 4 по 7 с сдвинулись на кадр-два.
     @Test func matchesRecordedHarnessRun() async {
         let result = await runOffCooperativePool {
@@ -35,7 +36,8 @@ struct OfflineBeatChainTests {
         #expect(abs((result.tempoBPM ?? -1) - 120.26392951876916) < 1e-9)
         #expect(result.states.count == 1120)
         #expect(result.predictedTimes.count == 21)
-        #expect(result.peakGlow == 1)
+        // Онсеты бочки без захвата светятся вполовину (`BeatGlow.reactiveScale`), пик дает доля.
+        #expect(abs(result.peakGlow - 0.7606863) < 1e-6)
     }
 
     /// Вспышки и онсеты бочки лежат на слышимой оси: доли сцены плюс задержка вывода. С захватом

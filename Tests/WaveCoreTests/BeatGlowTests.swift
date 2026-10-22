@@ -39,6 +39,32 @@ struct BeatGlowTests {
         #expect(abs(mutatingPeak - 1) <= 1e-6)
     }
 
+    /// Онсет бочки без захвата светится вполовину, с захватом полностью; доля светится полностью
+    /// всегда. Онсет, впервые видный без захвата, остается приглушенным и после захвата.
+    @Test func reactiveOnsetGlowsAtHalfUntilLocked() {
+        #expect(BeatGlow.reactiveScale == 0.5)
+        let onset = GlowEvent(id: BeatTracker.onsetIDFlag | 3, time: 10, amplitude: 0.9, predicted: false)
+        let beat = Self.event(id: 4, time: 20, amplitude: 0.9)
+        let peakTime = 10.0 - BeatGlow.lead - Self.refresh / 2
+        func schedule(_ events: [GlowEvent], locked: Bool) -> BeatSchedule {
+            BeatSchedule(events: events, bpm: 120, period: 0.5, confidence: locked ? 1 : 0, locked: locked)
+        }
+        let unlocked = BeatGlow.value(at: peakTime, schedule: schedule([onset], locked: false), refreshPeriod: Self.refresh)
+        let locked = BeatGlow.value(at: peakTime, schedule: schedule([onset], locked: true), refreshPeriod: Self.refresh)
+        #expect(abs(unlocked - 0.45) < 1e-6)
+        #expect(abs(locked - 0.9) < 1e-6)
+        let beatPeak = BeatGlow.value(at: peakTime + 10, schedule: schedule([beat], locked: false), refreshPeriod: Self.refresh)
+        #expect(abs(beatPeak - 0.9) < 1e-6)
+
+        var glow = BeatGlow()
+        #expect(glow.value(at: peakTime - 0.1, schedule: schedule([onset], locked: false), refreshPeriod: Self.refresh) == 0)
+        let peak = glow.value(at: peakTime, schedule: schedule([onset], locked: true), refreshPeriod: Self.refresh)
+        #expect(abs(peak - 0.45) < 1e-6)
+        var fresh = BeatGlow()
+        let lockedPeak = fresh.value(at: peakTime, schedule: schedule([onset], locked: true), refreshPeriod: Self.refresh)
+        #expect(abs(lockedPeak - 0.9) < 1e-6)
+    }
+
     @Test func lateEventStartsBright() {
         let event = Self.event(id: 7, time: 10, amplitude: 0.8)
         let schedule = Self.schedule([event])

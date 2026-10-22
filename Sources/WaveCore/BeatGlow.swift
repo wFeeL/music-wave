@@ -57,7 +57,9 @@ public struct BeatSchedule: Sendable, Equatable {
 ///
 /// `shape(a) = a < 0 ? 0 : exp(-a / decay)` при `a = t - (event.time - lead) + R / 2`, где `t` это
 /// время показа кадра, а `R` период обновления экрана (`+R/2` центрирует ошибку квантования кадрами).
-/// Свечение равно максимуму `amplitude × shape` по событиям и не бывает больше 1.
+/// Свечение равно максимуму `amplitude × shape` по событиям и не бывает больше 1. Онсет бочки
+/// (`predicted == false`) в расписании без захвата светится с `amplitude × reactiveScale`; изменяемый
+/// вариант решает это один раз, когда событие впервые видно, чтобы захват не зажигал его заново.
 ///
 /// Изменяемый вариант помнит события по id. Событие, которое впервые видно уже после своего начала
 /// (не позже `lateLimit`), вспыхивает в полную яркость на этом кадре: вспышку, которая начинается уже
@@ -78,6 +80,11 @@ public struct BeatGlow: Sendable {
     /// опоздавшим и вспыхивает полностью. Более старое уже прошлое (например, первое расписание после
     /// появления рендера) и в изменяемом варианте не светится вовсе.
     public static let lateLimit = 0.2
+    /// Яркость онсета бочки, впервые видного без захвата, относительно его `amplitude`. Такая вспышка
+    /// идет за звуком (обнаружение и показ, на GTZAN в среднем +36 мс) и попадает в долю реже
+    /// захваченной (0.58 против 0.91), поэтому светится вполовину: заметно, но не как доля. Захваченные
+    /// события, в том числе онсеты, светятся как раньше.
+    public static let reactiveScale: Float = 0.5
     /// Допуск округления на границе атаки.
     private static let edgeTolerance = 1e-9
 
@@ -86,6 +93,8 @@ public struct BeatGlow: Sendable {
         var origin: Double?
         /// Впервые видно позже `lateLimit`: не светится.
         var stale = false
+        /// Онсет, впервые видный без захвата: светится с `reactiveScale`.
+        var reactive = false
         var lastSeen: Double
     }
 
@@ -109,7 +118,7 @@ public struct BeatGlow: Sendable {
         var glow: Float = 0
         for event in schedule.events where isValid(event) {
             let a = t - scheduledOrigin(of: event, refreshPeriod: refreshPeriod)
-            glow = max(glow, contribution(event.amplitude, a: a, decay: decay))
+            glow = max(glow, contribution(amplitude(of: event, in: schedule), a: a, decay: decay))
         }
         return glow
     }
@@ -125,7 +134,10 @@ public struct BeatGlow: Sendable {
             var record = records[event.id] ?? {
                 // Впервые видно: опоздавшее событие начинается с этого кадра, слишком старое не светится.
                 let isLate = late > Self.edgeTolerance && late <= Self.lateLimit
-                return Record(origin: isLate ? t : nil, stale: late > Self.lateLimit, lastSeen: t)
+                return Record(
+                    origin: isLate ? t : nil, stale: late > Self.lateLimit,
+                    reactive: !event.predicted && !schedule.locked, lastSeen: t
+                )
             }()
             record.lastSeen = t
             if record.origin == nil, late >= -Self.edgeTolerance {
@@ -134,7 +146,8 @@ public struct BeatGlow: Sendable {
             records[event.id] = record
             guard !record.stale else { continue }
             let a = record.origin.map { t - $0 } ?? late
-            glow = max(glow, Self.contribution(event.amplitude, a: a, decay: decay))
+            let amplitude = record.reactive ? event.amplitude * Self.reactiveScale : event.amplitude
+            glow = max(glow, Self.contribution(amplitude, a: a, decay: decay))
         }
         if records.values.contains(where: { t - $0.lastSeen > Self.memory }) {
             records = records.filter { t - $0.value.lastSeen <= Self.memory }
@@ -157,6 +170,11 @@ public struct BeatGlow: Sendable {
     private static func scheduledOrigin(of event: GlowEvent, refreshPeriod: Double) -> Double {
         let refresh = refreshPeriod.isFinite ? max(refreshPeriod, 0) : 0
         return event.time - lead - refresh / 2
+    }
+
+    /// Яркость события в расписании без памяти: онсет без захвата приглушен.
+    private static func amplitude(of event: GlowEvent, in schedule: BeatSchedule) -> Float {
+        event.predicted || schedule.locked ? event.amplitude : event.amplitude * reactiveScale
     }
 
     private static func isValid(_ event: GlowEvent) -> Bool {
