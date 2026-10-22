@@ -92,7 +92,7 @@ public struct SuperFlux: Sendable {
 /// odf(n) >= max(odf[n-preMax ... n-1])
 /// odf(n) >  mean(odf[n-preAvg ... n-1]) + delta * P(n)       // P = max(odf, P * exp(-hop / 3 s))
 /// odf(n) >  longFactor * P_long(n)                            // то же с 10 с
-/// odf(n) >  floor  и  levelDB(n) > minLevelDB
+/// odf(n) >  max(floor, relativeFloor * P(n))  и  levelDB(n) > minLevelDB
 /// levelDB(n) - levelDB(n - riseLag) >= minRiseDB              // настоящий подъем, не колебание шума
 /// n - lastOnset >= combine
 /// ```
@@ -114,6 +114,9 @@ public struct OnlinePeakPicker: Sendable {
         public var longFactor: Float
         /// Абсолютный порог odf.
         public var floor: Float
+        /// Порог odf относительно следящего пика P: при громких ударах порог растет вместе с ними,
+        /// а абсолютный `floor` держит шум и тишину.
+        public var relativeFloor: Float
         public var minLevelDB: Float
         public var minRiseDB: Float
         /// Насколько назад берется уровень для проверки подъема, секунды.
@@ -129,6 +132,7 @@ public struct OnlinePeakPicker: Sendable {
             longRelease: Double = 10.0,
             longFactor: Float = 0.25,
             floor: Float = 0.3,
+            relativeFloor: Float = 0,
             minLevelDB: Float = -60,
             minRiseDB: Float = 9,
             riseLag: Double = 0.016,
@@ -141,6 +145,7 @@ public struct OnlinePeakPicker: Sendable {
             self.longRelease = longRelease
             self.longFactor = longFactor
             self.floor = floor
+            self.relativeFloor = relativeFloor
             self.minLevelDB = minLevelDB
             self.minRiseDB = minRiseDB
             self.riseLag = riseLag
@@ -210,7 +215,7 @@ public struct OnlinePeakPicker: Sendable {
         let fires = odf >= recentMax
             && odf > mean + p.delta * follower
             && odf > p.longFactor * longFollower
-            && odf > p.floor
+            && odf > max(p.floor, p.relativeFloor * follower)
             && level > p.minLevelDB
             && level - earlierLevel >= p.minRiseDB
             && hopsSinceOnset >= combineHops
