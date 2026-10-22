@@ -87,10 +87,14 @@ struct CoreAudioSmokeTests {
         let idleFrames = log.frames.count - before
         let elapsed = clock.now - started
         // Сон под нагрузкой может затянуться, поэтому проверяется частота за фактическое время:
-        // кадров бывает меньше, но не больше 15 в секунду (плюс первый сразу и запас на границы).
+        // не больше 15 кадров в секунду (плюс первый сразу и запас на границы) и не меньше половины
+        // этого: таймер работает, а не стоит.
         let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
-        let limit = Int(seconds * AnalysisEngine.idleRate) + 3
-        #expect(idleFrames <= limit, "кадров в простое: \(idleFrames) за \(elapsed), предел \(limit)")
+        let expected = seconds * AnalysisEngine.idleRate
+        let upper = Int(expected) + 3
+        let lower = max(1, Int(expected * 0.5))
+        #expect(idleFrames <= upper, "кадров в простое: \(idleFrames) за \(elapsed), не больше \(upper)")
+        #expect(idleFrames >= lower, "кадров в простое: \(idleFrames) за \(elapsed), не меньше \(lower)")
 
         engine.setIdle(false)
         let active = engine.tickIntervalForTesting

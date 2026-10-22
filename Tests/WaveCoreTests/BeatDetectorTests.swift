@@ -55,7 +55,8 @@ struct BeatDetectorTests {
 
     /// Частоты идут отдельными случаями теста и считаются параллельно: одним циклом этот тест был
     /// самым долгим во всем наборе (около 11 с на Linux и до минуты на маке). Расчет идет вне пула
-    /// Swift Concurrency (`runOffCooperativePool`), иначе 23 случая занимают все его потоки.
+    /// Swift Concurrency и не больше чем на двух ядрах (`runOffCooperativePool`), иначе 23 случая
+    /// занимают все потоки пула.
     @Test(arguments: Array(stride(from: 40.0, through: 150.0, by: 5.0)))
     func steadyToneHasNoBeats(frequency: Double) async {
         let sampleRate = Self.sampleRate
