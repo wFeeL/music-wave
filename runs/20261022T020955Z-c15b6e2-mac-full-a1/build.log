@@ -1,0 +1,2398 @@
+== step build-release: swift build -c release
+Building for production...
+[0/5] Write sources
+[2/5] Write swift-version-7974D3F7F03D5E95.txt
+[4/6] Compiling WaveCore ActivityGate.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:22: error: value of type 'CGRect' has no member 'minX'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                      `- error: value of type 'CGRect' has no member 'minX'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:44: error: value of type 'CGRect' has no member 'minY'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                                            `- error: value of type 'CGRect' has no member 'minY'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:26: error: value of type 'CGRect' has no member 'width'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                          `- error: value of type 'CGRect' has no member 'width'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:58: error: value of type 'CGRect' has no member 'height'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                                                          `- error: value of type 'CGRect' has no member 'height'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:47:22: error: argument passed to call that takes no arguments
+ 45 |     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:22: error: value of type 'CGRect' has no member 'midX'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                      `- error: value of type 'CGRect' has no member 'midX'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:54: error: value of type 'CGRect' has no member 'maxY'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                                                      `- error: value of type 'CGRect' has no member 'maxY'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:56:22: error: argument passed to call that takes no arguments
+ 54 |     public var expandedIsland: CGRect {
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+ 58 |             width: size.width, height: size.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:65:36: error: value of type 'CGRect' has no member 'union'
+ 63 |     /// по горизонтали не выходит за экран.
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+    |                                    `- error: value of type 'CGRect' has no member 'union'
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:66:48: error: value of type 'CGRect' has no member 'minX'
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+    |                                                `- error: value of type 'CGRect' has no member 'minX'
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:67:48: error: value of type 'CGRect' has no member 'maxX'
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+    |                                                `- error: value of type 'CGRect' has no member 'maxX'
+ 68 |         return CGRect(
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:68:22: error: argument passed to call that takes no arguments
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+ 70 |             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:35: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                   `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:46: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                              `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:22: error: argument passed to call that takes no arguments
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                      `- error: argument passed to call that takes no arguments
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:31: error: value of type 'CGRect' has no member 'minX'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                               `- error: value of type 'CGRect' has no member 'minX'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:45: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                             `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:63: error: value of type 'CGRect' has no member 'width'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                               `- error: value of type 'CGRect' has no member 'width'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:89: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                                                         `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:103:76: error: value of type 'CGRect' has no member 'maxY'
+101 |             return NotchLayout(
+102 |                 screenID: first.id, screenFrame: first.frame, hasNotch: true,
+103 |                 notch: centeredNotch(size: fakeNotchSize, top: first.frame.maxY, in: first.frame)
+    |                                                                            `- error: value of type 'CGRect' has no member 'maxY'
+104 |             )
+105 |         }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:109:40: error: value of type 'CGRect' has no member 'width'
+107 |         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+    |                                        `- error: value of type 'CGRect' has no member 'width'
+110 |             let notch = CGRect(
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:110:25: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+110 |             let notch = CGRect(
+    |                         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+112 |                 width: screen.frame.width - left - right, height: screen.safeAreaTop
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:119:67: error: value of type 'CGRect' has no member 'maxY'
+117 |         return NotchLayout(
+118 |             screenID: first.id, screenFrame: first.frame, hasNotch: false,
+119 |             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
+    |                                                                   `- error: value of type 'CGRect' has no member 'maxY'
+120 |         )
+121 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:25: error: value of type 'CGRect' has no member 'midX'
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |                         `- error: value of type 'CGRect' has no member 'midX'
+125 |     }
+126 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:15: error: argument passed to call that takes no arguments
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |               `- error: argument passed to call that takes no arguments
+125 |     }
+126 | }
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] Write sources
+[2/13] Write WaveFeels-entitlement.plist
+[3/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[4/13] Write sources
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/24] Compiling WaveCore ActivityGate.swift
+[10/24] Compiling WaveCore Analyzer.swift
+[11/24] Compiling WaveCore AttackRelease.swift
+[12/24] Compiling WaveCore AudioSource.swift
+[13/24] Compiling WaveCore BandMapper.swift
+[14/29] Compiling WaveCore NowPlaying.swift
+[15/29] Compiling WaveCore Palette.swift
+[16/29] Compiling WaveCore RealFFT.swift
+[17/29] Compiling WaveCore SampleRingBuffer.swift
+[18/29] Compiling WaveCore WaveShape.swift
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[19/29] Emitting module WaveCore
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+[20/29] Compiling WaveCore BeatDetector.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:22: error: value of type 'CGRect' has no member 'minX'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                      `- error: value of type 'CGRect' has no member 'minX'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:44: error: value of type 'CGRect' has no member 'minY'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                                            `- error: value of type 'CGRect' has no member 'minY'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:26: error: value of type 'CGRect' has no member 'width'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                          `- error: value of type 'CGRect' has no member 'width'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:58: error: value of type 'CGRect' has no member 'height'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                                                          `- error: value of type 'CGRect' has no member 'height'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:47:22: error: argument passed to call that takes no arguments
+ 45 |     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:22: error: value of type 'CGRect' has no member 'midX'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                      `- error: value of type 'CGRect' has no member 'midX'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:54: error: value of type 'CGRect' has no member 'maxY'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                                                      `- error: value of type 'CGRect' has no member 'maxY'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:56:22: error: argument passed to call that takes no arguments
+ 54 |     public var expandedIsland: CGRect {
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+ 58 |             width: size.width, height: size.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:65:36: error: value of type 'CGRect' has no member 'union'
+ 63 |     /// по горизонтали не выходит за экран.
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+    |                                    `- error: value of type 'CGRect' has no member 'union'
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:66:48: error: value of type 'CGRect' has no member 'minX'
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+    |                                                `- error: value of type 'CGRect' has no member 'minX'
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:67:48: error: value of type 'CGRect' has no member 'maxX'
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+    |                                                `- error: value of type 'CGRect' has no member 'maxX'
+ 68 |         return CGRect(
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:68:22: error: argument passed to call that takes no arguments
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+ 70 |             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:35: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                   `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:46: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                              `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:22: error: argument passed to call that takes no arguments
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                      `- error: argument passed to call that takes no arguments
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:31: error: value of type 'CGRect' has no member 'minX'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                               `- error: value of type 'CGRect' has no member 'minX'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:45: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                             `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:63: error: value of type 'CGRect' has no member 'width'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                               `- error: value of type 'CGRect' has no member 'width'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:89: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                                                         `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:103:76: error: value of type 'CGRect' has no member 'maxY'
+101 |             return NotchLayout(
+102 |                 screenID: first.id, screenFrame: first.frame, hasNotch: true,
+103 |                 notch: centeredNotch(size: fakeNotchSize, top: first.frame.maxY, in: first.frame)
+    |                                                                            `- error: value of type 'CGRect' has no member 'maxY'
+104 |             )
+105 |         }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:109:40: error: value of type 'CGRect' has no member 'width'
+107 |         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+    |                                        `- error: value of type 'CGRect' has no member 'width'
+110 |             let notch = CGRect(
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:110:25: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+110 |             let notch = CGRect(
+    |                         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+112 |                 width: screen.frame.width - left - right, height: screen.safeAreaTop
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:119:67: error: value of type 'CGRect' has no member 'maxY'
+117 |         return NotchLayout(
+118 |             screenID: first.id, screenFrame: first.frame, hasNotch: false,
+119 |             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
+    |                                                                   `- error: value of type 'CGRect' has no member 'maxY'
+120 |         )
+121 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:25: error: value of type 'CGRect' has no member 'midX'
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |                         `- error: value of type 'CGRect' has no member 'midX'
+125 |     }
+126 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:15: error: argument passed to call that takes no arguments
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |               `- error: argument passed to call that takes no arguments
+125 |     }
+126 | }
+[21/29] Compiling WaveCore IslandStateMachine.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:22: error: value of type 'CGRect' has no member 'minX'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                      `- error: value of type 'CGRect' has no member 'minX'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:44: error: value of type 'CGRect' has no member 'minY'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                                            `- error: value of type 'CGRect' has no member 'minY'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:26: error: value of type 'CGRect' has no member 'width'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                          `- error: value of type 'CGRect' has no member 'width'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:58: error: value of type 'CGRect' has no member 'height'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                                                          `- error: value of type 'CGRect' has no member 'height'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:47:22: error: argument passed to call that takes no arguments
+ 45 |     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:22: error: value of type 'CGRect' has no member 'midX'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                      `- error: value of type 'CGRect' has no member 'midX'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:54: error: value of type 'CGRect' has no member 'maxY'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                                                      `- error: value of type 'CGRect' has no member 'maxY'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:56:22: error: argument passed to call that takes no arguments
+ 54 |     public var expandedIsland: CGRect {
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+ 58 |             width: size.width, height: size.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:65:36: error: value of type 'CGRect' has no member 'union'
+ 63 |     /// по горизонтали не выходит за экран.
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+    |                                    `- error: value of type 'CGRect' has no member 'union'
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:66:48: error: value of type 'CGRect' has no member 'minX'
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+    |                                                `- error: value of type 'CGRect' has no member 'minX'
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:67:48: error: value of type 'CGRect' has no member 'maxX'
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+    |                                                `- error: value of type 'CGRect' has no member 'maxX'
+ 68 |         return CGRect(
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:68:22: error: argument passed to call that takes no arguments
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+ 70 |             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:35: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                   `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:46: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                              `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:22: error: argument passed to call that takes no arguments
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                      `- error: argument passed to call that takes no arguments
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:31: error: value of type 'CGRect' has no member 'minX'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                               `- error: value of type 'CGRect' has no member 'minX'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:45: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                             `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:63: error: value of type 'CGRect' has no member 'width'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                               `- error: value of type 'CGRect' has no member 'width'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:89: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                                                         `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:103:76: error: value of type 'CGRect' has no member 'maxY'
+101 |             return NotchLayout(
+102 |                 screenID: first.id, screenFrame: first.frame, hasNotch: true,
+103 |                 notch: centeredNotch(size: fakeNotchSize, top: first.frame.maxY, in: first.frame)
+    |                                                                            `- error: value of type 'CGRect' has no member 'maxY'
+104 |             )
+105 |         }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:109:40: error: value of type 'CGRect' has no member 'width'
+107 |         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+    |                                        `- error: value of type 'CGRect' has no member 'width'
+110 |             let notch = CGRect(
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:110:25: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+110 |             let notch = CGRect(
+    |                         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+112 |                 width: screen.frame.width - left - right, height: screen.safeAreaTop
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:119:67: error: value of type 'CGRect' has no member 'maxY'
+117 |         return NotchLayout(
+118 |             screenID: first.id, screenFrame: first.frame, hasNotch: false,
+119 |             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
+    |                                                                   `- error: value of type 'CGRect' has no member 'maxY'
+120 |         )
+121 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:25: error: value of type 'CGRect' has no member 'midX'
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |                         `- error: value of type 'CGRect' has no member 'midX'
+125 |     }
+126 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:15: error: argument passed to call that takes no arguments
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |               `- error: argument passed to call that takes no arguments
+125 |     }
+126 | }
+[22/29] Compiling WaveCore Latency.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:22: error: value of type 'CGRect' has no member 'minX'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                      `- error: value of type 'CGRect' has no member 'minX'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:44: error: value of type 'CGRect' has no member 'minY'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                                            `- error: value of type 'CGRect' has no member 'minY'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:26: error: value of type 'CGRect' has no member 'width'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                          `- error: value of type 'CGRect' has no member 'width'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:58: error: value of type 'CGRect' has no member 'height'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                                                          `- error: value of type 'CGRect' has no member 'height'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:47:22: error: argument passed to call that takes no arguments
+ 45 |     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:22: error: value of type 'CGRect' has no member 'midX'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                      `- error: value of type 'CGRect' has no member 'midX'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:54: error: value of type 'CGRect' has no member 'maxY'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                                                      `- error: value of type 'CGRect' has no member 'maxY'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:56:22: error: argument passed to call that takes no arguments
+ 54 |     public var expandedIsland: CGRect {
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+ 58 |             width: size.width, height: size.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:65:36: error: value of type 'CGRect' has no member 'union'
+ 63 |     /// по горизонтали не выходит за экран.
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+    |                                    `- error: value of type 'CGRect' has no member 'union'
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:66:48: error: value of type 'CGRect' has no member 'minX'
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+    |                                                `- error: value of type 'CGRect' has no member 'minX'
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:67:48: error: value of type 'CGRect' has no member 'maxX'
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+    |                                                `- error: value of type 'CGRect' has no member 'maxX'
+ 68 |         return CGRect(
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:68:22: error: argument passed to call that takes no arguments
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+ 70 |             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:35: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                   `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:46: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                              `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:22: error: argument passed to call that takes no arguments
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                      `- error: argument passed to call that takes no arguments
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:31: error: value of type 'CGRect' has no member 'minX'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                               `- error: value of type 'CGRect' has no member 'minX'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:45: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                             `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:63: error: value of type 'CGRect' has no member 'width'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                               `- error: value of type 'CGRect' has no member 'width'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:89: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                                                         `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:103:76: error: value of type 'CGRect' has no member 'maxY'
+101 |             return NotchLayout(
+102 |                 screenID: first.id, screenFrame: first.frame, hasNotch: true,
+103 |                 notch: centeredNotch(size: fakeNotchSize, top: first.frame.maxY, in: first.frame)
+    |                                                                            `- error: value of type 'CGRect' has no member 'maxY'
+104 |             )
+105 |         }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:109:40: error: value of type 'CGRect' has no member 'width'
+107 |         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+    |                                        `- error: value of type 'CGRect' has no member 'width'
+110 |             let notch = CGRect(
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:110:25: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+110 |             let notch = CGRect(
+    |                         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+112 |                 width: screen.frame.width - left - right, height: screen.safeAreaTop
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:119:67: error: value of type 'CGRect' has no member 'maxY'
+117 |         return NotchLayout(
+118 |             screenID: first.id, screenFrame: first.frame, hasNotch: false,
+119 |             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
+    |                                                                   `- error: value of type 'CGRect' has no member 'maxY'
+120 |         )
+121 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:25: error: value of type 'CGRect' has no member 'midX'
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |                         `- error: value of type 'CGRect' has no member 'midX'
+125 |     }
+126 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:15: error: argument passed to call that takes no arguments
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |               `- error: argument passed to call that takes no arguments
+125 |     }
+126 | }
+[23/29] Compiling WaveCore LevelProcessor.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:22: error: value of type 'CGRect' has no member 'minX'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                      `- error: value of type 'CGRect' has no member 'minX'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:44: error: value of type 'CGRect' has no member 'minY'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                                            `- error: value of type 'CGRect' has no member 'minY'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:26: error: value of type 'CGRect' has no member 'width'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                          `- error: value of type 'CGRect' has no member 'width'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:58: error: value of type 'CGRect' has no member 'height'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                                                          `- error: value of type 'CGRect' has no member 'height'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:47:22: error: argument passed to call that takes no arguments
+ 45 |     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:22: error: value of type 'CGRect' has no member 'midX'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                      `- error: value of type 'CGRect' has no member 'midX'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:54: error: value of type 'CGRect' has no member 'maxY'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                                                      `- error: value of type 'CGRect' has no member 'maxY'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:56:22: error: argument passed to call that takes no arguments
+ 54 |     public var expandedIsland: CGRect {
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+ 58 |             width: size.width, height: size.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:65:36: error: value of type 'CGRect' has no member 'union'
+ 63 |     /// по горизонтали не выходит за экран.
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+    |                                    `- error: value of type 'CGRect' has no member 'union'
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:66:48: error: value of type 'CGRect' has no member 'minX'
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+    |                                                `- error: value of type 'CGRect' has no member 'minX'
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:67:48: error: value of type 'CGRect' has no member 'maxX'
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+    |                                                `- error: value of type 'CGRect' has no member 'maxX'
+ 68 |         return CGRect(
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:68:22: error: argument passed to call that takes no arguments
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+ 70 |             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:35: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                   `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:46: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                              `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:22: error: argument passed to call that takes no arguments
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                      `- error: argument passed to call that takes no arguments
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:31: error: value of type 'CGRect' has no member 'minX'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                               `- error: value of type 'CGRect' has no member 'minX'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:45: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                             `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:63: error: value of type 'CGRect' has no member 'width'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                               `- error: value of type 'CGRect' has no member 'width'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:89: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                                                         `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:103:76: error: value of type 'CGRect' has no member 'maxY'
+101 |             return NotchLayout(
+102 |                 screenID: first.id, screenFrame: first.frame, hasNotch: true,
+103 |                 notch: centeredNotch(size: fakeNotchSize, top: first.frame.maxY, in: first.frame)
+    |                                                                            `- error: value of type 'CGRect' has no member 'maxY'
+104 |             )
+105 |         }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:109:40: error: value of type 'CGRect' has no member 'width'
+107 |         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+    |                                        `- error: value of type 'CGRect' has no member 'width'
+110 |             let notch = CGRect(
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:110:25: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+110 |             let notch = CGRect(
+    |                         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+112 |                 width: screen.frame.width - left - right, height: screen.safeAreaTop
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:119:67: error: value of type 'CGRect' has no member 'maxY'
+117 |         return NotchLayout(
+118 |             screenID: first.id, screenFrame: first.frame, hasNotch: false,
+119 |             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
+    |                                                                   `- error: value of type 'CGRect' has no member 'maxY'
+120 |         )
+121 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:25: error: value of type 'CGRect' has no member 'midX'
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |                         `- error: value of type 'CGRect' has no member 'midX'
+125 |     }
+126 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:15: error: argument passed to call that takes no arguments
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |               `- error: argument passed to call that takes no arguments
+125 |     }
+126 | }
+[24/29] Compiling WaveCore NotchGeometry.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:4:15: error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+  2 | 
+  3 | /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
+  4 | public struct ScreenDescriptor: Sendable, Equatable {
+    |               |- error: type 'ScreenDescriptor' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+  5 |     public var id: UInt32
+  6 |     public var frame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'ScreenDescriptor' to 'Equatable'
+  7 |     /// Высота выреза сверху (`safeAreaInsets.top`), 0 на экране без выреза.
+  8 |     public var safeAreaTop: CGFloat
+
+Swift.==:1:24: note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'ScreenDescriptor' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'ScreenDescriptor' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'ScreenDescriptor' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(ScreenDescriptor, ScreenDescriptor) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:30:15: error: type 'NotchLayout' does not conform to protocol 'Equatable'
+ 28 | 
+ 29 | /// Положение выреза (или капсулы-замены) на выбранном экране и производные прямоугольники острова.
+ 30 | public struct NotchLayout: Sendable, Equatable {
+    |               |- error: type 'NotchLayout' does not conform to protocol 'Equatable'
+    |               `- note: add stubs for conformance
+ 31 |     public var screenID: UInt32
+ 32 |     /// Рамка выбранного экрана, нужна для ограничения панели и зоны наведения.
+ 33 |     public var screenFrame: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 34 |     public var hasNotch: Bool
+ 35 |     public var notch: CGRect
+    |                `- note: stored property type 'CGRect' does not conform to protocol 'Equatable', preventing synthesized conformance of 'NotchLayout' to 'Equatable'
+ 36 | 
+ 37 |     public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+
+Swift.==:1:24: note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+1 | @inlinable public func == <T>(lhs: T, rhs: T) -> Bool where T : RawRepresentable, T.RawValue : Equatable
+  |                        `- note: candidate would match if 'NotchLayout' conformed to 'RawRepresentable'
+
+Swift.FloatingPoint.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+1 | protocol FloatingPoint {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'FloatingPoint'
+3 | 
+
+Swift.BinaryInteger.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+1 | protocol BinaryInteger {
+2 | public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : BinaryInteger}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'BinaryInteger'
+3 | 
+
+Swift._Pointer.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift._Pointer.==:2:31: note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+1 | protocol _Pointer {
+2 | @inlinable public static func == <Other>(lhs: Self, rhs: Other) -> Bool where Other : _Pointer}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to '_Pointer'
+3 | 
+
+Swift.Strideable.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+1 | protocol Strideable {
+2 | @inlinable public static func == (x: Self, y: Self) -> Bool}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'Strideable'
+3 | 
+
+Swift.StringProtocol.==:2:31: note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+1 | protocol StringProtocol {
+2 | @inlinable public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : StringProtocol}
+  |                               `- note: candidate would match if 'NotchLayout' conformed to 'StringProtocol'
+3 | 
+
+Swift.SIMD.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+1 | protocol SIMD {
+2 | public static func == (a: Self, b: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'SIMD'
+3 | 
+
+Foundation.AttributedStringProtocol.==:2:20: note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+1 | protocol AttributedStringProtocol {
+2 | public static func == <RHS>(lhs: Self, rhs: RHS) -> Bool where RHS : AttributedStringProtocol}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to 'AttributedStringProtocol'
+3 | 
+
+Foundation._BridgedStoredNSError.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+1 | protocol _BridgedStoredNSError {
+2 | public static func == (lhs: Self, rhs: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_BridgedStoredNSError'
+3 | 
+
+CoreFoundation._CFObject.==:2:20: note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+1 | protocol _CFObject {
+2 | public static func == (left: Self, right: Self) -> Bool}
+  |                    `- note: candidate would match if 'NotchLayout' conformed to '_CFObject'
+3 | 
+
+Swift.Equatable.==:2:13: note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+1 | protocol Equatable {
+2 | static func == (lhs: Self, rhs: Self) -> Bool}
+  |             `- note: protocol requires function '==' with type '(NotchLayout, NotchLayout) -> Bool'
+3 | 
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:22: error: value of type 'CGRect' has no member 'minX'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                      `- error: value of type 'CGRect' has no member 'minX'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:48:44: error: value of type 'CGRect' has no member 'minY'
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+    |                                            `- error: value of type 'CGRect' has no member 'minY'
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+ 50 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:26: error: value of type 'CGRect' has no member 'width'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                          `- error: value of type 'CGRect' has no member 'width'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:49:58: error: value of type 'CGRect' has no member 'height'
+ 47 |         return CGRect(
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+    |                                                          `- error: value of type 'CGRect' has no member 'height'
+ 50 |         )
+ 51 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:47:22: error: argument passed to call that takes no arguments
+ 45 |     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
+ 46 |         let wing = min(max(wingWidth, 0), NotchGeometry.maxWingWidth)
+ 47 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 48 |             x: notch.minX - wing, y: notch.minY,
+ 49 |             width: notch.width + 2 * wing, height: notch.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:22: error: value of type 'CGRect' has no member 'midX'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                      `- error: value of type 'CGRect' has no member 'midX'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:57:54: error: value of type 'CGRect' has no member 'maxY'
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+    |                                                      `- error: value of type 'CGRect' has no member 'maxY'
+ 58 |             width: size.width, height: size.height
+ 59 |         )
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:56:22: error: argument passed to call that takes no arguments
+ 54 |     public var expandedIsland: CGRect {
+ 55 |         let size = NotchGeometry.expandedSize
+ 56 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 57 |             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+ 58 |             width: size.width, height: size.height
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:65:36: error: value of type 'CGRect' has no member 'union'
+ 63 |     /// по горизонтали не выходит за экран.
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+    |                                    `- error: value of type 'CGRect' has no member 'union'
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:66:48: error: value of type 'CGRect' has no member 'minX'
+ 64 |     public var panelFrame: CGRect {
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+    |                                                `- error: value of type 'CGRect' has no member 'minX'
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:67:48: error: value of type 'CGRect' has no member 'maxX'
+ 65 |         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+    |                                                `- error: value of type 'CGRect' has no member 'maxX'
+ 68 |         return CGRect(
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:68:22: error: argument passed to call that takes no arguments
+ 66 |         let minX = max(union.minX, screenFrame.minX)
+ 67 |         let maxX = min(union.maxX, screenFrame.maxX)
+ 68 |         return CGRect(
+    |                      `- error: argument passed to call that takes no arguments
+ 69 |             x: minX, y: union.minY - NotchGeometry.glowMargin,
+ 70 |             width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:35: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                   `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:80:46: error: value of type 'CGRect' has no member 'maxY'
+ 78 |     public func hoverZone(expanded: Bool) -> CGRect {
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+    |                                              `- error: value of type 'CGRect' has no member 'maxY'
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+ 82 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:22: error: argument passed to call that takes no arguments
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                      `- error: argument passed to call that takes no arguments
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:31: error: value of type 'CGRect' has no member 'minX'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                               `- error: value of type 'CGRect' has no member 'minX'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:45: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                             `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:63: error: value of type 'CGRect' has no member 'width'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                               `- error: value of type 'CGRect' has no member 'width'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:81:89: error: value of type 'CGRect' has no member 'minY'
+ 79 |         let base = expanded ? expandedIsland : notch
+ 80 |         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+ 81 |         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
+    |                                                                                         `- error: value of type 'CGRect' has no member 'minY'
+ 82 |     }
+ 83 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:103:76: error: value of type 'CGRect' has no member 'maxY'
+101 |             return NotchLayout(
+102 |                 screenID: first.id, screenFrame: first.frame, hasNotch: true,
+103 |                 notch: centeredNotch(size: fakeNotchSize, top: first.frame.maxY, in: first.frame)
+    |                                                                            `- error: value of type 'CGRect' has no member 'maxY'
+104 |             )
+105 |         }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:109:40: error: value of type 'CGRect' has no member 'width'
+107 |         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+    |                                        `- error: value of type 'CGRect' has no member 'width'
+110 |             let notch = CGRect(
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:110:25: error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+108 |            let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+109 |            left + right < screen.frame.width {
+110 |             let notch = CGRect(
+    |                         `- error: the compiler is unable to type-check this expression in reasonable time; try breaking up the expression into distinct sub-expressions
+111 |                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
+112 |                 width: screen.frame.width - left - right, height: screen.safeAreaTop
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:119:67: error: value of type 'CGRect' has no member 'maxY'
+117 |         return NotchLayout(
+118 |             screenID: first.id, screenFrame: first.frame, hasNotch: false,
+119 |             notch: centeredNotch(size: pillSize, top: first.frame.maxY - first.menuBarHeight - pillGap, in: first.frame)
+    |                                                                   `- error: value of type 'CGRect' has no member 'maxY'
+120 |         )
+121 |     }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:25: error: value of type 'CGRect' has no member 'midX'
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |                         `- error: value of type 'CGRect' has no member 'midX'
+125 |     }
+126 | }
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/NotchGeometry.swift:124:15: error: argument passed to call that takes no arguments
+122 | 
+123 |     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
+124 |         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    |               `- error: argument passed to call that takes no arguments
+125 |     }
+126 | }
