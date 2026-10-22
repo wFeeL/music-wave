@@ -54,9 +54,25 @@ public struct NotchLayout: Sendable, Equatable {
         )
     }
 
+    /// Размер раскрытого острова. У выреза: `NotchGeometry.expandedSize` (под вырез 32 pt),
+    /// а под более высокий вырез панель выше на разницу, чтобы под вырезом осталось столько же
+    /// места. У капсулы: `NotchGeometry.pillExpandedSize`, без зоны под вырез.
+    public var expandedSize: CGSize {
+        guard hasNotch else { return NotchGeometry.pillExpandedSize }
+        let extra = max(notch.height - NotchGeometry.baseNotchHeight, 0)
+        return CGSize(width: NotchGeometry.expandedSize.width, height: NotchGeometry.expandedSize.height + extra)
+    }
+
+    /// От верха раскрытого острова до верха его содержимого (обложки). У выреза: высота выреза
+    /// (не меньше 32 pt) плюс `notchClearance`, под камерой ничего нет. У капсулы: `pillContentInset`.
+    public var expandedContentTop: CGFloat {
+        guard hasNotch else { return NotchGeometry.pillContentInset }
+        return max(notch.height, NotchGeometry.baseNotchHeight) + NotchGeometry.notchClearance
+    }
+
     /// Раскрытый остров: `expandedSize` по центру выреза, верх на уровне верха выреза.
     public var expandedIsland: CGRect {
-        let size = NotchGeometry.expandedSize
+        let size = expandedSize
         return CGRect(
             x: notch.midX - size.width / 2, y: notch.maxY - size.height,
             width: size.width, height: size.height
@@ -117,7 +133,20 @@ public struct NotchPointer: Sendable, Equatable {
 }
 
 public enum NotchGeometry {
-    public static let expandedSize = CGSize(width: 480, height: 170)
+    /// Видимая ширина раскрытой панели у выреза и у капсулы.
+    public static let expandedBodyWidth: CGFloat = 468
+    /// Вогнутые плечи раскрытой панели у выреза: рамка шире тела на них с каждой стороны.
+    public static let expandedShoulderRadius: CGFloat = 9
+    /// Раскрытый остров у выреза высотой `baseNotchHeight`.
+    public static let expandedSize = CGSize(width: expandedBodyWidth + 2 * expandedShoulderRadius, height: 170)
+    /// Высота выреза, под которую рассчитан `expandedSize`.
+    public static let baseNotchHeight: CGFloat = 32
+    /// Зазор между низом выреза и содержимым панели.
+    public static let notchClearance: CGFloat = 13
+    /// Раскрытая капсула на экране без выреза: зоны под вырез нет.
+    public static let pillExpandedSize = CGSize(width: expandedBodyWidth, height: 150)
+    /// Отступ содержимого раскрытой капсулы со всех сторон.
+    public static let pillContentInset: CGFloat = 16
     public static let pillSize = CGSize(width: 240, height: 28)
     public static let maxWingWidth: CGFloat = 120
     /// Насколько зона наведения выступает выше верха экрана.

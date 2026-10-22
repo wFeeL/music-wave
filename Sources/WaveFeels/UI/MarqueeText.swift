@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Строка в одну линию. Если текст помещается, это обычный `Text` без таймеров и анимаций.
-/// Если нет: пауза 1.5 с, прокрутка влево со скоростью 30 pt/с до конца текста, пауза 1.5 с,
-/// возврат к началу втрое быстрее, и снова. Обрезанные края затухают маской на 14 pt: правый,
-/// пока конец текста скрыт, левый, пока скрыто начало.
+/// Если нет, это бегущая строка по кругу: 2 с стоит в начале, затем уезжает влево со скоростью
+/// 30 pt/с, а через 36 pt за ней идет вторая копия; когда копия встает на место начала, все
+/// повторяется. Правый край затухает маской на 16 pt всегда, левый только пока текст движется.
 ///
 /// Ширина всегда предложенная, а не ширина текста: длинная строка не раздвигает соседей.
 /// Выбор между обычной и бегущей строкой делает `ViewThatFits` при раскладке, поэтому снимок
@@ -11,13 +11,14 @@ import SwiftUI
 /// живет в `task` и останавливается вместе с видом: бегущая строка есть только в раскрытой панели.
 /// При «Уменьшении движения» текст не прокручивается: видно начало и затухание справа.
 struct MarqueeText: View {
-    static let pause: Duration = .milliseconds(1500)
+    /// Сколько текст стоит в начале перед каждым кругом.
+    static let hold: Duration = .seconds(2)
     /// Скорость прокрутки, pt/с.
     static let speed: CGFloat = 30
-    /// Возврат к началу во столько раз быстрее.
-    static let returnSpeedup: CGFloat = 3
-    static let fadeWidth: CGFloat = 14
-    /// Как быстро появляется и пропадает затухание края, с.
+    /// Промежуток между концом текста и его копией.
+    static let gap: CGFloat = 36
+    static let fadeWidth: CGFloat = 16
+    /// Как быстро появляется и пропадает затухание левого края, с.
     static let fadeDuration = 0.2
 
     let text: String
@@ -37,11 +38,11 @@ struct MarqueeText: View {
 
 /// Бегущая строка для текста шире своего места.
 private struct MarqueeScroller: View {
-    /// Поездка зависит от текста и того, насколько он длиннее места; новая поездка начинается с начала.
+    /// Круг зависит от текста и его ширины; новый круг начинается с начала.
     private struct Trip: Equatable {
         var text: String
+        /// Путь за круг: ширина текста и промежуток; 0, если прокрутки нет.
         var distance: CGFloat
-        var reduceMotion: Bool
     }
 
     let text: String
@@ -50,14 +51,13 @@ private struct MarqueeScroller: View {
     @State private var textWidth: CGFloat = 0
     @State private var boxWidth: CGFloat = 0
     @State private var offset: CGFloat = 0
-    /// Начало текста ушло влево: левый край затухает.
-    @State private var headHidden = false
-    /// Конец текста дошел до правого края: правый край не затухает.
-    @State private var tailShown = false
+    /// Текст движется: левый край затухает.
+    @State private var moving = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let distance = max(textWidth - boxWidth, 0)
+        let overflows = textWidth - boxWidth > 0.5
+        let distance = overflows && !reduceMotion ? textWidth + MarqueeText.gap : 0
         // Место задает скрытая строка: высота одной строки, ширина ровно предложенная (минимум 0).
         // Сам текст во всю длину лежит поверх и в раскладке не участвует; маска обрезает его по месту.
         Text(verbatim: text)
@@ -66,61 +66,67 @@ private struct MarqueeScroller: View {
             .hidden()
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .leading) {
-                Text(verbatim: text)
-                    .font(font)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
-                    .offset(x: offset)
+                HStack(spacing: MarqueeText.gap) {
+                    label
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+                    // Копия, которая въезжает следом; до начала движения она за правым краем.
+                    label
+                        .accessibilityHidden(true)
+                }
+                .fixedSize()
+                .offset(x: offset)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
             .mask { edgeMask }
-            .task(id: Trip(text: text, distance: distance, reduceMotion: reduceMotion)) {
-                await scroll(distance: reduceMotion ? 0 : distance)
+            .task(id: Trip(text: text, distance: distance)) {
+                await loop(distance: distance)
             }
+    }
+
+    private var label: some View {
+        Text(verbatim: text)
+            .font(font)
+            .lineLimit(1)
+            .fixedSize()
     }
 
     private var edgeMask: some View {
         HStack(spacing: 0) {
-            edge(fading: headHidden, from: .leading)
+            ZStack {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
+                Rectangle().opacity(moving ? 0 : 1)
+            }
+            .frame(width: MarqueeText.fadeWidth)
             Rectangle()
-            edge(fading: !tailShown, from: .trailing)
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: MarqueeText.fadeWidth)
         }
     }
 
-    /// Край маски: плавный переход от прозрачного у самого края или сплошной, если затухания нет.
-    private func edge(fading: Bool, from side: UnitPoint) -> some View {
-        let inside: UnitPoint = side == .leading ? .trailing : .leading
-        return ZStack {
-            LinearGradient(colors: [.clear, .black], startPoint: side, endPoint: inside)
-            Rectangle().opacity(fading ? 0 : 1)
-        }
-        .frame(width: MarqueeText.fadeWidth)
-    }
-
-    private func scroll(distance: CGFloat) async {
-        offset = 0
-        headHidden = false
-        tailShown = false
-        guard distance > 0.5 else { return }
-        let forward = Double(distance / MarqueeText.speed)
-        let back = forward / Double(MarqueeText.returnSpeedup)
+    private func loop(distance: CGFloat) async {
+        jumpToStart()
+        moving = false
+        guard distance > 0 else { return }
+        let lap = Double(distance / MarqueeText.speed)
         let fade = Animation.easeInOut(duration: MarqueeText.fadeDuration)
         do {
             while true {
-                try await Task.sleep(for: MarqueeText.pause)
-                withAnimation(.linear(duration: forward)) { offset = -distance }
-                withAnimation(fade) { headHidden = true }
-                try await Task.sleep(for: .seconds(forward))
-                withAnimation(fade) { tailShown = true }
-                try await Task.sleep(for: MarqueeText.pause)
-                withAnimation(.easeInOut(duration: back)) { offset = 0 }
-                withAnimation(fade) { tailShown = false }
-                try await Task.sleep(for: .seconds(back))
-                withAnimation(fade) { headHidden = false }
+                try await Task.sleep(for: MarqueeText.hold)
+                withAnimation(fade) { moving = true }
+                withAnimation(.linear(duration: lap)) { offset = -distance }
+                try await Task.sleep(for: .seconds(lap))
+                // Копия стоит ровно там, где начинался текст: прыжок к началу незаметен.
+                jumpToStart()
+                withAnimation(fade) { moving = false }
             }
         } catch {
-            // Вид исчез или текст сменился: следующая поездка начнется с начала.
+            // Вид исчез или текст сменился: следующий круг начнется с начала.
         }
+    }
+
+    private func jumpToStart() {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { offset = 0 }
     }
 }

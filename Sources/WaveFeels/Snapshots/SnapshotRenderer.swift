@@ -146,30 +146,38 @@ enum SnapshotRenderer {
     /// от краев обложки.
     @MainActor
     static func artworkSampleRect() -> CGRect {
-        let layout = notchLayout
-        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(AppSettings.Default.wingWidth))
+        let (geometry, origin) = expandedGeometry()
         let content = geometry.panelContent
         let size = ExpandedPanelView.artworkSize
-        let panelTop = screenSize.height - layout.panelFrame.maxY
         let artwork = CGRect(
-            x: layout.panelFrame.minX + content.minX + ExpandedPanelView.leadingInset,
-            y: panelTop + content.midY - size / 2,
-            width: size, height: size
+            x: origin.x + content.minX + geometry.panelInset, y: origin.y + content.minY, width: size, height: size
         )
         return artwork.insetBy(dx: 12, dy: 12)
     }
 
-    /// Квадрат 20×20 pt по центру средней кнопки («пауза/играть») раскрытой панели на снимке.
+    /// Квадраты по центру кнопок «назад» (12×12 pt) и «пауза/играть» (20×20 pt) раскрытой панели
+    /// на снимке. Рамка кнопок заходит за линию содержимого на поле значка «вперед».
     @MainActor
-    static func playButtonSampleRect() -> CGRect {
-        let layout = notchLayout
-        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(AppSettings.Default.wingWidth))
+    static func transportSampleRects() -> (backward: CGRect, play: CGRect) {
+        let (geometry, origin) = expandedGeometry()
         let content = geometry.panelContent
         let button = ExpandedPanelView.buttonSize
-        let centerX = content.maxX - ExpandedPanelView.trailingInset - button - ExpandedPanelView.buttonSpacing - button / 2
-        let panelTop = screenSize.height - layout.panelFrame.maxY
-        let center = CGPoint(x: layout.panelFrame.minX + centerX, y: panelTop + content.midY)
-        return CGRect(x: center.x - 10, y: center.y - 10, width: 20, height: 20)
+        let pitch = button + ExpandedPanelView.buttonSpacing
+        let trailing = content.maxX - geometry.panelInset + ExpandedPanelView.skipSymbolBearing
+        let forwardX = origin.x + trailing - button / 2
+        let y = origin.y + content.midY
+        func square(_ x: CGFloat, _ side: CGFloat) -> CGRect {
+            CGRect(x: x - side / 2, y: y - side / 2, width: side, height: side)
+        }
+        return (square(forwardX - 2 * pitch, 12), square(forwardX - pitch, 20))
+    }
+
+    /// Геометрия острова на экране с вырезом и левый верхний угол панели на снимке.
+    @MainActor
+    private static func expandedGeometry() -> (IslandGeometry, CGPoint) {
+        let layout = notchLayout
+        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(AppSettings.Default.wingWidth))
+        return (geometry, CGPoint(x: layout.panelFrame.minX, y: screenSize.height - layout.panelFrame.maxY))
     }
 
     /// Список снимков в каталоге: имена PNG по строке. Пишется до отрисовки, CI сверяет с ним,

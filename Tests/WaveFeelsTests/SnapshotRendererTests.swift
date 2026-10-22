@@ -46,22 +46,31 @@ struct SnapshotRendererTests {
         // текст не сдвигает ее, середина обложки цветная, не черная.
         let artwork = SnapshotRenderer.artworkSampleRect()
         let artworkArea = Int(artwork.width * artwork.height * SnapshotRenderer.scale * SnapshotRenderer.scale)
-        for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork", "11-expanded-no-adapter"] {
+        for name in ["04-expanded", "05-expanded-paused", "06-long-title"] {
             let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
             let artworkCount = expanded.saturatedPixels(in: artwork, scale: SnapshotRenderer.scale)
             #expect(artworkCount > artworkArea / 2, "\(name): цветных пикселей обложки \(artworkCount) из \(artworkArea)")
         }
 
+        // Плитка без обложки и значок источника не цветные, но и не пустые.
+        for name in ["10-expanded-no-artwork", "11-expanded-no-adapter"] {
+            let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
+            let visible = expanded.visiblePixels(in: artwork, scale: SnapshotRenderer.scale)
+            #expect(visible > artworkArea / 4, "\(name): заметных пикселей на месте обложки \(visible) из \(artworkArea)")
+        }
+
         // Кнопки на своем месте: в середине средней кнопки белый значок «пауза» или «играть».
-        let playButton = SnapshotRenderer.playButtonSampleRect()
+        let transport = SnapshotRenderer.transportSampleRects()
         for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork"] {
             let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
-            let bright = expanded.brightPixels(in: playButton, scale: SnapshotRenderer.scale)
+            let bright = expanded.brightPixels(in: transport.play, scale: SnapshotRenderer.scale)
             #expect(bright > 100, "\(name): светлых пикселей в кнопке «пауза/играть» \(bright)")
+            let back = expanded.brightPixels(in: transport.backward, scale: SnapshotRenderer.scale)
+            #expect(back > 20, "\(name): светлых пикселей в кнопке «назад» \(back)")
         }
-        // Без Now Playing кнопок нет.
+        // Без Now Playing кнопок управления нет (кнопка «Открыть» правее, на месте «пауза/играть»).
         let noAdapter = try Bitmap(url: directory.appendingPathComponent("11-expanded-no-adapter.png"))
-        #expect(noAdapter.brightPixels(in: playButton, scale: SnapshotRenderer.scale) == 0)
+        #expect(noAdapter.brightPixels(in: transport.backward, scale: SnapshotRenderer.scale) == 0)
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
@@ -111,8 +120,17 @@ private struct Bitmap {
     /// Почти белые пиксели: все каналы от этого значения.
     static let brightValue: UInt8 = 200
 
+    /// Сколько пикселей в `rect` (pt, начало сверху слева) заметно светлее черного.
+    func visiblePixels(in rect: CGRect, scale: CGFloat) -> Int {
+        count(in: rect, scale: scale) { r, g, b in max(r, g, b) >= 20 }
+    }
+
     /// Сколько почти белых пикселей в `rect` (pt, начало сверху слева).
     func brightPixels(in rect: CGRect, scale: CGFloat) -> Int {
+        count(in: rect, scale: scale) { r, g, b in min(r, g, b) >= Self.brightValue }
+    }
+
+    private func count(in rect: CGRect, scale: CGFloat, where matches: (UInt8, UInt8, UInt8) -> Bool) -> Int {
         let x0 = max(Int((rect.minX * scale).rounded(.down)), 0)
         let x1 = min(Int((rect.maxX * scale).rounded(.up)), width)
         let y0 = max(Int((rect.minY * scale).rounded(.down)), 0)
@@ -121,7 +139,7 @@ private struct Bitmap {
         for y in y0..<max(y1, y0) {
             for x in x0..<max(x1, x0) {
                 let offset = (y * width + x) * 4
-                if min(pixels[offset], pixels[offset + 1], pixels[offset + 2]) >= Self.brightValue {
+                if matches(pixels[offset], pixels[offset + 1], pixels[offset + 2]) {
                     count += 1
                 }
             }

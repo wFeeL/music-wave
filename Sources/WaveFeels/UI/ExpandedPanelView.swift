@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WaveCore
 
@@ -5,28 +6,25 @@ import WaveCore
 /// кнопки. Волны вдоль нижнего края (`WaveCanvas`, стиль `.panel`, 36 pt) рисует `IslandView`
 /// вместе с остальной сценой острова, в том же кадре, что и форма.
 ///
-/// Вид занимает `IslandGeometry.panelContent`: всю ширину панели от низа выреза (у капсулы от
-/// верха панели) до верха полосы волн, и стоит в нем по центру по вертикали. Слева обложка
-/// 72×72, справа от нее колонка текста, у правого края три кнопки. Колонка: название, исполнитель,
-/// прогресс с прошедшим и оставшимся временем; она по центру обложки.
+/// Вид занимает `IslandGeometry.panelContent`: полосу высотой с обложку (72 pt) во всю ширину
+/// рамки панели, ниже выреза на `NotchGeometry.notchClearance` (у капсулы на 16 pt от верха).
+/// `inset`: от края рамки до линии содержимого, 16 pt от видимого края тела. Слева обложка,
+/// за ней колонка текста, справа три кнопки; все на одной средней линии. Колонка: название,
+/// исполнитель, прогресс с прошедшим и оставшимся временем.
 ///
 /// Трек берется из `AppModel.lastTrack`, он держится и на паузе. Кнопки и прогресс видны, только
-/// если Now Playing работает и знает трек источника; иначе вместо названия трека показывается
-/// название источника. Время обновляется раз в секунду (`TimelineView(.periodic)`), пока трек
-/// играет и панель раскрыта; на паузе и в снимках время стоит.
+/// если Now Playing работает и знает трек источника. Иначе слева значок приложения-источника,
+/// его название и «Нет данных о треке», а справа кнопка «Открыть», которая выводит источник
+/// вперед (у всего звука системы кнопки нет). Время обновляется раз в секунду
+/// (`TimelineView(.periodic)`), пока трек играет и панель раскрыта; на паузе и в снимках стоит.
 struct ExpandedPanelView: View {
-    static let artworkSize: CGFloat = 72
-    static let artworkRadius: CGFloat = 14
+    static let artworkSize: CGFloat = IslandGeometry.panelContentHeight
+    static let artworkRadius: CGFloat = 11
     /// Сторона картинки обложки в пикселях: 72 pt на экране Retina.
     static let artworkPixels = 144
-    /// Слева, как у волн, чтобы обложка и полоса волн начинались на одной линии.
-    static let leadingInset: CGFloat = IslandGeometry.panelWaveSideInset
-    /// Справа от рамки кнопок: значки встают примерно на линию волн.
-    static let trailingInset: CGFloat = 16
-    /// Справа без кнопок, как слева.
-    static let trailingInsetWithoutControls: CGFloat = IslandGeometry.panelWaveSideInset
     static let artworkSpacing: CGFloat = 14
-    static let controlsSpacing: CGFloat = 16
+    /// От колонки текста до рамки первой кнопки; до самого значка около 21 pt.
+    static let controlsSpacing: CGFloat = 14
     static let titleSize: CGFloat = 15
     static let artistSize: CGFloat = 13
     static let artistOpacity = 0.65
@@ -34,27 +32,37 @@ struct ExpandedPanelView: View {
     static let progressSpacing: CGFloat = 12
     static let progressHeight: CGFloat = 3
     static let timeSize: CGFloat = 11
-    static let timeOpacity = 0.5
+    static let timeOpacity = 0.55
     static let timeSpacing: CGFloat = 8
     static let buttonSize: CGFloat = 36
     static let buttonSpacing: CGFloat = 2
-    static let symbolSize: CGFloat = 20
-    /// Ширина трех кнопок с промежутками.
+    /// «Пауза/играть» главная: крупнее и жирнее «назад» и «вперед».
+    static let playSymbolSize: CGFloat = 22
+    static let skipSymbolSize: CGFloat = 15
+    /// Поле внутри рамки кнопки справа от значка `forward.fill` 15 pt (ширина около 22 pt):
+    /// рамка заходит за линию содержимого на столько, и край значка встает ровно на нее.
+    static let skipSymbolBearing: CGFloat = 7
+    /// Ширина трех кнопок с промежутками (шаг центров 38 pt).
     static let controlsWidth: CGFloat = 3 * buttonSize + 2 * buttonSpacing
+    static let missingTrackText = "Нет данных о треке"
+    static let openSourceText = "Открыть"
 
-    /// Ширина колонки текста: все, что осталось в панели после отступов, обложки и кнопок.
-    /// Задается явно, чтобы длинное название не раздвигало панель.
-    static func textColumnWidth(controls: Bool) -> CGFloat {
-        let panel = NotchGeometry.expandedSize.width
-        let leading = leadingInset + artworkSize + artworkSpacing
-        let trailing = controls ? controlsSpacing + controlsWidth + trailingInset : trailingInsetWithoutControls
-        return max(panel - leading - trailing, 0)
+    /// Ширина колонки текста рядом с кнопками: все, что осталось в рамке шириной `width`
+    /// после отступов, обложки и кнопок. Задается явно, чтобы длинное название не раздвигало панель.
+    static func textColumnWidth(width: CGFloat, inset: CGFloat) -> CGFloat {
+        let leading = inset + artworkSize + artworkSpacing
+        let trailing = controlsSpacing + controlsWidth + inset - skipSymbolBearing
+        return max(width - leading - trailing, 0)
     }
 
     /// Сколько ждать подтверждения паузы или игры от Now Playing, прежде чем вернуть значок.
     static let pendingPlaybackTimeout: Duration = .seconds(3)
 
     let model: AppModel
+    /// Ширина рамки панели.
+    let width: CGFloat
+    /// От края рамки до линии содержимого слева и справа.
+    let inset: CGFloat
     /// Неподвижное время для снимков; `nil`: время идет.
     var date: Date? = nil
 
@@ -65,36 +73,14 @@ struct ExpandedPanelView: View {
     var body: some View {
         // Без Now Playing трека нет вовсе, даже если он остался с тех пор, когда адаптер работал.
         let playback = model.nowPlayingAvailable ? model.lastTrack : nil
-        let source = model.effectiveSource.displayName
-        let title = playback.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? source
-        let artist = playback?.artist.flatMap { $0.isEmpty ? nil : $0 }
-
-        HStack(spacing: 0) {
-            PanelArtworkView(artwork: playback == nil ? nil : model.artwork, palette: model.palette)
-                .padding(.trailing, Self.artworkSpacing)
-            VStack(alignment: .leading, spacing: 0) {
-                MarqueeText(text: title, font: .system(size: Self.titleSize, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                if let artist {
-                    MarqueeText(text: artist, font: .system(size: Self.artistSize))
-                        .foregroundStyle(Color.white.opacity(Self.artistOpacity))
-                        .padding(.top, Self.artistSpacing)
-                }
-                if let playback, let duration = playback.duration, playback.elapsedTime != nil {
-                    progress(playback, duration: duration)
-                        .padding(.top, Self.progressSpacing)
-                }
-            }
-            .frame(width: Self.textColumnWidth(controls: playback != nil), alignment: .leading)
+        Group {
             if let playback {
-                controls(isPlaying: pendingPlaying ?? playback.isPlaying)
-                    .fixedSize()
-                    .padding(.leading, Self.controlsSpacing)
+                trackRow(playback)
+            } else {
+                sourceRow
             }
         }
-        .padding(.leading, Self.leadingInset)
-        .padding(.trailing, playback == nil ? Self.trailingInsetWithoutControls : Self.trailingInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: width, height: Self.artworkSize, alignment: .leading)
         .onChange(of: playback?.isPlaying) {
             // Now Playing подтвердил (или трек сменился): значок снова из состояния трека.
             pendingPlaying = nil
@@ -111,6 +97,69 @@ struct ExpandedPanelView: View {
                 // Нажали еще раз или панель закрылась.
             }
         }
+    }
+
+    // MARK: - Трек
+
+    private func trackRow(_ track: NowPlayingInfo) -> some View {
+        let title = track.title.isEmpty ? model.effectiveSource.displayName : track.title
+        let artist = track.artist.flatMap { $0.isEmpty ? nil : $0 }
+        return HStack(spacing: 0) {
+            PanelArtworkView(artwork: model.artwork)
+                .padding(.trailing, Self.artworkSpacing)
+            VStack(alignment: .leading, spacing: 0) {
+                MarqueeText(text: title, font: .system(size: Self.titleSize, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                if let artist {
+                    MarqueeText(text: artist, font: .system(size: Self.artistSize))
+                        .foregroundStyle(Color.white.opacity(Self.artistOpacity))
+                        .padding(.top, Self.artistSpacing)
+                }
+                if let duration = track.duration, track.elapsedTime != nil {
+                    progress(track, duration: duration)
+                        .padding(.top, Self.progressSpacing)
+                }
+            }
+            .frame(width: Self.textColumnWidth(width: width, inset: inset), alignment: .leading)
+            controls(isPlaying: pendingPlaying ?? track.isPlaying)
+                .fixedSize()
+                .padding(.leading, Self.controlsSpacing)
+        }
+        .padding(.leading, inset)
+    }
+
+    // MARK: - Источник без трека
+
+    private var sourceRow: some View {
+        let source = model.effectiveSource
+        let opens: Bool = switch source {
+        case .application: true
+        case .systemWide: false
+        }
+        return HStack(spacing: 0) {
+            SourceIconView(icon: model.sourceIcon())
+                .padding(.trailing, Self.artworkSpacing)
+            VStack(alignment: .leading, spacing: Self.artistSpacing) {
+                MarqueeText(text: source.displayName, font: .system(size: Self.titleSize, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                Text(verbatim: Self.missingTrackText)
+                    .font(.system(size: Self.artistSize))
+                    .foregroundStyle(Color.white.opacity(Self.artistOpacity))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            if opens {
+                Button {
+                    model.openSource()
+                } label: {
+                    Text(verbatim: Self.openSourceText)
+                }
+                .buttonStyle(PanelCapsuleButtonStyle())
+                .fixedSize()
+                .padding(.leading, Self.controlsSpacing)
+            }
+        }
+        .padding(.horizontal, inset)
     }
 
     // MARK: - Прогресс
@@ -145,6 +194,7 @@ struct ExpandedPanelView: View {
                 model.adapter.send(.previousTrack)
             } label: {
                 Image(systemName: "backward.fill")
+                    .font(.system(size: Self.skipSymbolSize, weight: .semibold))
             }
             .accessibilityLabel("Предыдущий трек")
 
@@ -153,6 +203,7 @@ struct ExpandedPanelView: View {
                 model.adapter.send(isPlaying ? .pause : .play)
             } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: Self.playSymbolSize, weight: .semibold))
                     .contentTransition(.symbolEffect(.replace))
                     .animation(.snappy(duration: 0.2), value: isPlaying)
             }
@@ -162,6 +213,7 @@ struct ExpandedPanelView: View {
                 model.adapter.send(.nextTrack)
             } label: {
                 Image(systemName: "forward.fill")
+                    .font(.system(size: Self.skipSymbolSize, weight: .semibold))
             }
             .accessibilityLabel("Следующий трек")
         }
@@ -169,25 +221,43 @@ struct ExpandedPanelView: View {
     }
 }
 
-// MARK: - Обложка
+// MARK: - Обложка и значок источника
 
-/// Обложка 72×72 со скруглением 14 pt (continuous) и тонкой светлой обводкой, чтобы темная
-/// обложка не сливалась с черной панелью. Без обложки: градиент текущей палитры с `music.note`.
-/// Новая обложка и новая палитра появляются плавно.
-private struct PanelArtworkView: View {
+/// Плитки 72×72 со скруглением 11 pt (continuous) и тонкой светлой обводкой.
+@MainActor
+private enum PanelTile {
     static let strokeOpacity = 0.1
     static let strokeWidth: CGFloat = 0.5
-    static let placeholderShade = 0.18
-    static let noteSize: CGFloat = 28
-    static let noteOpacity = 0.92
+    static let fillOpacity = 0.1
+    static let symbolSize: CGFloat = 28
+    static let symbolOpacity = 0.45
+
+    static var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: ExpandedPanelView.artworkRadius, style: .continuous)
+    }
+
+    /// Нейтральная плитка с символом: вместо обложки или значка источника.
+    static func neutral(symbol: String) -> some View {
+        shape
+            .fill(Color.white.opacity(fillOpacity))
+            .overlay {
+                Image(systemName: symbol)
+                    .font(.system(size: symbolSize, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(symbolOpacity))
+            }
+    }
+}
+
+/// Обложка с обводкой, чтобы темная обложка не сливалась с черной панелью. Без обложки
+/// нейтральная плитка с `music.note`; волны в этом случае в стандартной палитре. Новая обложка
+/// появляется плавно.
+private struct PanelArtworkView: View {
     static let crossfade = Animation.easeInOut(duration: 0.35)
 
     let artwork: PanelArtwork?
-    let palette: [PaletteColor]
 
     var body: some View {
         let size = ExpandedPanelView.artworkSize
-        let shape = RoundedRectangle(cornerRadius: ExpandedPanelView.artworkRadius, style: .continuous)
         ZStack {
             if let artwork {
                 Image(decorative: artwork.image, scale: 1)
@@ -198,32 +268,44 @@ private struct PanelArtworkView: View {
                     .id(artwork.id)
                     .transition(.opacity)
             } else {
-                placeholder
+                PanelTile.neutral(symbol: "music.note")
                     .transition(.opacity)
             }
         }
         .frame(width: size, height: size)
-        .clipShape(shape)
+        .clipShape(PanelTile.shape)
         .overlay {
-            shape.strokeBorder(Color.white.opacity(Self.strokeOpacity), lineWidth: Self.strokeWidth)
+            PanelTile.shape.strokeBorder(Color.white.opacity(PanelTile.strokeOpacity), lineWidth: PanelTile.strokeWidth)
         }
         .animation(Self.crossfade, value: artwork?.id)
         .accessibilityHidden(true)
     }
+}
 
-    private var placeholder: some View {
-        LinearGradient(
-            colors: palette.map { Color(palette: $0) },
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .overlay(Color.black.opacity(Self.placeholderShade))
-        .overlay {
-            Image(systemName: "music.note")
-                .font(.system(size: Self.noteSize, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(Self.noteOpacity))
+/// Значок приложения-источника как есть, 72 pt, без своей маски: у значков macOS она уже есть.
+/// Без значка (весь звук системы) нейтральная плитка с динамиком.
+private struct SourceIconView: View {
+    let icon: NSImage?
+
+    var body: some View {
+        let size = ExpandedPanelView.artworkSize
+        Group {
+            if let icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                PanelTile.neutral(symbol: "speaker.wave.2.fill")
+                    .overlay {
+                        PanelTile.shape.strokeBorder(
+                            Color.white.opacity(PanelTile.strokeOpacity), lineWidth: PanelTile.strokeWidth
+                        )
+                    }
+            }
         }
-        .animation(.easeInOut(duration: PaletteFade.duration), value: palette)
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -287,9 +369,9 @@ private struct ProgressFill: Shape {
 
 // MARK: - Кнопки
 
-/// Кнопка панели: значок 20 pt без рамки, при наведении под ним светлый круг 36 pt, при
-/// нажатии круг ярче, а кнопка чуть сжимается. Без системных стилей: AppKit-кнопки здесь
-/// смотрелись бы чужими, и `ImageRenderer` их не рисует.
+/// Кнопка-значок панели без рамки. Рамка 36×36; при наведении под значком светлый круг,
+/// при нажатии круг ярче, а кнопка чуть сжимается. Размер значка задает сама кнопка. Без
+/// системных стилей: AppKit-кнопки здесь смотрелись бы чужими, и `ImageRenderer` их не рисует.
 private struct IslandButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         IslandButtonBody(configuration: configuration)
@@ -304,13 +386,11 @@ private struct IslandButtonBody: View {
 
     let configuration: ButtonStyleConfiguration
     @State private var hovering = false
-    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         let pressed = configuration.isPressed
         let highlight = pressed ? Self.pressedOpacity : (hovering ? Self.hoverOpacity : 0)
         configuration.label
-            .font(.system(size: ExpandedPanelView.symbolSize, weight: .medium))
             .foregroundStyle(Color.white.opacity(hovering || pressed ? 1 : Self.restingSymbolOpacity))
             .frame(width: ExpandedPanelView.buttonSize, height: ExpandedPanelView.buttonSize)
             .background {
@@ -318,7 +398,46 @@ private struct IslandButtonBody: View {
             }
             .contentShape(Circle())
             .scaleEffect(pressed ? Self.pressedScale : 1)
-            .opacity(isEnabled ? 1 : 0.4)
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: pressed)
+    }
+}
+
+/// Капсула с текстом («Открыть»): 13 pt medium, высота 28 pt, заливка белым 12 %, при наведении
+/// и нажатии ярче.
+private struct PanelCapsuleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PanelCapsuleButtonBody(configuration: configuration)
+    }
+}
+
+private struct PanelCapsuleButtonBody: View {
+    static let height: CGFloat = 28
+    static let horizontalPadding: CGFloat = 12
+    static let textSize: CGFloat = 13
+    static let restingOpacity = 0.12
+    static let hoverOpacity = 0.18
+    static let pressedOpacity = 0.24
+    static let pressedScale: CGFloat = 0.96
+
+    let configuration: ButtonStyleConfiguration
+    @State private var hovering = false
+
+    var body: some View {
+        let pressed = configuration.isPressed
+        let fill = pressed ? Self.pressedOpacity : (hovering ? Self.hoverOpacity : Self.restingOpacity)
+        configuration.label
+            .font(.system(size: Self.textSize, weight: .medium))
+            .foregroundStyle(Color.white)
+            .lineLimit(1)
+            .padding(.horizontal, Self.horizontalPadding)
+            .frame(height: Self.height)
+            .background {
+                Capsule().fill(Color.white.opacity(fill))
+            }
+            .contentShape(Capsule())
+            .scaleEffect(pressed ? Self.pressedScale : 1)
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.15), value: hovering)
             .animation(.spring(response: 0.22, dampingFraction: 0.65), value: pressed)

@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import UniformTypeIdentifiers
 import WaveCore
 
 /// Цвет палитры из WaveCore. В SDK macOS есть одноименная структура QuickDraw `RGBColor`
@@ -88,6 +89,8 @@ final class AppModel {
     @ObservationIgnored private var artworkNowPlaying = false
     /// Обложка, из которой сейчас получены `artwork` и `palette` (`nil`: стандартная палитра).
     @ObservationIgnored private var shownArtworkData: Data?
+    /// Значок приложения-источника для панели без трека, по пути бандла.
+    @ObservationIgnored private var sourceIconCache: (path: String, icon: NSImage)?
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         settings = AppSettings(defaults: defaults)
@@ -518,6 +521,38 @@ final class AppModel {
         if let analysis, analysis.image == nil {
             log("обложка не прочиталась, палитра стандартная")
         }
+    }
+
+    // MARK: - Источник в панели
+
+    /// Значок приложения-источника для панели без трека; у всего звука системы значка нет.
+    /// Если приложения по пути нет, значок обычного приложения.
+    func sourceIcon() -> NSImage? {
+        guard case .application(_, let path, _) = effectiveSource else { return nil }
+        if let cached = sourceIconCache, cached.path == path { return cached.icon }
+        let workspace = NSWorkspace.shared
+        let icon = FileManager.default.fileExists(atPath: path)
+            ? workspace.icon(forFile: path)
+            : workspace.icon(for: .applicationBundle)
+        sourceIconCache = (path, icon)
+        return icon
+    }
+
+    /// Кнопка «Открыть» в панели без трека: запускает приложение-источник или выводит его вперед.
+    func openSource() {
+        guard case .application(let bundleID, let path, let name) = effectiveSource else { return }
+        var url: URL?
+        if FileManager.default.fileExists(atPath: path) {
+            url = URL(fileURLWithPath: path, isDirectory: true)
+        } else if !bundleID.isEmpty {
+            url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        }
+        guard let url else {
+            log("открыть источник не удалось: нет приложения \(name)")
+            return
+        }
+        log("открываю источник: \(name)")
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
     }
 
     // MARK: - Кадр острова

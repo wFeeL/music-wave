@@ -6,8 +6,9 @@ import WaveCore
 ///
 /// Свернутый остров: черная форма на вырез и крылья, волны только в крыльях, зеркально, x = 0
 /// у края выреза; над самим вырезом ничего не рисуется. Раскрытый: черная панель с мягкой
-/// тенью, волны во всю ширину вдоль нижнего края, над ними `ExpandedPanelView` (обложка,
-/// название, прогресс, кнопки).
+/// тенью и плечами 9 pt (у свернутого 6 pt), волны во всю ширину вдоль нижнего края, над ними
+/// `ExpandedPanelView` (обложка, название, прогресс, кнопки). На паузе волны панели, затихнув,
+/// гаснут до 15 %.
 /// Капсула на экране без выреза (ровно `NotchGeometry.pillSize`, без крыльев): волны идут
 /// через нее одной линией от середины, по краю свернутой капсулы тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
 ///
@@ -52,6 +53,10 @@ struct IslandView: View {
     static let expandedShadowOpacity = 0.25
     static let expandedShadowRadius: CGFloat = 16
     static let expandedShadowOffset: CGFloat = 4
+    /// Волны раскрытой панели на паузе: гаснут до этой яркости, когда затихли.
+    static let pausedWaveOpacity = 0.15
+    static let pausedWaveDelay = 1.0
+    static let pausedWaveFade = 0.5
     /// Обводка свернутой капсулы.
     static let pillStrokeWidth: CGFloat = 0.5
     static let pillStrokeOpacity = 0.08
@@ -104,7 +109,10 @@ struct IslandView: View {
         let content = geometry.panelContent
         return ZStack(alignment: .topLeading) {
             if state == .expanded {
-                ExpandedPanelView(model: model, date: clock.map { Date(timeIntervalSinceReferenceDate: $0()) })
+                ExpandedPanelView(
+                    model: model, width: content.width, inset: geometry.panelInset,
+                    date: clock.map { Date(timeIntervalSinceReferenceDate: $0()) }
+                )
                     .frame(width: content.width, height: content.height)
                     .offset(x: content.minX, y: content.minY)
                     .transition(Self.panelContentTransition)
@@ -116,7 +124,7 @@ struct IslandView: View {
                 if layout.hasNotch {
                     IslandShape(
                         bottomRadius: state == .expanded ? Self.expandedRadius : Self.collapsedRadius,
-                        shoulderRadius: IslandGeometry.shoulderRadius
+                        shoulderRadius: IslandGeometry.shoulder(for: state)
                     )
                 } else {
                     RoundedRectangle(
@@ -153,7 +161,7 @@ struct IslandView: View {
                     island(
                         IslandShape(
                             bottomRadius: state == .expanded ? Self.expandedRadius : Self.collapsedRadius,
-                            shoulderRadius: IslandGeometry.shoulderRadius
+                            shoulderRadius: IslandGeometry.shoulder(for: state)
                         ),
                         rect: rect, state: state, geometry: geometry, waves: waves, visuals: visuals, glow: glow
                     )
@@ -211,7 +219,14 @@ struct IslandView: View {
         ZStack(alignment: .topLeading) {
             switch state {
             case .expanded:
+                // На паузе волны сначала затихают в линию (около секунды), затем полоса гаснет.
+                let paused = model.nowPlayingAvailable && model.lastTrack?.isPlaying == false
                 waveLayer(waves, rect: geometry.panelWaves, mirrored: false, glow: glow)
+                    .opacity(paused ? Self.pausedWaveOpacity : 1)
+                    .animation(
+                        .easeInOut(duration: Self.pausedWaveFade).delay(paused ? Self.pausedWaveDelay : 0),
+                        value: paused
+                    )
                     .transition(.opacity)
             case .collapsed, .hidden:
                 if layout.hasNotch {
@@ -293,14 +308,24 @@ struct IslandView: View {
 
 /// Прямоугольники острова и волн в координатах панели (начало сверху слева, ось Y вниз).
 struct IslandGeometry {
-    /// Вогнутые плечи формы у верхних углов (только у выреза).
+    /// Вогнутые плечи формы у верхних углов (только у выреза), у свернутого острова.
     static let shoulderRadius: CGFloat = 6
+    /// Плечи раскрытой панели шире, форма переходит к ним анимацией вместе с остальным.
+    static let expandedShoulderRadius: CGFloat = NotchGeometry.expandedShoulderRadius
+
+    static func shoulder(for state: IslandState) -> CGFloat {
+        state == .expanded ? expandedShoulderRadius : shoulderRadius
+    }
     /// Отступ волн крыла от внешнего края тела острова, сверх плеча.
     static let wingOuterInset: CGFloat = 4
-    /// Отступы волн раскрытой панели от боковых краев и снизу, их высота.
-    static let panelWaveSideInset: CGFloat = 22
-    static let panelWaveBottomInset: CGFloat = 12
+    /// Содержимое и волны раскрытой панели отстоят от видимого края тела на столько.
+    static let panelVisibleInset: CGFloat = 16
+    /// От низа волн до низа панели: у выреза и у капсулы.
+    static let panelWaveBottomInset: CGFloat = 8
+    static let pillWaveBottomInset: CGFloat = 16
     static let panelWaveHeight: CGFloat = 36
+    /// Высота полосы содержимого панели: обложка.
+    static let panelContentHeight: CGFloat = 72
     /// Отступ волн капсулы от ее скругленных концов.
     static let pillWaveInset: CGFloat = 14
 
@@ -309,6 +334,8 @@ struct IslandGeometry {
     let notch: CGRect
     let collapsed: CGRect
     let expanded: CGRect
+    /// От верха раскрытого острова до содержимого (`NotchLayout.expandedContentTop`).
+    let contentTop: CGFloat
 
     init(layout: NotchLayout, wingWidth: CGFloat) {
         let panel = layout.panelFrame
@@ -320,6 +347,7 @@ struct IslandGeometry {
         notch = local(layout.notch)
         collapsed = local(layout.collapsedIsland(wingWidth: wingWidth))
         expanded = local(layout.expandedIsland)
+        contentTop = layout.expandedContentTop
     }
 
     /// Остров в состоянии `state`; скрытый совпадает с вырезом.
@@ -349,21 +377,25 @@ struct IslandGeometry {
         CGRect(x: notch.maxX, y: collapsed.minY, width: wingWaveWidth, height: collapsed.height)
     }
 
+    /// От края рамки раскрытой панели до линии содержимого: плечо (у выреза) и 16 pt.
+    var panelInset: CGFloat {
+        (hasNotch ? Self.expandedShoulderRadius : 0) + Self.panelVisibleInset
+    }
+
     var panelWaves: CGRect {
-        CGRect(
-            x: expanded.minX + Self.panelWaveSideInset,
-            y: expanded.maxY - Self.panelWaveBottomInset - Self.panelWaveHeight,
-            width: max(expanded.width - 2 * Self.panelWaveSideInset, 0),
+        let bottom = hasNotch ? Self.panelWaveBottomInset : Self.pillWaveBottomInset
+        return CGRect(
+            x: expanded.minX + panelInset,
+            y: expanded.maxY - bottom - Self.panelWaveHeight,
+            width: max(expanded.width - 2 * panelInset, 0),
             height: Self.panelWaveHeight
         )
     }
 
-    /// Место содержимого раскрытой панели: вся ширина, от низа выреза до верха полосы волн.
-    /// Верх панели под вырезом закрыт камерой, там ничего нет; у капсулы выреза нет, и место
-    /// начинается от верха панели.
+    /// Полоса содержимого раскрытой панели: во всю ширину рамки, высотой с обложку, ниже
+    /// выреза на `NotchGeometry.notchClearance` (у капсулы на 16 pt от верха).
     var panelContent: CGRect {
-        let top = hasNotch ? min(max(notch.maxY, expanded.minY), panelWaves.minY) : expanded.minY
-        return CGRect(x: expanded.minX, y: top, width: expanded.width, height: max(panelWaves.minY - top, 0))
+        CGRect(x: expanded.minX, y: expanded.minY + contentTop, width: expanded.width, height: Self.panelContentHeight)
     }
 
     var pillWaves: CGRect {

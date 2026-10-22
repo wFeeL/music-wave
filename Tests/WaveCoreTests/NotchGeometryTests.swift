@@ -68,9 +68,45 @@ struct NotchGeometryTests {
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
         let island = layout.expandedIsland
         #expect(island.maxY == 956)
-        #expect(island.width == 480)
+        #expect(island.width == 486)
         #expect(island.height == 170)
         #expect(island.midX == layout.notch.midX)
+        // Видимое тело 468 pt, по бокам вогнутые плечи 9 pt.
+        #expect(NotchGeometry.expandedBodyWidth + 2 * NotchGeometry.expandedShoulderRadius == island.width)
+        #expect(layout.expandedContentTop == 45)
+    }
+
+    @Test func tallerNotchGrowsExpandedPanel() throws {
+        var screen = notched()
+        screen.safeAreaTop = 38
+        screen.menuBarHeight = 38
+        let layout = try #require(NotchGeometry.layout(for: [screen]))
+        #expect(layout.notch.height == 38)
+        #expect(layout.expandedIsland.height == 176)
+        #expect(layout.expandedIsland.width == 486)
+        #expect(layout.expandedIsland.maxY == 956)
+        #expect(layout.expandedContentTop == 51)
+        // Под содержимым столько же места, сколько у выреза 32 pt.
+        let below = layout.expandedIsland.height - layout.expandedContentTop
+        let base = try #require(NotchGeometry.layout(for: [notched()]))
+        #expect(below == base.expandedIsland.height - base.expandedContentTop)
+    }
+
+    @Test func contentClearsNotchByAtLeast12() throws {
+        for height: CGFloat in [24, 30, 32, 33, 37.5, 38, 44] {
+            var screen = notched()
+            screen.safeAreaTop = height
+            let layout = try #require(NotchGeometry.layout(for: [screen]))
+            #expect(layout.expandedContentTop - layout.notch.height >= 12, "вырез \(height)")
+            #expect(layout.expandedIsland.height >= 170)
+        }
+    }
+
+    @Test func pillExpandedIsCompact() throws {
+        let layout = try #require(NotchGeometry.layout(for: [external()]))
+        #expect(layout.expandedIsland.size == CGSize(width: 468, height: 150))
+        #expect(layout.expandedIsland.midX == layout.notch.midX)
+        #expect(layout.expandedContentTop == 16)
     }
 
     @Test func hoverZoneExcludesWings() throws {
