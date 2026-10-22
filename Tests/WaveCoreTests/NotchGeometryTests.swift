@@ -72,10 +72,44 @@ struct NotchGeometryTests {
 
     @Test func hoverZoneExcludesWings() throws {
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
-        let wingPoint = CGPoint(x: layout.notch.minX - 10, y: layout.notch.midY)
-        #expect(!layout.hoverZone(expanded: false).contains(wingPoint))
-        #expect(layout.hoverZone(expanded: false).contains(CGPoint(x: layout.notch.midX, y: layout.notch.midY)))
-        #expect(layout.hoverZone(expanded: true) == layout.expandedIsland)
+        let zone = layout.hoverZone(expanded: false)
+        #expect(zone.minX == layout.notch.minX)
+        #expect(zone.maxX == layout.notch.maxX)
+        let left = CGPoint(x: layout.notch.minX - 10, y: layout.notch.midY)
+        let right = CGPoint(x: layout.notch.maxX + 10, y: layout.notch.midY)
+        let leftTop = CGPoint(x: layout.notch.minX - 10, y: 956 - 1)
+        let rightTop = CGPoint(x: layout.notch.maxX + 10, y: 956 - 1)
+        #expect(!zone.contains(left))
+        #expect(!zone.contains(right))
+        #expect(!zone.contains(leftTop))
+        #expect(!zone.contains(rightTop))
+        #expect(zone.contains(CGPoint(x: layout.notch.midX, y: layout.notch.midY)))
+        #expect(layout.hoverZone(expanded: true).minX == layout.expandedIsland.minX)
+        #expect(layout.hoverZone(expanded: true).maxX == layout.expandedIsland.maxX)
+    }
+
+    @Test func hoverZoneIncludesScreenTopEdge() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let top = CGPoint(x: layout.notch.midX, y: layout.screenFrame.maxY)
+        #expect(layout.hoverZone(expanded: false).contains(top))
+        #expect(layout.hoverZone(expanded: true).contains(top))
+    }
+
+    @Test func pillHoverZonesIncludeScreenTopEdge() throws {
+        let layout = try #require(NotchGeometry.layout(for: [external()]))
+        let top = CGPoint(x: layout.notch.midX, y: layout.screenFrame.maxY)
+        #expect(layout.hoverZone(expanded: false).contains(top))
+        #expect(layout.hoverZone(expanded: true).contains(top))
+        #expect(layout.hoverZone(expanded: true).contains(CGPoint(x: layout.notch.midX, y: layout.expandedIsland.minY)))
+    }
+
+    @Test func degenerateAuxiliaryWidthsFallBackToPill() throws {
+        let frame = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        let layout = try #require(NotchGeometry.layout(for: [notched(frame: frame, left: 735, right: 735)]))
+        #expect(!layout.hasNotch)
+        #expect(layout.notch.size == NotchGeometry.pillSize)
+        let wider = try #require(NotchGeometry.layout(for: [notched(frame: frame, left: 800, right: 800)]))
+        #expect(!wider.hasNotch)
     }
 
     @Test func prefersBuiltInNotchedScreen() throws {
@@ -100,7 +134,7 @@ struct NotchGeometryTests {
         #expect(layout.expandedIsland.maxY == layout.notch.maxY)
         #expect(layout.collapsedIsland(wingWidth: 40).maxY == layout.notch.maxY)
         let hover = layout.hoverZone(expanded: false)
-        #expect(hover.maxY == screen.frame.maxY)
+        #expect(hover.maxY == screen.frame.maxY + NotchGeometry.hoverTopOvershoot)
         #expect(hover.minY == layout.notch.minY)
         #expect(hover.minX == layout.notch.minX)
         #expect(hover.width == layout.notch.width)

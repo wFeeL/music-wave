@@ -71,13 +71,14 @@ public struct NotchLayout: Sendable, Equatable {
         )
     }
 
-    /// Зона наведения: свернутая это вырез, продленный до верха экрана, без крыльев.
+    /// Зона наведения. Свернутая: вырез, продленный до верха экрана, без крыльев. Раскрытая:
+    /// раскрытый остров (в режиме капсулы продленный до верха экрана). Обе зоны выступают
+    /// выше экрана на `hoverTopOvershoot`, иначе курсор на самой верхней строке пикселей
+    /// (`y == frame.maxY`) не попадал бы в полуоткрытый `CGRect`.
     public func hoverZone(expanded: Bool) -> CGRect {
-        if expanded { return expandedIsland }
-        return CGRect(
-            x: notch.minX, y: notch.minY,
-            width: notch.width, height: max(screenFrame.maxY, notch.maxY) - notch.minY
-        )
+        let base = expanded ? expandedIsland : notch
+        let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
+        return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
     }
 }
 
@@ -85,6 +86,8 @@ public enum NotchGeometry {
     public static let expandedSize = CGSize(width: 480, height: 170)
     public static let pillSize = CGSize(width: 200, height: 32)
     public static let maxWingWidth: CGFloat = 120
+    /// Насколько зона наведения выступает выше верха экрана.
+    static let hoverTopOvershoot: CGFloat = 2
     /// Запас под панелью для свечения.
     static let glowMargin: CGFloat = 40
     /// Отступ капсулы от строки меню на экране без выреза.
@@ -102,7 +105,8 @@ public enum NotchGeometry {
         }
 
         if let screen = screens.first(where: { $0.isBuiltIn && $0.safeAreaTop > 0 }),
-           let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth {
+           let left = screen.auxiliaryLeftWidth, let right = screen.auxiliaryRightWidth,
+           left + right < screen.frame.width {
             let notch = CGRect(
                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
                 width: screen.frame.width - left - right, height: screen.safeAreaTop
