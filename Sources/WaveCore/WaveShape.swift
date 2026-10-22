@@ -1,29 +1,90 @@
 import Foundation
 
-/// Фазы трех слоев волны. Фаза копится в Double и держится в 0..<2π.
-/// Скорость задает звук: в тишине волны почти стоят, на громкой музыке бегут быстрее.
-public struct WaveMotion: Sendable {
-    /// Угловая скорость слоев (бас, середина, верх), рад/с.
-    private static let speeds: [Double] = [1.6, 2.8, 4.4]
+/// Фаза одного слоя волны: свой накопитель у несущей и свой у гармоники. Каждый держится
+/// в 0..<2π и переходит через 2π сам по себе, поэтому гармоника не прыгает, когда
+/// переходит несущая.
+public struct WavePhase: Sendable, Equatable {
+    public var carrier: Double
+    public var harmonic: Double
 
-    private var phases: [Double] = [0, 0, 0]
+    public init(carrier: Double, harmonic: Double) {
+        self.carrier = carrier
+        self.harmonic = harmonic
+    }
+
+    /// Та же волна, сдвинутая на `offset` рад несущей: гармоника сдвигается на
+    /// `harmonicRatio × offset`, обе фазы снова в 0..<2π.
+    public func shifted(by offset: Double) -> WavePhase {
+        let offset = offset.isFinite ? offset : 0
+        return WavePhase(
+            carrier: Self.wrapped(carrier + offset),
+            harmonic: Self.wrapped(harmonic + WaveMotion.harmonicRatio * offset)
+        )
+    }
+
+    /// `value` в 0..<2π, в том числе для отрицательных; не конечное значение дает 0.
+    static func wrapped(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        let twoPi = 2 * Double.pi
+        var result = value.truncatingRemainder(dividingBy: twoPi)
+        if result < 0 { result += twoPi }
+        return result < twoPi ? result : 0
+    }
+}
+
+/// Фазы трех слоев волны для крыла и для панели. Скорость задает звук: в тишине волны почти
+/// стоят, на громкой музыке бегут быстрее. Скорость идет от громкости, сглаженной за 0.4 с,
+/// а не от мгновенного уровня, поэтому удары не дергают гребни.
+public struct WaveMotion: Sendable {
+    /// Во сколько раз гармоника бежит быстрее несущей по фазе.
+    static let harmonicRatio: Double = 1.7
+    /// Угловая скорость слоев (бас, середина, верх) в крыле, рад/с.
+    static let wingSpeeds: [Double] = [1.6, 2.8, 4.4]
+    /// То же в панели: гребни идут с той же скоростью в точках, что и в крыле.
+    static let panelSpeeds: [Double] = [0.85, 1.6, 3.0]
+    /// Постоянная времени медленной громкости, с.
+    static let loudnessTau = 0.4
+    /// Самый длинный учитываемый кадр, с.
+    static let maxStep = 1.0
+
+    private var slow: [Double] = [0, 0, 0]
+    private var wing = [WavePhase](repeating: WavePhase(carrier: 0, harmonic: 0), count: 3)
+    private var panel = [WavePhase](repeating: WavePhase(carrier: 0, harmonic: 0), count: 3)
 
     public init() {}
 
     /// `layers` это уровни слоев 0...1 в порядке `WaveLayer`, `dt` в секундах.
     public mutating func advance(layers: [Float], dt: Double) {
-        let step = dt.isFinite ? max(0, dt) : 0
-        let twoPi = 2 * Double.pi
-        for index in 0..<phases.count {
+        let step = dt.isFinite ? min(max(0, dt), Self.maxStep) : 0
+        let blend = 1 - exp(-step / Self.loudnessTau)
+        for index in 0..<slow.count {
             let raw = index < layers.count ? layers[index] : 0
             let level = raw.isFinite ? Double(min(max(raw, 0), 1)) : 0
-            let advanced = phases[index] + Self.speeds[index] * (0.3 + 1.7 * level) * step
-            phases[index] = advanced.truncatingRemainder(dividingBy: twoPi)
+            slow[index] += blend * (level - slow[index])
+        }
+        Self.advance(&wing, speeds: Self.wingSpeeds, slow: slow, step: step)
+        Self.advance(&panel, speeds: Self.panelSpeeds, slow: slow, step: step)
+    }
+
+    private static func advance(_ phases: inout [WavePhase], speeds: [Double], slow: [Double], step: Double) {
+        let twoPi = 2 * Double.pi
+        for index in phases.indices {
+            let turn = speeds[index] * (0.3 + 1.7 * slow[index]) * step
+            phases[index].carrier = (phases[index].carrier + turn).truncatingRemainder(dividingBy: twoPi)
+            phases[index].harmonic = (phases[index].harmonic + harmonicRatio * turn).truncatingRemainder(dividingBy: twoPi)
         }
     }
 
-    public func phase(_ layer: WaveLayer) -> Double {
-        phases[layer.rawValue]
+    public func phase(_ layer: WaveLayer, profile: WaveProfile = .wing) -> WavePhase {
+        switch profile {
+        case .wing: wing[layer.rawValue]
+        case .panel: panel[layer.rawValue]
+        }
+    }
+
+    /// Громкость слоя, сглаженная за `loudnessTau`, 0...1.
+    public func slowLevel(_ layer: WaveLayer) -> Float {
+        Float(slow[layer.rawValue])
     }
 }
 
@@ -37,15 +98,15 @@ public enum WaveProfile: Sendable, CaseIterable {
 
 /// Форма одного слоя волны.
 ///
-/// Несущая `sin(2π·c·x − phase + p)` и гармоника `sin(2π·2.3·c·x − 1.7·phase)`: с ростом фазы
-/// гребни бегут от выреза наружу. В крыле волн мало (0.6, 1.1, 1.8 периода на бас, середину и
-/// верх), у баса нет гармоники. В панели линия идет через середину: волна считается от
+/// Несущая `sin(2π·c·x − phase.carrier + p)` и гармоника `sin(2π·2.3·c·x − phase.harmonic)`:
+/// с ростом фазы гребни бегут от выреза наружу. В крыле волн мало (0.6, 1.1, 1.8 периода на
+/// бас, середину и верх), у баса нет гармоники. В панели линия идет через середину: волна считается от
 /// `u = sqrt(x² + 0.03²)`, мягкого модуля без излома, и в середине амплитуда не пропадает.
 public enum WaveShape {
     static let wingCarriers: [Double] = [0.6, 1.1, 1.8]
     static let panelCarriers: [Double] = [1.25, 2.5, 5.0]
     static let wingHarmonics: [Double] = [0, 0.12, 0.12]
-    static let panelHarmonics: [Double] = [0.25, 0.25, 0.25]
+    static let panelHarmonics: [Double] = [0.15, 0.15, 0.15]
     private static let offsets: [Double] = [0, 2.1, 4.2]
     /// Где огибающая слоя достигает максимума (доля от выреза или от середины панели).
     static let peaks: [Double] = [0.2, 0.4, 0.6]
@@ -63,14 +124,15 @@ public enum WaveShape {
     /// `wingGain` раз с мягким пределом. `.panel`: x = -1 + 2i / (count - 1) через всю ширину.
     /// `amplitude` ограничивается диапазоном 0...1.
     public static func samples(
-        layer: WaveLayer, amplitude: Float, phase: Double, count: Int, profile: WaveProfile = .wing
+        layer: WaveLayer, amplitude: Float, phase: WavePhase, count: Int, profile: WaveProfile = .wing
     ) -> [Float] {
         guard count > 0 else { return [] }
         let index = layer.rawValue
         let p = offsets[index]
         let k = log(0.5) / log(peaks[index])
         let amp = Double(min(max(amplitude, 0), 1))
-        let phase = phase.isFinite ? phase : 0
+        let carrierPhase = phase.carrier.isFinite ? phase.carrier : 0
+        let harmonicPhase = phase.harmonic.isFinite ? phase.harmonic : 0
         let denominator = Double(max(count - 1, 1))
         let twoPi = 2 * Double.pi
 
@@ -98,7 +160,7 @@ public enum WaveShape {
                 let body = panelFloor + (1 - panelFloor) * sin(Double.pi * pow(u, k))
                 envelope = body * WavePaint.smoothstep(1, panelTaperStart, u)
             }
-            let carrier = (1 - h) * sin(twoPi * c * u - phase + p) + h * sin(twoPi * 2.3 * c * u - 1.7 * phase)
+            let carrier = (1 - h) * sin(twoPi * c * u - carrierPhase + p) + h * sin(twoPi * 2.3 * c * u - harmonicPhase)
             let y = amp * envelope * carrier
             return Float(profile == .wing ? softLimit(wingGain * y) : y)
         }

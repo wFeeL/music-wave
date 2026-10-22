@@ -3,13 +3,19 @@ import Testing
 @testable import WaveCore
 
 struct WaveShapeTests {
-    private static let weights: [Double] = [1.6, 2.8, 4.4]
+    private static let wingWeights: [Double] = [1.6, 2.8, 4.4]
+    private static let panelWeights: [Double] = [0.85, 1.6, 3.0]
+
+    /// Фаза как в 0.9.0, где гармоника шла от `1.7 * phase`: старые проверки формы не меняются.
+    private func legacyPhase(_ p: Double) -> WavePhase {
+        WavePhase(carrier: p, harmonic: 1.7 * p)
+    }
 
     @Test func waveIsZeroAtEdges() {
         for profile in WaveProfile.allCases {
             for layer in WaveLayer.allCases {
                 for phase in stride(from: 0.0, to: 2 * Double.pi, by: 0.37) {
-                    let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 128, profile: profile)
+                    let y = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: 128, profile: profile)
                     #expect(y.count == 128)
                     // Крыло: ноль у выреза и у края; панель: ноль у обоих краев.
                     #expect(abs(y[0]) <= 1e-6)
@@ -25,7 +31,7 @@ struct WaveShapeTests {
             for layer in WaveLayer.allCases {
                 for i in 0..<200 {
                     let phase = Double(i) / 200 * 2 * Double.pi
-                    let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 257, profile: profile)
+                    let y = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: 257, profile: profile)
                     #expect(y.allSatisfy { abs($0) <= 1 })
                 }
             }
@@ -35,7 +41,7 @@ struct WaveShapeTests {
     @Test func zeroAmplitudeIsFlat() {
         for profile in WaveProfile.allCases {
             for layer in WaveLayer.allCases {
-                let y = WaveShape.samples(layer: layer, amplitude: 0, phase: 1.3, count: 64, profile: profile)
+                let y = WaveShape.samples(layer: layer, amplitude: 0, phase: legacyPhase(1.3), count: 64, profile: profile)
                 #expect(y.allSatisfy { $0 == 0 })
             }
         }
@@ -46,7 +52,7 @@ struct WaveShapeTests {
         var peak = [Float](repeating: 0, count: count)
         for i in 0..<200 {
             let phase = Double(i) / 200 * 2 * Double.pi
-            let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: profile)
+            let y = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: count, profile: profile)
             for j in 0..<count { peak[j] = max(peak[j], abs(y[j])) }
         }
         return peak
@@ -92,12 +98,12 @@ struct WaveShapeTests {
         for layer in WaveLayer.allCases {
             for phase in [0.4, 1.9, 3.3, 5.1] {
                 // Крыло: от выреза (индекс 0) к краю.
-                let wingNow = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: .wing)
-                let wingLater = WaveShape.samples(layer: layer, amplitude: 1, phase: phase + 0.15, count: count, profile: .wing)
+                let wingNow = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: count, profile: .wing)
+                let wingLater = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase + 0.15), count: count, profile: .wing)
                 #expect(bestShift(wingNow, wingLater, range: 160..<640) > 0, "wing \(layer) phase \(phase)")
                 // Панель: правая половина вправо, левая влево.
-                let panelNow = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: .panel)
-                let panelLater = WaveShape.samples(layer: layer, amplitude: 1, phase: phase + 0.15, count: count, profile: .panel)
+                let panelNow = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: count, profile: .panel)
+                let panelLater = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase + 0.15), count: count, profile: .panel)
                 #expect(bestShift(panelNow, panelLater, range: 480..<720) > 0, "panel right \(layer) phase \(phase)")
                 #expect(bestShift(panelNow, panelLater, range: 80..<320) < 0, "panel left \(layer) phase \(phase)")
             }
@@ -113,7 +119,7 @@ struct WaveShapeTests {
             var nearbySteps: Float = 0
             for i in 0..<64 {
                 let phase = Double(i) / 64 * 2 * Double.pi
-                let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: .panel)
+                let y = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: count, profile: .panel)
                 for j in 0..<count {
                     #expect(abs(y[j] - y[count - 1 - j]) < 1e-6)
                 }
@@ -121,7 +127,7 @@ struct WaveShapeTests {
                 // Шаг 0.0005 ширины: у середины линия почти не меняется (касательная
                 // горизонтальна), на 0.02 от середины уже идет наклонно. У излома |x| эти шаги
                 // были бы одного порядка.
-                let fine = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 4001, profile: .panel)
+                let fine = WaveShape.samples(layer: layer, amplitude: 1, phase: legacyPhase(phase), count: 4001, profile: .panel)
                 centerSteps += abs(fine[2001] - fine[2000])
                 nearbySteps += abs(fine[2041] - fine[2040])
             }
@@ -137,15 +143,48 @@ struct WaveShapeTests {
         return min(d, twoPi - d)
     }
 
+    /// Шаг фазы по кругу, -π..<π.
+    private func circularStep(from a: Double, to b: Double) -> Double {
+        let twoPi = 2 * Double.pi
+        var d = (b - a).truncatingRemainder(dividingBy: twoPi)
+        if d >= Double.pi { d -= twoPi }
+        if d < -Double.pi { d += twoPi }
+        return d
+    }
+
+    private func isWrapped(_ phase: WavePhase) -> Bool {
+        phase.carrier.isFinite && phase.harmonic.isFinite
+            && phase.carrier >= 0 && phase.carrier < 2 * Double.pi
+            && phase.harmonic >= 0 && phase.harmonic < 2 * Double.pi
+    }
+
     @Test func motionDependsOnLoudness() {
         var quiet = WaveMotion()
         var loud = WaveMotion()
-        quiet.advance(layers: [0, 0, 0], dt: 1)
-        loud.advance(layers: [1, 1, 1], dt: 1)
-        for layer in WaveLayer.allCases {
-            let w = Self.weights[layer.rawValue]
-            #expect(circularDistance(quiet.phase(layer), (0.3 * w).truncatingRemainder(dividingBy: 2 * .pi)) < 1e-9)
-            #expect(circularDistance(loud.phase(layer), (2.0 * w).truncatingRemainder(dividingBy: 2 * .pi)) < 1e-9)
+        let dt = 1.0 / 60
+        for _ in 0..<120 {
+            quiet.advance(layers: [0, 0, 0], dt: dt)
+            loud.advance(layers: [1, 1, 1], dt: dt)
+        }
+        // Громкость сглажена за 0.4 с: на n-м кадре slow = 1 - (1 - a)^n.
+        let a = 1 - exp(-dt / 0.4)
+        var loudTurn = 0.0
+        var slow = 0.0
+        for _ in 0..<120 {
+            slow += a * (1 - slow)
+            loudTurn += (0.3 + 1.7 * slow) * dt
+        }
+        for profile in WaveProfile.allCases {
+            let weights = profile == .wing ? Self.wingWeights : Self.panelWeights
+            for layer in WaveLayer.allCases {
+                let w = weights[layer.rawValue]
+                let quietPhase = quiet.phase(layer, profile: profile)
+                let loudPhase = loud.phase(layer, profile: profile)
+                #expect(circularDistance(quietPhase.carrier, 0.3 * w * 2) < 1e-9)
+                #expect(circularDistance(quietPhase.harmonic, 1.7 * 0.3 * w * 2) < 1e-9)
+                #expect(circularDistance(loudPhase.carrier, w * loudTurn) < 1e-9)
+                #expect(circularDistance(loudPhase.harmonic, 1.7 * w * loudTurn) < 1e-9)
+            }
         }
     }
 
@@ -155,9 +194,10 @@ struct WaveShapeTests {
             let level = Float(i % 7) / 6
             motion.advance(layers: [level, 1 - level, 1], dt: 1.0 / 60)
         }
-        for layer in WaveLayer.allCases {
-            let p = motion.phase(layer)
-            #expect(p >= 0 && p < 2 * Double.pi)
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                #expect(isWrapped(motion.phase(layer, profile: profile)))
+            }
         }
     }
 
@@ -167,17 +207,158 @@ struct WaveShapeTests {
         motion.advance(layers: [.nan, .infinity, 0.5], dt: .infinity)
         motion.advance(layers: [.nan, .infinity, 0.5], dt: -1)
         motion.advance(layers: [], dt: 1)
-        for layer in WaveLayer.allCases {
-            let p = motion.phase(layer)
-            #expect(p.isFinite && p >= 0 && p < 2 * Double.pi)
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                #expect(isWrapped(motion.phase(layer, profile: profile)))
+                #expect(motion.slowLevel(layer).isFinite)
+            }
         }
         // NaN-уровень считается тишиной, бесконечный dt шагом 0, отрицательный тоже.
         var reference = WaveMotion()
         reference.advance(layers: [0, 0, 0], dt: 1)
         motion = WaveMotion()
         motion.advance(layers: [.nan, .nan, .nan], dt: 1)
-        for layer in WaveLayer.allCases {
-            #expect(motion.phase(layer) == reference.phase(layer))
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                #expect(motion.phase(layer, profile: profile) == reference.phase(layer, profile: profile))
+            }
+        }
+    }
+
+    @Test func samplesRepeatEveryFullTurn() {
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                for (c, h) in [(0.3, 5.1), (6.28, 0.01), (3.0, 6.2)] {
+                    let a = WaveShape.samples(
+                        layer: layer, amplitude: 1, phase: WavePhase(carrier: c, harmonic: h), count: 128, profile: profile
+                    )
+                    let b = WaveShape.samples(
+                        layer: layer, amplitude: 1, phase: WavePhase(carrier: c + 2 * .pi, harmonic: h + 2 * .pi),
+                        count: 128, profile: profile
+                    )
+                    #expect(zip(a, b).allSatisfy { abs($0 - $1) < 1e-5 }, "\(profile) \(layer) \(c) \(h)")
+                }
+            }
+        }
+    }
+
+    /// 60 Гц на полном уровне, пока каждый накопитель несущей и гармоники не перейдет через 2π
+    /// трижды. Кадр сравнивается с предыдущим, сдвинутым непрерывно: несущая на свой шаг,
+    /// гармоника на 1.7 этого шага. В 0.9.0 на переходе гармоника прыгала на 0.7 периода,
+    /// около 0.4 в единицах панели.
+    @Test func advanceAcrossWrapIsContinuous() {
+        let dt = 1.0 / 60
+        let count = 128
+        var motion = WaveMotion()
+        var wraps = [String: (carrier: Int, harmonic: Int)]()
+        var worst: Float = 0
+        var frames = 0
+        func key(_ profile: WaveProfile, _ layer: WaveLayer) -> String { "\(profile) \(layer)" }
+        while frames < 60 * 60 {
+            let before = motion
+            motion.advance(layers: [1, 1, 1], dt: dt)
+            frames += 1
+            for profile in WaveProfile.allCases {
+                for layer in WaveLayer.allCases {
+                    let old = before.phase(layer, profile: profile)
+                    let new = motion.phase(layer, profile: profile)
+                    var counted = wraps[key(profile, layer)] ?? (0, 0)
+                    if new.carrier < old.carrier { counted.carrier += 1 }
+                    if new.harmonic < old.harmonic { counted.harmonic += 1 }
+                    wraps[key(profile, layer)] = counted
+                    let step = circularStep(from: old.carrier, to: new.carrier)
+                    let expected = WavePhase(carrier: old.carrier + step, harmonic: old.harmonic + 1.7 * step)
+                    let a = WaveShape.samples(layer: layer, amplitude: 1, phase: expected, count: count, profile: profile)
+                    let b = WaveShape.samples(layer: layer, amplitude: 1, phase: new, count: count, profile: profile)
+                    for (x, y) in zip(a, b) { worst = max(worst, abs(x - y)) }
+                }
+            }
+            if wraps.count == 6, wraps.values.allSatisfy({ $0.carrier >= 3 && $0.harmonic >= 3 }) { break }
+        }
+        #expect(wraps.count == 6 && wraps.values.allSatisfy { $0.carrier >= 3 && $0.harmonic >= 3 }, "\(wraps)")
+        #expect(worst < 0.01, "worst jump \(worst) after \(frames) frames")
+    }
+
+    @Test func harmonicHasOwnAccumulator() {
+        let dt = 1.0 / 60
+        var motion = WaveMotion()
+        var unwrapped = [String: Double]()
+        for _ in 0..<600 {
+            let before = motion
+            motion.advance(layers: [1, 1, 1], dt: dt)
+            for profile in WaveProfile.allCases {
+                for layer in WaveLayer.allCases {
+                    let step = circularStep(
+                        from: before.phase(layer, profile: profile).carrier, to: motion.phase(layer, profile: profile).carrier
+                    )
+                    unwrapped["\(profile) \(layer)", default: 0] += step
+                }
+            }
+        }
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                let u = unwrapped["\(profile) \(layer)"] ?? 0
+                #expect(u > 2 * Double.pi, "\(profile) \(layer) turned \(u)")
+                let expected = (1.7 * u).truncatingRemainder(dividingBy: 2 * .pi)
+                let harmonic = motion.phase(layer, profile: profile).harmonic
+                #expect(circularDistance(harmonic, expected) < 1e-6, "\(profile) \(layer)")
+            }
+        }
+    }
+
+    @Test func shiftedWrapsBoth() {
+        let shifted = WavePhase(carrier: 6.0, harmonic: 6.0).shifted(by: 0.6)
+        #expect(abs(shifted.carrier - (0.6 + 6.0 - 2 * .pi)) < 1e-9)
+        #expect(abs(shifted.harmonic - (6.0 + 1.02 - 2 * .pi)) < 1e-9)
+        let back = WavePhase(carrier: 0.1, harmonic: 0.1).shifted(by: -0.6)
+        #expect(isWrapped(back))
+        #expect(abs(back.carrier - (0.1 - 0.6 + 2 * .pi)) < 1e-9)
+        #expect(abs(back.harmonic - (0.1 - 1.02 + 2 * .pi)) < 1e-9)
+    }
+
+    @Test func panelCrestsMoveAtWingSpeedInPoints() {
+        // Скорость гребня в pt/с = ω / (2π c) × длина единицы: крыло 54 pt, панель 218 pt.
+        for i in 0..<3 {
+            let wing = WaveMotion.wingSpeeds[i] / (2 * .pi * WaveShape.wingCarriers[i]) * 54
+            let panel = WaveMotion.panelSpeeds[i] / (2 * .pi * WaveShape.panelCarriers[i]) * 218
+            #expect(panel / wing > 0.9 && panel / wing < 1.1, "layer \(i): \(panel / wing)")
+        }
+        #expect(WaveShape.panelHarmonics == [0.15, 0.15, 0.15])
+    }
+
+    @Test func crestSpeedFollowsSlowLoudness() {
+        var motion = WaveMotion()
+        motion.advance(layers: [1, 1, 1], dt: 1.0 / 60)
+        #expect(abs(motion.slowLevel(.bass) - 0.0408) < 0.002)
+        for _ in 1..<24 { motion.advance(layers: [1, 1, 1], dt: 1.0 / 60) }
+        #expect(abs(motion.slowLevel(.bass) - 0.632) < 0.01)
+    }
+
+    /// 120 BPM при 60 Гц: два кадра уровень 1, 28 кадров тишина. Шаг баса за кадр почти не
+    /// качается (расчет 1.37; в 0.9.0 больше 3).
+    @Test func kicksDoNotPumpCrestSpeed() {
+        let dt = 1.0 / 60
+        var motion = WaveMotion()
+        var steps: [Double] = []
+        for frame in 0..<360 {
+            let level: Float = frame % 30 < 2 ? 1 : 0
+            let before = motion.phase(.bass).carrier
+            motion.advance(layers: [level, level, level], dt: dt)
+            if frame >= 240 { steps.append(circularStep(from: before, to: motion.phase(.bass).carrier)) }
+        }
+        let largest = steps.max()!
+        let smallest = steps.min()!
+        #expect(smallest > 0)
+        #expect(largest < 1.5 * smallest, "\(largest / smallest)")
+    }
+
+    @Test func hugeStepStaysFinite() {
+        var motion = WaveMotion()
+        motion.advance(layers: [1, 0.5, 1], dt: 1e300)
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                #expect(isWrapped(motion.phase(layer, profile: profile)))
+            }
         }
     }
 
@@ -422,7 +603,7 @@ struct WaveShapeTests {
             var wingPeak: Float = 0
             for i in 0..<64 {
                 let phase = Double(i) / 64 * 2 * Double.pi
-                let y = WaveShape.samples(layer: layer, amplitude: 0.4, phase: phase, count: 201, profile: .wing)
+                let y = WaveShape.samples(layer: layer, amplitude: 0.4, phase: legacyPhase(phase), count: 201, profile: .wing)
                 wingPeak = max(wingPeak, y.map { abs($0) }.max()!)
             }
             #expect(wingPeak > 0.45 && wingPeak <= 0.53, "\(layer): \(wingPeak)")
