@@ -48,7 +48,6 @@ public enum ProcessMatcher {
         guard case .application(let bundleID, let bundlePath, _) = source else { return [] }
 
         let pathPrefix = directoryPrefix(of: bundlePath)
-        let helperPrefix = bundleID.isEmpty ? nil : bundleID + "."
         let includesWebKitGPU = bundleID == safariBundleID
 
         var result: [UInt32] = []
@@ -59,13 +58,20 @@ public enum ProcessMatcher {
                 isMatch = true
             }
             if !isMatch, let id = process.bundleID {
-                isMatch = (!bundleID.isEmpty && id == bundleID)
-                    || (helperPrefix.map { id.hasPrefix($0) } ?? false)
+                isMatch = bundleIDBelongs(id, to: bundleID)
                     || (includesWebKitGPU && id == webKitGPUBundleID)
             }
             if isMatch { result.append(process.objectID) }
         }
         return Array(Set(result)).sorted()
+    }
+
+    /// bundle ID процесса или записи Now Playing относится к приложению `appBundleID`: равен ему
+    /// или начинается с него и точки (помощники вроде `com.google.Chrome.helper`). Пустой bundle ID
+    /// приложения не подходит ни к чему.
+    public static func bundleIDBelongs(_ candidate: String, to appBundleID: String) -> Bool {
+        guard !appBundleID.isEmpty else { return false }
+        return candidate == appBundleID || candidate.hasPrefix(appBundleID + ".")
     }
 
     /// Истинно, когда множество подходящих процессов отличается от `current` (порядок не важен).
@@ -87,6 +93,21 @@ public enum ProcessMatcher {
 
     private static func normalized(_ string: String) -> String {
         string.precomposedStringWithCanonicalMapping
+    }
+}
+
+extension NowPlayingInfo {
+    /// Запись Now Playing относится к источнику: bundle ID приложения или его родителя подходит
+    /// по правилам `ProcessMatcher.bundleIDBelongs`. Для всего звука системы подходит любая.
+    public func belongs(to source: AudioSource) -> Bool {
+        switch source {
+        case .systemWide:
+            return true
+        case .application(let bundleID, _, _):
+            if ProcessMatcher.bundleIDBelongs(bundleIdentifier, to: bundleID) { return true }
+            guard let parentBundleIdentifier else { return false }
+            return ProcessMatcher.bundleIDBelongs(parentBundleIdentifier, to: bundleID)
+        }
     }
 }
 

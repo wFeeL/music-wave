@@ -366,16 +366,11 @@ final class AppModel {
         return .application(bundleID: bundleID, bundlePath: path, displayName: name)
     }
 
-    /// Now Playing относится к источнику: совпал bundle ID приложения или его родителя.
+    /// Now Playing относится к источнику: bundle ID приложения или его родителя совпал или
+    /// начинается с bundle ID источника и точки, как у процессов (`ProcessMatcher`).
     /// Для всего звука системы подходит любой.
     nonisolated static func belongs(_ info: NowPlayingInfo, to source: AudioSource) -> Bool {
-        switch source {
-        case .systemWide:
-            return true
-        case .application(let bundleID, _, _):
-            guard !bundleID.isEmpty else { return false }
-            return info.bundleIdentifier == bundleID || info.parentBundleIdentifier == bundleID
-        }
+        info.belongs(to: source)
     }
 
     // MARK: - Доступ к звуку

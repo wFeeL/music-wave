@@ -112,6 +112,32 @@ struct ProcessMatcherTests {
         #expect(ProcessMatcher.needsRebuild(source: Self.yandex, current: [10], processes: before))
     }
 
+    @Test func bundleIDBelongsByEqualityOrDottedPrefix() {
+        #expect(ProcessMatcher.bundleIDBelongs("com.google.Chrome", to: "com.google.Chrome"))
+        #expect(ProcessMatcher.bundleIDBelongs("com.google.Chrome.helper", to: "com.google.Chrome"))
+        #expect(!ProcessMatcher.bundleIDBelongs("com.google.Chromium", to: "com.google.Chrome"))
+        #expect(!ProcessMatcher.bundleIDBelongs("com.google", to: "com.google.Chrome"))
+        #expect(!ProcessMatcher.bundleIDBelongs("", to: ""))
+        #expect(!ProcessMatcher.bundleIDBelongs("a.b", to: ""))
+    }
+
+    /// Now Playing узнается по тем же правилам bundle ID, что и процессы: помощник приложения
+    /// (`ru.yandex.desktop.music.helper`) тоже относится к нему, похожий префикс нет.
+    @Test func nowPlayingBelongsBySameBundleRules() {
+        func info(_ bundleID: String, parent: String? = nil) -> NowPlayingInfo {
+            NowPlayingInfo(bundleIdentifier: bundleID, parentBundleIdentifier: parent, title: "Песня")
+        }
+        #expect(info("ru.yandex.desktop.music").belongs(to: Self.yandex))
+        #expect(info("ru.yandex.desktop.music.helper").belongs(to: Self.yandex))
+        #expect(info("com.apple.WebKit.GPU", parent: "ru.yandex.desktop.music").belongs(to: Self.yandex))
+        #expect(info("x.y", parent: "ru.yandex.desktop.music.renderer").belongs(to: Self.yandex))
+        #expect(!info("ru.yandex.desktop.musicplayer").belongs(to: Self.yandex))
+        #expect(!info("com.apple.Music").belongs(to: Self.yandex))
+        #expect(info("com.apple.Music").belongs(to: .systemWide))
+        let noID = AudioSource.application(bundleID: "", bundlePath: "/Applications/X.app", displayName: "X")
+        #expect(!info("").belongs(to: noID))
+    }
+
     @Test func yandexCandidates() {
         #expect(ProcessMatcher.yandexMusicCandidates == ["ru.yandex.desktop.music", "ru.yandex.music"])
     }
