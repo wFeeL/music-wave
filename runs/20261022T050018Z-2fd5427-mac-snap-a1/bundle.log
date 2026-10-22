@@ -1,0 +1,12 @@
+== step bundle: bash scripts/bundle.sh 0.0.15 15
+dist/WaveFeels.app/Contents/Info.plist: OK
+bundled dist/WaveFeels.app (version 0.0.15, build 15)
+dist/WaveFeels.app
+dist/WaveFeels.app/Contents
+dist/WaveFeels.app/Contents/Info.plist
+dist/WaveFeels.app/Contents/MacOS
+dist/WaveFeels.app/Contents/MacOS/WaveFeels
+dist/WaveFeels.app/Contents/Resources
+dist/WaveFeels.app/Contents/Resources/Demo
+dist/WaveFeels.app/Contents/Resources/Demo/demo.wav
+dist/WaveFeels.app/Contents/Resources/Demo/silence.wav
