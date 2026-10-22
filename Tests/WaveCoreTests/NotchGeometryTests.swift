@@ -203,15 +203,62 @@ struct NotchGeometryTests {
         let panel = layout.panelFrame
         #expect(panel.contains(layout.expandedIsland))
         #expect(panel.contains(layout.collapsedIsland(wingWidth: NotchGeometry.maxWingWidth)))
-        #expect(panel.minY == layout.expandedIsland.minY - 40)
+        #expect(panel.minY == layout.expandedIsland.minY - NotchGeometry.glowMargin)
         #expect(panel.maxY == 956)
         // Запас по бокам под тень и «вздох».
-        #expect(panel.minX == layout.expandedIsland.minX - NotchGeometry.panelSideMargin)
-        #expect(panel.maxX == layout.expandedIsland.maxX + NotchGeometry.panelSideMargin)
+        #expect(panel.minX == layout.collapsedIsland(wingWidth: 200).minX - NotchGeometry.panelSideMargin)
+        #expect(panel.maxX == layout.collapsedIsland(wingWidth: 200).maxX + NotchGeometry.panelSideMargin)
         #expect(NotchGeometry.panelSideMargin == 24)
         // Клики только над самим раскрытым островом, не над запасом.
         let margin = CGPoint(x: panel.minX + 4, y: layout.expandedIsland.midY)
         #expect(!layout.pointer(at: margin, state: .expanded).acceptsClicks)
+    }
+
+    /// Крыло не шире свободной области строки меню у выреза минус 8 pt, и клики через него идут
+    /// в строку меню.
+    @Test func wingIsLimitedToAuxiliaryAreaAndPassesClicks() throws {
+        #expect(NotchGeometry.maxWingWidth == 200)
+        #expect(NotchGeometry.wingAuxMargin == 8)
+        let frame = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        let narrow = try #require(NotchGeometry.layout(for: [notched(frame: frame, left: 150, right: 300)]))
+        #expect(narrow.wingLimit == 142)
+        #expect(narrow.collapsedIsland(wingWidth: 200).width == narrow.notch.width + 2 * 142)
+        #expect(narrow.collapsedIsland(wingWidth: 100).width == narrow.notch.width + 2 * 100)
+
+        let wide = try #require(NotchGeometry.layout(for: [notched(frame: frame, left: 640, right: 640)]))
+        #expect(wide.wingLimit == 200)
+        let island = wide.collapsedIsland(wingWidth: 200)
+        #expect(island.width == wide.notch.width + 2 * 200)
+        let rightWing = CGPoint(x: wide.notch.maxX + 100, y: wide.notch.midY)
+        for state in [IslandState.hidden, .collapsed] {
+            let pointer = wide.pointer(at: rightWing, state: state)
+            #expect(!pointer.inHoverZone && !pointer.acceptsClicks)
+        }
+
+        // Капсула и условный вырез: предел по умолчанию.
+        let fake = try #require(NotchGeometry.layout(for: [external()], fakeNotch: true))
+        #expect(fake.wingLimit == 200)
+        #expect(fake.collapsedIsland(wingWidth: 200).width == fake.notch.width + 400)
+        #expect(try #require(NotchGeometry.layout(for: [external()])).wingLimit == 200)
+        #expect(NotchLayout(screenID: 1, screenFrame: frame, hasNotch: true, notch: wide.notch).wingLimit == 200)
+    }
+
+    @Test func negativeAuxiliaryWidthIsGuarded() throws {
+        let frame = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        let layout = try #require(NotchGeometry.layout(for: [notched(frame: frame, left: -20, right: 640)]))
+        #expect(layout.wingLimit == 0)
+        #expect(layout.collapsedIsland(wingWidth: 120) == layout.notch)
+    }
+
+    @Test func panelFrameFitsWidestWingAndGlow() throws {
+        #expect(NotchGeometry.glowMargin == 108)
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let widest = layout.collapsedIsland(wingWidth: 200)
+        let union = layout.expandedIsland.union(widest)
+        let panel = layout.panelFrame
+        #expect(panel.contains(widest))
+        #expect(panel.minY == union.minY - 108)
+        #expect(panel.maxY == union.maxY)
     }
 
     @Test func collapsedPillHasNoWings() throws {

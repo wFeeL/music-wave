@@ -116,17 +116,22 @@ public enum WaveShape {
     /// от `panelTaperStart` до нуля.
     static let panelFloor = 0.6
     static let panelTaperStart = 0.75
-    /// Крыло: размах в 1.3 раза больше, выше `wingKnee` он плавно упирается в 1.
+    /// Крыло: размах в 1.3 раза больше, выше `wingKnee` он плавно упирается в 1 (в панели
+    /// так же упирается размах, усиленный настройкой «Размах»).
     static let wingGain = 1.3
     static let wingKnee = 0.8
 
     /// Значения y в -1...1. `.wing`: x = i / (count - 1) от выреза к краю, размах усилен в
     /// `wingGain` раз с мягким пределом. `.panel`: x = -1 + 2i / (count - 1) через всю ширину.
-    /// `amplitude` ограничивается диапазоном 0...1.
+    /// `amplitude` ограничивается диапазоном 0...1. `gain` (настройка «Размах») умножает размах
+    /// до мягкого предела: ниже `wingKnee` y растет ровно в `gain` раз, выше упирается в ±1.
+    /// Отрицательный `gain` дает 0, не конечный считается 1.
     public static func samples(
-        layer: WaveLayer, amplitude: Float, phase: WavePhase, count: Int, profile: WaveProfile = .wing
+        layer: WaveLayer, amplitude: Float, phase: WavePhase, count: Int, profile: WaveProfile = .wing,
+        gain: Double = 1
     ) -> [Float] {
         guard count > 0 else { return [] }
+        let swing = (gain.isFinite ? max(gain, 0) : 1) * (profile == .wing ? wingGain : 1)
         let index = layer.rawValue
         let p = offsets[index]
         let k = log(0.5) / log(peaks[index])
@@ -162,7 +167,7 @@ public enum WaveShape {
             }
             let carrier = (1 - h) * sin(twoPi * c * u - carrierPhase + p) + h * sin(twoPi * 2.3 * c * u - harmonicPhase)
             let y = amp * envelope * carrier
-            return Float(profile == .wing ? softLimit(wingGain * y) : y)
+            return Float(softLimit(swing * y))
         }
     }
 
@@ -249,6 +254,9 @@ public enum WavePaint {
     public static let fullOpacity: Float = 0.75
     /// Бас чуть прозрачнее остальных.
     public static let layerOpacity: [Float] = [0.8, 1, 1]
+    /// Заливка под линией: у линии прозрачность `fillTopOpacity × fill` («Заливка» 0...1),
+    /// к оси спадает до нуля.
+    public static let fillTopOpacity: Float = 0.35
     /// Уровень, на котором линия набирает полную яркость.
     static let opacityKnee: Float = 0.35
     /// Насыщенность в тишине (доля от цвета палитры) и уровни, между которыми она растет до полной.

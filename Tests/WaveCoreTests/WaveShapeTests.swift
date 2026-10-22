@@ -615,6 +615,27 @@ struct WaveShapeTests {
         }
     }
 
+    @Test func gainScalesAndStaysInRange() {
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                for phase in stride(from: 0.0, to: 2 * Double.pi, by: 0.9) {
+                    let p = legacyPhase(phase)
+                    let unit = WaveShape.samples(layer: layer, amplitude: 1, phase: p, count: 129, profile: profile)
+                    #expect(unit == WaveShape.samples(layer: layer, amplitude: 1, phase: p, count: 129, profile: profile, gain: 1))
+                    let loud = WaveShape.samples(layer: layer, amplitude: 1, phase: p, count: 129, profile: profile, gain: 2)
+                    #expect(loud.allSatisfy { abs($0) <= 1 })
+                    let quiet = WaveShape.samples(layer: layer, amplitude: 1, phase: p, count: 129, profile: profile, gain: 0.5)
+                    for (y, y1) in zip(quiet, unit) where abs(y1) < 0.8 {
+                        #expect(abs(y - 0.5 * y1) <= 1e-6, "\(profile) \(layer): \(y) vs \(y1)")
+                    }
+                }
+            }
+        }
+        let bad = WaveShape.samples(layer: .mid, amplitude: 1, phase: legacyPhase(1), count: 33, gain: .nan)
+        #expect(bad.allSatisfy { $0.isFinite && abs($0) <= 1 })
+        #expect(WavePaint.fillTopOpacity == 0.35)
+    }
+
     @Test func paintSurvivesBadInput() {
         for profile in WaveProfile.allCases {
             for stop in WavePaint.stops(palette: [], layer: .high, level: .nan, time: .infinity, count: 5, profile: profile) {

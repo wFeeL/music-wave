@@ -36,18 +36,28 @@ public struct NotchLayout: Sendable, Equatable {
     public var screenFrame: CGRect
     public var hasNotch: Bool
     public var notch: CGRect
+    /// Самое широкое крыло на этом экране. У настоящего выреза: свободная область строки меню
+    /// с узкой стороны минус `NotchGeometry.wingAuxMargin`, не больше `maxWingWidth`.
+    /// У условного выреза и капсулы: `maxWingWidth`.
+    public var wingLimit: CGFloat
 
-    public init(screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect) {
+    public init(
+        screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect,
+        wingLimit: CGFloat = NotchGeometry.maxWingWidth
+    ) {
         self.screenID = screenID
         self.screenFrame = screenFrame
         self.hasNotch = hasNotch
         self.notch = notch
+        self.wingLimit = wingLimit
     }
 
-    /// Свернутый остров: вырез плюс крылья по бокам. Верх и высота как у выреза. У капсулы
-    /// крыльев нет: свернутая капсула ровно `NotchGeometry.pillSize`.
+    /// Свернутый остров: вырез плюс крылья по бокам, крыло не шире `wingLimit` и
+    /// `maxWingWidth`. Верх и высота как у выреза. У капсулы крыльев нет: свернутая капсула
+    /// ровно `NotchGeometry.pillSize`.
     public func collapsedIsland(wingWidth: CGFloat) -> CGRect {
-        let wing = hasNotch ? min(max(wingWidth, 0), NotchGeometry.maxWingWidth) : 0
+        let limit = wingLimit.isNaN ? 0 : min(max(wingLimit, 0), NotchGeometry.maxWingWidth)
+        let wing = hasNotch && !wingWidth.isNaN ? min(max(wingWidth, 0), limit) : 0
         return CGRect(
             x: notch.minX - wing, y: notch.minY,
             width: notch.width + 2 * wing, height: notch.height
@@ -86,8 +96,8 @@ public struct NotchLayout: Sendable, Equatable {
         hasNotch ? expandedIsland.insetBy(dx: NotchGeometry.expandedShoulderRadius, dy: 0) : expandedIsland
     }
 
-    /// Рамка панели: раскрытый и самый широкий свернутый остров плюс запас снизу под свечение
-    /// и по бокам под тень и «вздох», по горизонтали не выходит за экран.
+    /// Рамка панели: раскрытый и самый широкий допустимый свернутый остров плюс запас снизу
+    /// под свечение и по бокам под тень и «вздох», по горизонтали не выходит за экран.
     public var panelFrame: CGRect {
         let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
         let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
@@ -159,11 +169,15 @@ public enum NotchGeometry {
     /// Отступ содержимого раскрытой капсулы со всех сторон.
     public static let pillContentInset: CGFloat = 16
     public static let pillSize = CGSize(width: 240, height: 28)
-    public static let maxWingWidth: CGFloat = 120
+    /// Самое широкое крыло, pt.
+    public static let maxWingWidth: CGFloat = 200
+    /// Насколько крыло уже свободной области строки меню рядом с вырезом, pt.
+    public static let wingAuxMargin: CGFloat = 8
     /// Насколько зона наведения выступает выше верха экрана.
     static let hoverTopOvershoot: CGFloat = 2
-    /// Запас под панелью для свечения.
-    static let glowMargin: CGFloat = 40
+    /// Запас под панелью для свечения: три радиуса при «Радиусе свечения» 3× (размытие 42 pt
+    /// плюс сам эллипс).
+    public static let glowMargin: CGFloat = 108
     /// Запас панели по бокам: тень раскрытого острова и «вздох» не обрезаются краем окна.
     public static let panelSideMargin: CGFloat = 24
     /// Отступ капсулы от строки меню на экране без выреза.
@@ -187,7 +201,11 @@ public enum NotchGeometry {
                 x: screen.frame.minX + left, y: screen.frame.maxY - screen.safeAreaTop,
                 width: screen.frame.width - left - right, height: screen.safeAreaTop
             )
-            return NotchLayout(screenID: screen.id, screenFrame: screen.frame, hasNotch: true, notch: notch)
+            let freeWidth = max(min(left, right), 0)
+            let wingLimit = min(max(freeWidth - wingAuxMargin, 0), maxWingWidth)
+            return NotchLayout(
+                screenID: screen.id, screenFrame: screen.frame, hasNotch: true, notch: notch, wingLimit: wingLimit
+            )
         }
 
         return NotchLayout(
