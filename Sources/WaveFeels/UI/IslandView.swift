@@ -1,3 +1,4 @@
+import QuartzCore
 import SwiftUI
 import WaveCore
 
@@ -13,8 +14,9 @@ import WaveCore
 /// через нее одной линией от середины, по краю свернутой капсулы тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
 ///
 /// Кадры идут от `TimelineView(.animation)`, на паузе, пока остров скрыт; в режиме
-/// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет последний кадр анализа
-/// и двигает фазы волн, «вздох» и переход палитры (`AppModel.islandVisuals`), точки и цвета волн
+/// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет кадр анализа на момент
+/// кадра по часам хоста (`CACurrentMediaTime()`), сглаживает уровни пружинами и двигает фазы
+/// волн, «вздох» и переход палитры (`AppModel.islandVisuals`), точки и цвета волн
 /// считаются один раз на кадр (`WaveSet`). Весь остров рисуется одной текстурой
 /// (`drawingGroup`). С `clock` остров рисуется один раз на момент `clock()`, без
 /// `TimelineView`: так его снимает `ImageRenderer`.
@@ -83,10 +85,15 @@ struct IslandView: View {
         ZStack(alignment: .topLeading) {
             Group {
                 if let clock {
-                    scene(state: state, now: clock())
+                    let time = clock()
+                    scene(state: state, now: time, timelineTime: time)
                 } else {
                     TimelineView(.animation(minimumInterval: model.lowPower ? 1.0 / 30 : nil, paused: state == .hidden)) { context in
-                        scene(state: state, now: context.date.timeIntervalSinceReferenceDate)
+                        scene(
+                            state: state,
+                            now: CACurrentMediaTime(),
+                            timelineTime: context.date.timeIntervalSinceReferenceDate
+                        )
                     }
                 }
             }
@@ -140,8 +147,10 @@ struct IslandView: View {
 
     // MARK: - Сцена
 
-    private func scene(state: IslandState, now: Double) -> some View {
-        let visuals = model.islandVisuals(now: now, reduceMotion: reduceMotion)
+    /// `now`: момент кадра по часам хоста (`CACurrentMediaTime()`), по нему берутся кадры анализа
+    /// и идет анимация; `timelineTime`: дата `TimelineView`, только для замера отрисовки.
+    private func scene(state: IslandState, now: Double, timelineTime: Double) -> some View {
+        let visuals = model.islandVisuals(now: now, timelineTime: timelineTime, reduceMotion: reduceMotion)
         let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(model.settings.wingWidth))
         let rect = geometry.island(for: state)
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.

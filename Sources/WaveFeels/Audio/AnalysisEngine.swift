@@ -3,7 +3,9 @@ import Synchronization
 import WaveCore
 
 /// Таймер анализа: 60 Гц (30 Гц в режиме энергосбережения) берет из кольца окно 2048 сэмплов
-/// со смещением на задержку, считает `Analyzer.process` и публикует кадр в `FrameStore`.
+/// со смещением на задержку, считает `Analyzer.process` и публикует кадр в `FrameStore` с моментом
+/// тика по часам хоста (отрисовка смешивает соседние кадры на свой момент). `stop()` оставляет в
+/// хранилище один тихий кадр.
 /// Пока остров скрыт (`setIdle(true)`), таймер идет с частотой 15 Гц: этого хватает, чтобы
 /// `ActivityGate` заметил начало звука (лишние десятки миллисекунд), а волны не рисуются.
 /// Если в кольцо больше 250 мс не приходят новые сэмплы (tap или демо встали), анализ получает
@@ -89,7 +91,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             }
             self.shared.withLock { $0.isRunning = false }
         }
-        store.publish(.silent)
+        store.reset()
     }
 
     func update(settings: LevelSettings, delayFrames: Int) {
@@ -152,7 +154,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             frame = .silent
         }
         shared.withLock { $0.zeroRun = isZero ? $0.zeroRun + dt : 0 }
-        store.publish(frame)
+        store.publish(frame, at: time)
         observer?(frame)
     }
 

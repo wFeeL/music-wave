@@ -57,7 +57,8 @@ nonisolated struct WaveSet: Sendable {
                 layer: layer,
                 level: level,
                 samples: WaveShape.samples(
-                    layer: layer, amplitude: level, phase: motion.phase(layer), count: points, profile: style.profile
+                    layer: layer, amplitude: level, phase: motion.phase(layer, profile: style.profile), count: points,
+                    profile: style.profile
                 ),
                 stops: WavePaint.stops(
                     palette: palette, layer: layer, level: level, time: time, locations: locations, profile: style.profile

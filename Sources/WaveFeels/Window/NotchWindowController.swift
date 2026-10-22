@@ -5,7 +5,8 @@ import WaveCore
 
 /// Панель у выреза: положение по экранам, курсор, пропуск кликов и полноэкранный режим.
 ///
-/// Экраны. Вырез пересчитывается при смене параметров экранов и после пробуждения экранов.
+/// Экраны. Вырез пересчитывается при смене параметров экранов и после пробуждения экранов,
+/// заодно модель получает период кадра экрана острова (`AppModel.refreshPeriod`).
 /// Остров стоит только на встроенном экране с вырезом; если его нет (внешний монитор при
 /// закрытой крышке), капсула встает под строку меню основного экрана (`NotchGeometry.layout`).
 ///
@@ -111,6 +112,11 @@ final class NotchWindowController {
             } else {
                 makePanel(layout: newLayout)
             }
+        }
+        let period = Self.refreshPeriod(screenID: newLayout.screenID)
+        if model.refreshPeriod != period {
+            model.refreshPeriod = period
+            log("экран острова: \(Int((1 / period).rounded())) Гц")
         }
         if isShown {
             panel?.orderFrontRegardless()
@@ -231,6 +237,15 @@ final class NotchWindowController {
             isBuiltIn: id != 0 && CGDisplayIsBuiltin(id) != 0,
             menuBarHeight: screen.frame.maxY - screen.visibleFrame.maxY
         )
+    }
+
+    /// Период кадра экрана острова по его наибольшей частоте кадров; экран не найден: 1/60 с.
+    private static func refreshPeriod(screenID: UInt32) -> Double {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        let screen = NSScreen.screens.first { screen in
+            (screen.deviceDescription[key] as? NSNumber)?.uint32Value == screenID
+        }
+        return RenderPacing.refreshPeriod(framesPerSecond: screen?.maximumFramesPerSecond ?? 0)
     }
 
     private static func describe(_ layout: NotchLayout) -> String {

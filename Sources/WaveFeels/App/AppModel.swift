@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import QuartzCore
 import UniformTypeIdentifiers
 import WaveCore
 
@@ -28,6 +29,12 @@ final class AppModel {
     static let privacyScreenCaptureURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
     /// Самый длинный шаг анимации острова между кадрами, с.
     static let maxVisualStep = 0.1
+    /// На сколько раньше момента кадра берется кадр анализа, с: соседние кадры анализа к этому
+    /// времени уже опубликованы, и уровни смешиваются между ними (до задачи 7, где момент
+    /// считается от задержки показа).
+    static let frameSampleDelay = 1.0 / 60
+    /// Как часто строка «Раскрытый» из «Отрисовки» пишется в файл лога, пока остров раскрыт, с.
+    static let renderLogInterval = 10.0
     /// Сколько трек может быть без обложки, прежде чем панель и волны вернутся к стандартной
     /// палитре: адаптер иногда присылает обложку следом за названием.
     static let missingArtworkGrace: Duration = .milliseconds(500)
@@ -83,6 +90,14 @@ final class AppModel {
     var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     /// Фазы волн. Сдвигаются на каждом кадре отрисовки, поэтому не наблюдаются.
     @ObservationIgnored var motion = WaveMotion()
+    /// Период кадра экрана острова, с (`1 / NSScreen.maximumFramesPerSecond`). Ставит
+    /// `NotchWindowController.relayout()`.
+    @ObservationIgnored var refreshPeriod = 1.0 / 60
+    /// Когда последний раз сменился `islandState`, секунды хоста (`CACurrentMediaTime()`).
+    @ObservationIgnored private(set) var islandStateChangedAt: Double = 0
+    /// Снимки: кадр, пружины и «вздох» заданы `showPreview` и на кадрах не меняются.
+    /// `start(arguments:)` снимает флаг.
+    @ObservationIgnored private(set) var previewing = false
 
     @ObservationIgnored private(set) var arguments = LaunchArguments()
     @ObservationIgnored private var gate = ActivityGate()
@@ -118,6 +133,13 @@ final class AppModel {
     @ObservationIgnored private var pulse = BeatPulse()
     @ObservationIgnored private var paletteFade = PaletteFade(palette: PaletteExtractor.fallback)
     @ObservationIgnored private var lastVisualTime: Double?
+    /// Пружины уровней трех слоев (по `WaveLayer.rawValue`) и общего уровня на кадрах отрисовки.
+    @ObservationIgnored private var layerSprings = [LevelSpring](repeating: LevelSpring(), count: WaveLayer.allCases.count)
+    @ObservationIgnored private var levelSpring = LevelSpring()
+    /// Замер отрисовки для раздела «Отрисовка».
+    @ObservationIgnored private var renderPacing = RenderPacing()
+    /// Когда строка «Раскрытый» последний раз ушла в лог; `nil`, пока остров не раскрыт.
+    @ObservationIgnored private var lastRenderLog: Double?
     /// Обложка, из которой получены `artwork` и `palette` (или ждут разбора).
     @ObservationIgnored private var artworkData: Data?
     @ObservationIgnored private var artworkTask: Task<Void, Never>?
@@ -161,6 +183,7 @@ final class AppModel {
     func start(arguments: LaunchArguments) {
         guard loopTask == nil else { return }
         self.arguments = arguments
+        previewing = false
 
         applySettings()
         subscribeToNotifications()
@@ -594,6 +617,7 @@ final class AppModel {
             // По этой строке замер CPU в CI убеждается, что остров действительно показан.
             log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
             islandState = state
+            islandStateChangedAt = CACurrentMediaTime()
             onIslandStateChange?()
         }
         updateAnalysisRate()
@@ -910,11 +934,20 @@ final class AppModel {
 
     // MARK: - Кадр острова
 
-    /// Шаг анимации острова на момент `now` (секунды часов кадра): последний кадр анализа,
-    /// фазы волн (при «Уменьшении движения» вдвое медленнее), «вздох» и палитра в середине
-    /// перехода. Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает.
-    func islandVisuals(now: Double, reduceMotion: Bool) -> IslandVisuals {
-        let frame = store.latest
+    /// Шаг анимации острова на момент `now` (секунды хоста, `CACurrentMediaTime()`): кадр анализа
+    /// на `now - frameSampleDelay`, смешанный из соседних (`FrameStore.frame(at:)`), уровни слоев
+    /// и общий уровень через пружины (`LevelSpring`), фазы волн по сглаженным уровням (при
+    /// «Уменьшении движения» вдвое медленнее), «вздох» и палитра в середине перехода. Шаг ограничен
+    /// `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр идет в замер
+    /// отрисовки (`timelineTime`: дата `TimelineView`), пока остров раскрыт, раз в 10 с строка
+    /// замера пишется в лог. Снимки (`previewing`) получают заданный кадр и «вздох» без шага.
+    func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
+        let sampled = store.frame(at: now - Self.frameSampleDelay)
+        if previewing {
+            let frame = springFrame(sampled)
+            let shown = paletteFade.palette(target: palette, now: now)
+            return IslandVisuals(frame: frame, sampled: sampled, motion: motion, palette: shown, pulse: pulse.value, time: now)
+        }
         var dt = 0.0
         if let lastVisualTime, now.isFinite {
             dt = min(max(now - lastVisualTime, 0), Self.maxVisualStep)
@@ -922,15 +955,50 @@ final class AppModel {
         if now.isFinite {
             lastVisualTime = now
         }
+        for index in layerSprings.indices {
+            let target = index < sampled.layers.count ? sampled.layers[index] : 0
+            layerSprings[index].step(toward: target, dt: dt)
+        }
+        levelSpring.step(toward: sampled.level, dt: dt)
+        let frame = springFrame(sampled)
         motion.advance(layers: frame.layers, dt: reduceMotion ? dt / 2 : dt)
         let beat = pulse.step(beat: frame.beat, dt: dt)
+        recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: palette, now: now)
-        return IslandVisuals(frame: frame, motion: motion, palette: shown, pulse: beat, time: now)
+        return IslandVisuals(frame: frame, sampled: sampled, motion: motion, palette: shown, pulse: beat, time: now)
+    }
+
+    /// Кадр `sampled` с уровнями слоев и общим уровнем из пружин.
+    private func springFrame(_ sampled: WaveFrame) -> WaveFrame {
+        var frame = sampled
+        frame.layers = layerSprings.map(\.value)
+        frame.level = levelSpring.value
+        return frame
+    }
+
+    /// Кадр отрисовки в `renderPacing`; пока остров раскрыт, строка «Раскрытый» раз в
+    /// `renderLogInterval` в файл лога (первая через 10 с после раскрытия).
+    private func recordRender(now: Double, timelineTime: Double) {
+        let bucket = RenderBucket.classify(state: islandState, sinceStateChange: now - islandStateChangedAt)
+        renderPacing.record(now: now, timelineTime: timelineTime, bucket: bucket, analysisSequence: store.sequence)
+        guard islandState == .expanded, now.isFinite else {
+            lastRenderLog = nil
+            return
+        }
+        guard let lastRenderLog else {
+            self.lastRenderLog = now
+            return
+        }
+        guard now - lastRenderLog >= Self.renderLogInterval else { return }
+        self.lastRenderLog = now
+        let row = renderPacing.summary(.expanded, refreshPeriod: refreshPeriod)?.pacingText ?? Self.noRenderData
+        Log.file("отрисовка, раскрытый: \(row)")
     }
 
     /// Снимки острова: модель не запущена, состояние, трек, палитра и кадр задаются напрямую.
-    /// Часы анимации встают на `time`, поэтому кадр на этот момент рисуется без шага анимации
-    /// и без перехода палитры.
+    /// Часы анимации встают на `time`, хранилище кадров держит `frame` в любой момент, пружины
+    /// уровней стоят на его значениях, поэтому кадр рисуется без шага анимации, без сглаживания
+    /// и без перехода палитры (`previewing`). Остров считается давно пришедшим в `state`.
     /// Обложка трека разбирается здесь же, синхронно, тем же путем, что в работе; палитра
     /// берется из нее же или задается явно (`palette`).
     func showPreview(
@@ -944,13 +1012,19 @@ final class AppModel {
         nowPlayingAvailable: Bool = true
     ) {
         islandState = state
+        islandStateChangedAt = -Double.infinity
         lastTrack = track
         previewNowPlaying = nowPlayingAvailable
         updateArtwork(immediately: true)
         if let palette {
             self.palette = palette
         }
-        store.publish(frame)
+        store.reset(to: frame)
+        for index in layerSprings.indices {
+            layerSprings[index].reset(to: index < frame.layers.count ? frame.layers[index] : 0)
+        }
+        levelSpring.reset(to: frame.level)
+        previewing = true
         self.motion = motion
         self.pulse = pulse
         paletteFade = PaletteFade(palette: self.palette)
@@ -979,7 +1053,10 @@ struct PanelArtwork {
 
 /// Все, что нужно острову на один кадр.
 struct IslandVisuals {
+    /// Кадр для рисования: уровни слоев и общий уровень после пружин.
     var frame: WaveFrame
+    /// Кадр анализа на момент кадра, смешанный из соседних, до пружин.
+    var sampled: WaveFrame
     var motion: WaveMotion
     /// Палитра с учетом перехода.
     var palette: [PaletteColor]
@@ -1031,6 +1108,7 @@ extension AppModel {
             nowPlayingSection(),
             audioSection(),
             outputSection(),
+            renderSection(),
             permissionSection(),
             screensSection(),
         ]
@@ -1146,6 +1224,30 @@ extension AppModel {
         ])
     }
 
+    /// Замер отрисовки по корзинам `RenderBucket` при периоде экрана `refreshPeriod`.
+    private func renderSection() -> DiagnosticsSection {
+        let period = refreshPeriod
+        let names = ["свернутый", "раскрытый", "переход"]
+        let summaries = [RenderBucket.collapsed, .expanded, .transition].map {
+            renderPacing.summary($0, refreshPeriod: period)
+        }
+        var analysis: [String] = []
+        var spread: [String] = []
+        for (name, summary) in zip(names, summaries) {
+            analysis.append("\(name) (\(summary?.analysisFramesText ?? Self.noRenderData))")
+            spread.append("\(name) (\(summary?.spreadText ?? Self.noRenderData))")
+        }
+        let hertz = Int((1 / period).rounded())
+        return DiagnosticsSection(title: "Отрисовка", rows: [
+            DiagnosticsRow(label: "Экран", value: "\(hertz) Гц | энергосбережение: \(Self.yesNo(lowPower))"),
+            DiagnosticsRow(label: "Свернутый", value: summaries[0]?.pacingText ?? Self.noRenderData),
+            DiagnosticsRow(label: "Раскрытый", value: summaries[1]?.pacingText ?? Self.noRenderData),
+            DiagnosticsRow(label: "Переход", value: summaries[2]?.pacingText ?? Self.noRenderData),
+            DiagnosticsRow(label: "Кадров анализа на кадр", value: analysis.joined(separator: ", ")),
+            DiagnosticsRow(label: "Разброс", value: spread.joined(separator: ", ")),
+        ])
+    }
+
     private func permissionSection() -> DiagnosticsSection {
         DiagnosticsSection(title: "Доступ", rows: [
             DiagnosticsRow(label: "Запись системного аудио", value: Self.describe(permissionStatus)),
@@ -1191,6 +1293,9 @@ extension AppModel {
     }
 
     // MARK: - Описания
+
+    /// В корзине замера отрисовки еще нет кадров.
+    static let noRenderData = "нет данных"
 
     /// Пояснение к `captureStallHint` в диагностике.
     static let captureStallText = "Звук не приходит, хотя доступ разрешен. WaveFeels повторяет попытки."
