@@ -166,7 +166,7 @@ public final class Analyzer {
 /// `CACurrentMediaTime()` и `DispatchTime.now().uptimeNanoseconds`). Отрисовка берет кадр на
 /// свой момент (`frame(at:)`): между соседними кадрами значения смешиваются линейно, поэтому
 /// уровни меняются на каждом кадре экрана, даже когда часы анализа и экрана расходятся по фазе.
-/// Хранятся последние `capacity` кадров.
+/// Хранятся последние `capacity` кадров и последнее расписание свечения (`publishSchedule`).
 public final class FrameStore: Sendable {
     public static let capacity = 128
 
@@ -182,6 +182,7 @@ public final class FrameStore: Sendable {
         var start = 0
         var held = WaveFrame.silent
         var sequence: UInt64 = 0
+        var schedule = BeatSchedule.empty
 
         var count: Int { entries.count }
 
@@ -266,10 +267,24 @@ public final class FrameStore: Sendable {
         }
     }
 
-    /// История становится одним кадром `frame`, который действует в любой момент. Номер
-    /// публикации (`sequence`) не меняется.
+    /// История становится одним кадром `frame`, который действует в любой момент, расписание
+    /// свечения пустым. Номер публикации (`sequence`) не меняется.
     public func reset(to frame: WaveFrame = .silent) {
-        state.withLock { $0.clear(holding: frame) }
+        state.withLock { history in
+            history.clear(holding: frame)
+            history.schedule = .empty
+        }
+    }
+
+    /// Новое расписание свечения (времена событий в слышимых секундах хоста) заменяет прежнее.
+    /// История кадров и `sequence` не меняются.
+    public func publishSchedule(_ schedule: BeatSchedule) {
+        state.withLock { $0.schedule = schedule }
+    }
+
+    /// Последнее расписание свечения; пустое до первой публикации и после `reset(to:)`.
+    public var schedule: BeatSchedule {
+        state.withLock { $0.schedule }
     }
 
     /// Последний опубликованный кадр (или кадр `reset(to:)`).

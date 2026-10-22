@@ -175,6 +175,39 @@ struct FrameStoreTests {
         #expect(repeats == 0)
     }
 
+    @Test func scheduleRoundTripsAndResets() {
+        let store = FrameStore()
+        #expect(store.schedule == .empty)
+        let schedule = BeatSchedule(
+            events: [
+                GlowEvent(id: 1, time: 10.0, amplitude: 1, predicted: true),
+                GlowEvent(id: 2, time: 10.5, amplitude: 0.8, predicted: true),
+            ],
+            bpm: 120, period: 0.5, confidence: 0.7, locked: true
+        )
+        store.publish(frame(0.4), at: 1)
+        let sequence = store.sequence
+        store.publishSchedule(schedule)
+        #expect(store.schedule == schedule)
+        // Расписание не кадр: номер публикации и история кадров не меняются.
+        #expect(store.sequence == sequence)
+        #expect(store.latest == frame(0.4))
+
+        // Время кадров пошло назад: история очищается, расписание остается до следующей публикации.
+        store.publish(frame(0.2), at: 0.5)
+        #expect(store.schedule == schedule)
+
+        let next = schedule.shifted(by: 0.5)
+        store.publishSchedule(next)
+        #expect(store.schedule == next)
+
+        store.reset(to: frame(0.6))
+        #expect(store.schedule == .empty)
+        store.publishSchedule(schedule)
+        store.reset()
+        #expect(store.schedule == .empty)
+    }
+
     @Test func frameStoreReturnsLastPublished() {
         let store = FrameStore()
         #expect(store.latest == .silent)

@@ -1,10 +1,24 @@
 import Synchronization
 
+/// Метка блока сэмплов: номер первого сэмпла блока с момента создания или `reset()` кольца
+/// и время хоста этого блока в тиках, как его дал аудио-колбэк.
+public struct RingStamp: Sendable, Equatable {
+    public var sampleIndex: Int
+    public var hostTicks: UInt64
+
+    public init(sampleIndex: Int, hostTicks: UInt64) {
+        self.sampleIndex = sampleIndex
+        self.hostTicks = hostTicks
+    }
+}
+
 /// Кольцевой буфер сэмплов для одного писателя и одного читателя (SPSC).
 ///
 /// Писатель (аудио-колбэк) вызывает `write` без блокировок и выделений памяти.
-/// Читатель (таймер анализа) вызывает `copyLatest` по схеме seqlock: копирует окно
-/// и проверяет, что писатель не успел его перезаписать.
+/// Читатель (таймер анализа) вызывает `copyWindow` или `copyLatest` по схеме seqlock: копирует
+/// окно и проверяет, что писатель не успел его перезаписать. Метку последнего блока
+/// (`latestStamp()`) писатель публикует через отдельный seqlock из атомиков, поэтому номер
+/// сэмпла и время читаются согласованной парой.
 public final class SampleRingBuffer: @unchecked Sendable {
     private let storage: UnsafeMutablePointer<Float>
     private let mask: Int
@@ -14,6 +28,11 @@ public final class SampleRingBuffer: @unchecked Sendable {
     /// Сколько сэмплов писатель успел заявить: растет до начала копирования,
     /// чтобы читатель увидел перезапись окна, которая еще не опубликована.
     private let claimed = Atomic<Int>(0)
+    /// Seqlock метки: нечетный номер, пока писатель меняет пару. `stampIndex < 0` значит,
+    /// что метки нет.
+    private let stampSequence = Atomic<UInt64>(0)
+    private let stampIndex = Atomic<Int>(-1)
+    private let stampTicks = Atomic<UInt64>(0)
     private let activeWriterCount = Atomic<Int>(0)
     private let peakWriterCount = Atomic<Int>(0)
 
@@ -38,8 +57,46 @@ public final class SampleRingBuffer: @unchecked Sendable {
     /// Только для одного писателя.
     public func write(_ samples: UnsafeBufferPointer<Float>) {
         guard let base = samples.baseAddress, samples.count > 0 else { return }
+        storeSamples(base, count: samples.count)
+    }
+
+    /// То же, что `write(_:)`, плюс метка блока: номер его первого сэмпла и `hostTicks`.
+    /// Метка публикуется после сэмплов. Пустой блок ничего не меняет. Только для одного писателя.
+    public func write(_ samples: UnsafeBufferPointer<Float>, hostTicks: UInt64) {
+        guard let base = samples.baseAddress, samples.count > 0 else { return }
+        let first = storeSamples(base, count: samples.count)
+        publishStamp(index: first, ticks: hostTicks)
+    }
+
+    /// Последняя метка блока; `nil` до первой записи с меткой и после `reset()`.
+    public func latestStamp() -> RingStamp? {
+        while true {
+            let before = stampSequence.load(ordering: .acquiring)
+            guard before & 1 == 0 else { continue }
+            let index = stampIndex.load(ordering: .relaxed)
+            let ticks = stampTicks.load(ordering: .relaxed)
+            atomicMemoryFence(ordering: .acquiring)
+            let after = stampSequence.load(ordering: .relaxed)
+            guard after == before else { continue }
+            return index < 0 ? nil : RingStamp(sampleIndex: index, hostTicks: ticks)
+        }
+    }
+
+    /// Пишет пару через seqlock: номер нечетный, пара, номер четный. Только атомики, без
+    /// блокировок, можно из аудио-колбэка.
+    private func publishStamp(index: Int, ticks: UInt64) {
+        let sequence = stampSequence.load(ordering: .relaxed)
+        stampSequence.store(sequence &+ 1, ordering: .relaxed)
+        atomicMemoryFence(ordering: .releasing)
+        stampIndex.store(index, ordering: .relaxed)
+        stampTicks.store(ticks, ordering: .relaxed)
+        stampSequence.store(sequence &+ 2, ordering: .releasing)
+    }
+
+    /// Копирует сэмплы в кольцо и публикует их. Возвращает номер первого сэмпла блока.
+    @discardableResult
+    private func storeSamples(_ base: UnsafePointer<Float>, count n: Int) -> Int {
         let w = written.load(ordering: .relaxed)
-        let n = samples.count
         let newTotal = w + n
         claimed.store(newTotal, ordering: .relaxed)
         atomicMemoryFence(ordering: .releasing)
@@ -55,6 +112,32 @@ public final class SampleRingBuffer: @unchecked Sendable {
         }
 
         written.store(newTotal, ordering: .releasing)
+        return w
+    }
+
+    /// Копирует `destination.count` сэмплов с номерами `endIndex - destination.count ..< endIndex`.
+    /// Возвращает `false`, если таких сэмплов еще нет (окно в будущем или до нулевого сэмпла),
+    /// окно длиннее кольца или уже перезаписано (в том числе во время копирования).
+    public func copyWindow(endingAt endIndex: Int, into destination: UnsafeMutableBufferPointer<Float>) -> Bool {
+        let count = destination.count
+        guard count <= _capacity else { return false }
+        let start = endIndex - count
+        guard start >= 0 else { return false }
+
+        let w = written.load(ordering: .acquiring)
+        guard endIndex <= w, w - start <= _capacity else { return false }
+        guard count > 0, let out = destination.baseAddress else { return true }
+
+        let startPos = start & mask
+        let firstPart = min(count, _capacity - startPos)
+        out.update(from: storage + startPos, count: firstPart)
+        if count > firstPart {
+            (out + firstPart).update(from: storage, count: count - firstPart)
+        }
+
+        atomicMemoryFence(ordering: .acquiring)
+        let c = claimed.load(ordering: .relaxed)
+        return c - start <= _capacity
     }
 
     /// Копирует `destination.count` сэмплов, заканчивающихся на `totalWritten - delay`.
@@ -82,10 +165,11 @@ public final class SampleRingBuffer: @unchecked Sendable {
         return c - start <= _capacity
     }
 
-    /// Обнуляет историю. Вызывать, когда писатель и читатель не работают.
+    /// Обнуляет историю и метку. Вызывать, когда писатель и читатель не работают.
     public func reset() {
         claimed.store(0, ordering: .relaxed)
         written.store(0, ordering: .releasing)
+        publishStamp(index: -1, ticks: 0)
     }
 
     // MARK: - Учет писателей
