@@ -69,7 +69,9 @@ public struct BeatTracker: Sendable {
         public var offGridScale: Float
         /// Нижняя граница яркости онсета бочки.
         public var onsetFloor: Float
-        /// За сколько долей смесь переходит между онсетами и предсказанием.
+        /// За сколько долей смесь переходит между онсетами и предсказанием. Одна доля: после отпускания
+        /// предсказанные доли с неверной фазой гаснут быстрее (на GTZAN такие вспышки попадали в долю в
+        /// 65 % случаев против 90 % у захваченных).
         public var crossfadeBeats: Double
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
@@ -94,7 +96,7 @@ public struct BeatTracker: Sendable {
             dropWindow: Double = 0.2,
             offGridScale: Float = 0.2,
             onsetFloor: Float = 0.4,
-            crossfadeBeats: Double = 2.0,
+            crossfadeBeats: Double = 1.0,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6,
             beatDelay: Double = 0.012
