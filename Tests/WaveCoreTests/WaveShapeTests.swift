@@ -6,52 +6,129 @@ struct WaveShapeTests {
     private static let weights: [Double] = [1.6, 2.8, 4.4]
 
     @Test func waveIsZeroAtEdges() {
-        for layer in WaveLayer.allCases {
-            for phase in stride(from: 0.0, to: 2 * Double.pi, by: 0.37) {
-                let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 128)
-                #expect(y.count == 128)
-                #expect(abs(y[0]) <= 1e-6)
-                #expect(abs(y[127]) <= 1e-6)
-                #expect(y.allSatisfy { $0.isFinite })
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                for phase in stride(from: 0.0, to: 2 * Double.pi, by: 0.37) {
+                    let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 128, profile: profile)
+                    #expect(y.count == 128)
+                    // Крыло: ноль у выреза и у края; панель: ноль у обоих краев.
+                    #expect(abs(y[0]) <= 1e-6)
+                    #expect(abs(y[127]) <= 1e-6)
+                    #expect(y.allSatisfy { $0.isFinite })
+                }
             }
         }
     }
 
     @Test func waveStaysInRange() {
-        for layer in WaveLayer.allCases {
-            for i in 0..<200 {
-                let phase = Double(i) / 200 * 2 * Double.pi
-                let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 257)
-                #expect(y.allSatisfy { abs($0) <= 1 })
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                for i in 0..<200 {
+                    let phase = Double(i) / 200 * 2 * Double.pi
+                    let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 257, profile: profile)
+                    #expect(y.allSatisfy { abs($0) <= 1 })
+                }
             }
         }
     }
 
     @Test func zeroAmplitudeIsFlat() {
-        for layer in WaveLayer.allCases {
-            let y = WaveShape.samples(layer: layer, amplitude: 0, phase: 1.3, count: 64)
-            #expect(y.allSatisfy { $0 == 0 })
+        for profile in WaveProfile.allCases {
+            for layer in WaveLayer.allCases {
+                let y = WaveShape.samples(layer: layer, amplitude: 0, phase: 1.3, count: 64, profile: profile)
+                #expect(y.allSatisfy { $0 == 0 })
+            }
         }
+    }
+
+    /// Положение максимума огибающей (по всем фазам) в долях от начала массива.
+    private func envelopePeak(_ layer: WaveLayer, profile: WaveProfile, count: Int) -> [Float] {
+        var peak = [Float](repeating: 0, count: count)
+        for i in 0..<200 {
+            let phase = Double(i) / 200 * 2 * Double.pi
+            let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: profile)
+            for j in 0..<count { peak[j] = max(peak[j], abs(y[j])) }
+        }
+        return peak
     }
 
     @Test func envelopePeaksWhereSpecified() {
         let count = 401
         func argmax(_ layer: WaveLayer) -> Double {
-            var peak = [Float](repeating: 0, count: count)
-            for i in 0..<200 {
-                let phase = Double(i) / 200 * 2 * Double.pi
-                let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count)
-                for j in 0..<count { peak[j] = max(peak[j], abs(y[j])) }
-            }
+            let peak = envelopePeak(layer, profile: .wing, count: count)
             let best = peak.indices.max { peak[$0] < peak[$1] }!
             return Double(best) / Double(count - 1)
         }
         let bass = argmax(.bass)
+        let mid = argmax(.mid)
         let high = argmax(.high)
-        #expect(abs(bass - 0.3) < 0.15)
-        #expect(abs(high - 0.7) < 0.15)
-        #expect(abs(bass - 0.3) < abs(high - 0.3))
-        #expect(abs(high - 0.7) < abs(bass - 0.7))
+        // Бас у выреза, верх к краю: 0.2, 0.4, 0.6.
+        #expect(abs(bass - 0.2) < 0.12, "bass \(bass)")
+        #expect(abs(high - 0.6) < 0.12, "high \(high)")
+        #expect(bass < mid && mid < high)
+    }
+
+    /// Сдвиг (в отсчетах) `later` относительно `earlier` на участке `range`: положительный, если
+    /// волна ушла к большим индексам.
+    private func bestShift(_ earlier: [Float], _ later: [Float], range: Range<Int>) -> Int {
+        var best = 0
+        var bestError = Float.infinity
+        for shift in -30...30 {
+            var error: Float = 0
+            for i in range {
+                let d = later[i] - earlier[i - shift]
+                error += d * d
+            }
+            if error < bestError {
+                bestError = error
+                best = shift
+            }
+        }
+        return best
+    }
+
+    @Test func crestsTravelOutward() {
+        let count = 801
+        for layer in WaveLayer.allCases {
+            for phase in [0.4, 1.9, 3.3, 5.1] {
+                // Крыло: от выреза (индекс 0) к краю.
+                let wingNow = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: .wing)
+                let wingLater = WaveShape.samples(layer: layer, amplitude: 1, phase: phase + 0.15, count: count, profile: .wing)
+                #expect(bestShift(wingNow, wingLater, range: 160..<640) > 0, "wing \(layer) phase \(phase)")
+                // Панель: правая половина вправо, левая влево.
+                let panelNow = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: .panel)
+                let panelLater = WaveShape.samples(layer: layer, amplitude: 1, phase: phase + 0.15, count: count, profile: .panel)
+                #expect(bestShift(panelNow, panelLater, range: 480..<720) > 0, "panel right \(layer) phase \(phase)")
+                #expect(bestShift(panelNow, panelLater, range: 80..<320) < 0, "panel left \(layer) phase \(phase)")
+            }
+        }
+    }
+
+    @Test func panelIsSymmetricWithoutCenterSeam() {
+        let count = 401
+        let center = count / 2
+        for layer in WaveLayer.allCases {
+            var centerPeak: Float = 0
+            var centerSteps: Float = 0
+            var nearbySteps: Float = 0
+            for i in 0..<64 {
+                let phase = Double(i) / 64 * 2 * Double.pi
+                let y = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: count, profile: .panel)
+                for j in 0..<count {
+                    #expect(abs(y[j] - y[count - 1 - j]) < 1e-6)
+                }
+                centerPeak = max(centerPeak, abs(y[center]))
+                // Шаг 0.0005 ширины: у середины линия почти не меняется (касательная
+                // горизонтальна), на 0.02 от середины уже идет наклонно. У излома |x| эти шаги
+                // были бы одного порядка.
+                let fine = WaveShape.samples(layer: layer, amplitude: 1, phase: phase, count: 4001, profile: .panel)
+                centerSteps += abs(fine[2001] - fine[2000])
+                nearbySteps += abs(fine[2041] - fine[2040])
+            }
+            #expect(centerSteps < 0.2 * nearbySteps, "\(layer): \(centerSteps) vs \(nearbySteps)")
+            // В середине амплитуда не пропадает.
+            #expect(centerPeak > 0.4, "\(layer): \(centerPeak)")
+        }
     }
 
     private func circularDistance(_ a: Double, _ b: Double) -> Double {
@@ -178,49 +255,75 @@ struct WaveShapeTests {
     }
 
     @Test func paintStopsSpanTheWave() {
-        let stops = WavePaint.stops(palette: Self.warm, layer: .mid, level: 0.6, time: 3, count: 9)
-        #expect(stops.count == 9)
-        for (index, stop) in stops.enumerated() {
-            #expect(abs(stop.location - Double(index) / 8) < 1e-12)
-            #expect(stop.opacity >= 0 && stop.opacity <= 1)
+        for profile in WaveProfile.allCases {
+            let stops = WavePaint.stops(palette: Self.warm, layer: .mid, level: 0.6, time: 3, count: 9, profile: profile)
+            #expect(stops.count == 9)
+            for (index, stop) in stops.enumerated() {
+                #expect(abs(stop.location - Double(index) / 8) < 1e-12)
+                #expect(stop.opacity >= 0 && stop.opacity <= 1)
+            }
+            #expect(WavePaint.stops(palette: Self.warm, layer: .mid, level: 0.6, time: 3, count: 1, profile: profile).isEmpty)
         }
-        #expect(WavePaint.stops(palette: Self.warm, layer: .mid, level: 0.6, time: 3, count: 1).isEmpty)
     }
 
     @Test func loudWaveBlendsTwoPaletteColors() {
+        // Середина без сдвига светлоты: у выреза свой цвет, посередине следующий.
+        let stops = WavePaint.stops(palette: Self.warm, layer: .mid, level: 1, time: 0, count: 9)
+        #expect(colorDistance(stops[0].color, Self.warm[1]) < 0.01)
+        #expect(colorDistance(stops[4].color, Self.warm[2]) < 0.01)
+        #expect(abs(stops[4].opacity - WavePaint.fullOpacity) < 1e-6)
+        // Бас темнее и прозрачнее, верх светлее.
+        let bass = WavePaint.stops(palette: Self.warm, layer: .bass, level: 1, time: 0, count: 9)
+        let high = WavePaint.stops(palette: Self.warm, layer: .high, level: 1, time: 0, count: 9)
+        #expect(abs(bass[0].color.oklab.l - (Self.warm[0].oklab.l - 0.06)) < 0.01)
+        #expect(abs(high[0].color.oklab.l - (Self.warm[2].oklab.l + 0.06)) < 0.02)
+        #expect(abs(bass[4].opacity - 0.8 * WavePaint.fullOpacity) < 1e-6)
+    }
+
+    @Test func lightnessIsCapped() {
+        let pale = [RGBColor(hex: 0xFFF3C4), RGBColor(hex: 0xFFE9A8), RGBColor(hex: 0xFFFFFF)]
         for layer in WaveLayer.allCases {
-            let stops = WavePaint.stops(palette: Self.warm, layer: layer, level: 1, time: 0, count: 9)
-            let own = Self.warm[layer.rawValue]
-            let next = Self.warm[(layer.rawValue + 1) % 3]
-            // При time = 0 у выреза свой цвет слоя, посередине следующий цвет палитры.
-            #expect(colorDistance(stops[0].color, own) < 0.01)
-            #expect(colorDistance(stops[4].color, next) < 0.01)
-            #expect(abs(stops[4].opacity - WavePaint.fullOpacity) < 1e-6)
+            for stop in WavePaint.stops(palette: pale, layer: layer, level: 1, time: 1.7, count: 9) {
+                #expect(stop.color.oklab.l <= WavePaint.maxLightness + 0.01)
+            }
         }
     }
 
-    @Test func silentWaveIsDimAndColorless() {
+    @Test func silentWaveIsDimButKeepsTint() {
         for layer in WaveLayer.allCases {
-            for stop in WavePaint.stops(palette: Self.warm, layer: layer, level: 0, time: 7.3, count: 9) {
-                let c = stop.color
-                #expect(max(c.r, c.g, c.b) - min(c.r, c.g, c.b) < 0.01)
+            let silent = WavePaint.stops(palette: Self.warm, layer: layer, level: 0, time: 0, count: 9)
+            let loud = WavePaint.stops(palette: Self.warm, layer: layer, level: 1, time: 0, count: 9)
+            for stop in silent {
                 #expect(stop.opacity <= WavePaint.restOpacity + 1e-6)
             }
+            // В тишине оттенок обложки остается, около 60 % насыщенности.
+            let ratio = silent[0].color.oklab.chroma / loud[0].color.oklab.chroma
+            #expect(ratio > 0.5 && ratio < 0.7, "\(layer): \(ratio)")
         }
-        // Цвет и яркость растут вместе с уровнем.
         let quiet = WavePaint.stops(palette: Self.warm, layer: .bass, level: 0.1, time: 0, count: 9)[4]
         let loud = WavePaint.stops(palette: Self.warm, layer: .bass, level: 0.6, time: 0, count: 9)[4]
         #expect(quiet.opacity < loud.opacity)
-        let spread: (RGBColor) -> Float = { max($0.r, $0.g, $0.b) - min($0.r, $0.g, $0.b) }
-        #expect(spread(quiet.color) < spread(loud.color))
+        #expect(quiet.color.oklab.chroma < loud.color.oklab.chroma)
     }
 
-    @Test func wavesFadeAtBothEnds() {
+    @Test func wingStartsBrightAtNotchAndDissolvesOutside() {
         let stops = WavePaint.stops(palette: Self.warm, layer: .high, level: 1, time: 0, count: 9)
+        let full = stops[4].opacity
+        #expect(stops[0].opacity >= 0.8 * full)
+        #expect(stops[1].opacity == full)
+        #expect(stops[6].opacity == full)
+        #expect(stops[7].opacity < full && stops[7].opacity > 0)
         #expect(stops[8].opacity == 0)
-        #expect(stops[0].opacity < 0.1 * WavePaint.fullOpacity)
-        #expect(stops[0].opacity < stops[1].opacity && stops[1].opacity < stops[2].opacity)
-        #expect(stops[6].opacity > stops[7].opacity && stops[7].opacity > stops[8].opacity)
+    }
+
+    @Test func panelRunsThroughCenterSymmetrically() {
+        let stops = WavePaint.stops(palette: Self.warm, layer: .mid, level: 1, time: 3.7, count: 17, profile: .panel)
+        #expect(stops[8].opacity == WavePaint.fullOpacity)
+        #expect(stops[0].opacity == 0 && stops[16].opacity == 0)
+        for i in 0..<17 {
+            #expect(abs(stops[i].opacity - stops[16 - i].opacity) < 1e-6)
+            #expect(colorDistance(stops[i].color, stops[16 - i].color) < 1e-4)
+        }
     }
 
     @Test func gradientFlowsOutwardAndLoops() {
@@ -234,12 +337,45 @@ struct WaveShapeTests {
         for index in 0..<9 {
             #expect(colorDistance(loop[index].color, now[index].color) < 0.005)
         }
+        // Панель: за 2.5 с на 0.125 полуширины от середины, то есть на одну точку из 17 в каждую сторону.
+        let panelNow = WavePaint.stops(palette: Self.warm, layer: .bass, level: 1, time: 4, count: 17, profile: .panel)
+        let panelLater = WavePaint.stops(palette: Self.warm, layer: .bass, level: 1, time: 6.5, count: 17, profile: .panel)
+        for index in 9..<17 {
+            #expect(colorDistance(panelLater[index].color, panelNow[index - 1].color) < 0.005)
+        }
+        for index in 0..<8 {
+            #expect(colorDistance(panelLater[index].color, panelNow[index + 1].color) < 0.005)
+        }
+    }
+
+    @Test func closePaletteColorsAreSeparated() {
+        let red = RGBColor(hex: 0xE11D48)
+        let labs = WavePaint.distinct([red, red, RGBColor(hex: 0xE21E49)])
+        #expect(labs[0] == red.oklab)
+        #expect(labs[0].distance(to: labs[1]) >= 0.08)
+        #expect(labs[0].distance(to: labs[2]) >= 0.08)
+        #expect(labs[1].distance(to: labs[2]) >= 0.08)
+        // Различимые цвета не трогаются.
+        let fallback = WavePaint.distinct(PaletteExtractor.fallback)
+        #expect(fallback == PaletteExtractor.fallback.map(\.oklab))
+    }
+
+    @Test func glowColorIsLiftedAndSaturated() {
+        let dull = WavePaint.glowColor(RGBColor(hex: 0x3A3246)).oklab
+        #expect(dull.l >= 0.7, "L \(dull.l)")
+        #expect(dull.chroma >= 0.1, "C \(dull.chroma)")
+        let bright = RGBColor(hex: 0x22D3EE)
+        #expect(colorDistance(WavePaint.glowColor(bright), bright) < 0.01)
+        let gray = WavePaint.glowColor(RGBColor(hex: 0x404040)).oklab
+        #expect(gray.chroma < 0.01 && gray.l >= 0.71)
     }
 
     @Test func paintSurvivesBadInput() {
-        for stop in WavePaint.stops(palette: [], layer: .high, level: .nan, time: .infinity, count: 5) {
-            #expect(stop.color.r.isFinite && stop.color.g.isFinite && stop.color.b.isFinite)
-            #expect(stop.opacity.isFinite && stop.opacity >= 0 && stop.opacity <= 1)
+        for profile in WaveProfile.allCases {
+            for stop in WavePaint.stops(palette: [], layer: .high, level: .nan, time: .infinity, count: 5, profile: profile) {
+                #expect(stop.color.r.isFinite && stop.color.g.isFinite && stop.color.b.isFinite)
+                #expect(stop.opacity.isFinite && stop.opacity >= 0 && stop.opacity <= 1)
+            }
         }
         let short = WavePaint.stops(palette: [RGBColor(hex: 0x22D3EE)], layer: .high, level: 1, time: 0, count: 3)
         #expect(short.count == 3)

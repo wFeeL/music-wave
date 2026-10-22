@@ -27,27 +27,74 @@ public struct WaveMotion: Sendable {
     }
 }
 
-/// Форма одного слоя волны вдоль крыла острова.
-public enum WaveShape {
-    private static let carriers: [Double] = [1.25, 2.5, 5.0]
-    private static let offsets: [Double] = [0, 2.1, 4.2]
-    private static let peaks: [Double] = [0.3, 0.5, 0.7]
+/// Где рисуется волна.
+public enum WaveProfile: Sendable, CaseIterable {
+    /// Крыло: x = 0 у выреза, x = 1 у внешнего края, у выреза амплитуда уходит в ноль.
+    case wing
+    /// Панель и капсула: одна линия во всю ширину, симметрично от середины и без шва в ней.
+    case panel
+}
 
-    /// Значения y в -1...1 для x = i / (count - 1): x = 0 у выреза, x = 1 у внешнего края крыла.
-    /// `amplitude` ограничивается диапазоном 0...1.
-    public static func samples(layer: WaveLayer, amplitude: Float, phase: Double, count: Int) -> [Float] {
+/// Форма одного слоя волны.
+///
+/// Несущая `sin(2π·c·x − phase + p)` и гармоника `sin(2π·2.3·c·x − 1.7·phase)`: с ростом фазы
+/// гребни бегут от выреза наружу. В крыле волн мало (0.6, 1.1, 1.8 периода на бас, середину и
+/// верх), у баса нет гармоники. В панели линия идет через середину: волна считается от
+/// `u = sqrt(x² + 0.03²)`, мягкого модуля без излома, и в середине амплитуда не пропадает.
+public enum WaveShape {
+    static let wingCarriers: [Double] = [0.6, 1.1, 1.8]
+    static let panelCarriers: [Double] = [1.25, 2.5, 5.0]
+    static let wingHarmonics: [Double] = [0, 0.12, 0.12]
+    static let panelHarmonics: [Double] = [0.25, 0.25, 0.25]
+    private static let offsets: [Double] = [0, 2.1, 4.2]
+    /// Где огибающая слоя достигает максимума (доля от выреза или от середины панели).
+    static let peaks: [Double] = [0.2, 0.4, 0.6]
+    /// Мягкий модуль в середине панели.
+    static let centerSoftness = 0.03
+    /// Огибающая панели: `panelFloor + (1 − panelFloor)·sin(π·u^k)`, к краям затухает
+    /// от `panelTaperStart` до нуля.
+    static let panelFloor = 0.6
+    static let panelTaperStart = 0.75
+
+    /// Значения y в -1...1. `.wing`: x = i / (count - 1) от выреза к краю. `.panel`:
+    /// x = -1 + 2i / (count - 1) через всю ширину. `amplitude` ограничивается диапазоном 0...1.
+    public static func samples(
+        layer: WaveLayer, amplitude: Float, phase: Double, count: Int, profile: WaveProfile = .wing
+    ) -> [Float] {
         guard count > 0 else { return [] }
-        let c = carriers[layer.rawValue]
-        let p = offsets[layer.rawValue]
-        let k = log(0.5) / log(peaks[layer.rawValue])
+        let index = layer.rawValue
+        let p = offsets[index]
+        let k = log(0.5) / log(peaks[index])
         let amp = Double(min(max(amplitude, 0), 1))
+        let phase = phase.isFinite ? phase : 0
         let denominator = Double(max(count - 1, 1))
         let twoPi = 2 * Double.pi
 
+        let c: Double, h: Double
+        switch profile {
+        case .wing:
+            c = wingCarriers[index]
+            h = wingHarmonics[index]
+        case .panel:
+            c = panelCarriers[index]
+            h = panelHarmonics[index]
+        }
+
         return (0..<count).map { i in
-            let x = Double(i) / denominator
-            let envelope = pow(max(0, sin(Double.pi * pow(x, k))), 1.5)
-            let carrier = 0.75 * sin(twoPi * c * x + phase + p) + 0.25 * sin(twoPi * 2.3 * c * x - 1.7 * phase)
+            let t = Double(i) / denominator
+            let u: Double
+            let envelope: Double
+            switch profile {
+            case .wing:
+                u = t
+                envelope = pow(max(0, sin(Double.pi * pow(u, k))), 1.5)
+            case .panel:
+                let x = 2 * t - 1
+                u = min((x * x + centerSoftness * centerSoftness).squareRoot(), 1)
+                let body = panelFloor + (1 - panelFloor) * sin(Double.pi * pow(u, k))
+                envelope = body * WavePaint.smoothstep(1, panelTaperStart, u)
+            }
+            let carrier = (1 - h) * sin(twoPi * c * u - phase + p) + h * sin(twoPi * 2.3 * c * u - 1.7 * phase)
             return Float(amp * envelope * carrier)
         }
     }
@@ -99,12 +146,14 @@ public struct BeatPulse: Sendable {
 /// Цвет и прозрачность вдоль одной волны.
 ///
 /// Градиент между цветом слоя `palette[i]` и следующим `palette[(i + 1) % 3]` течет от выреза
-/// наружу на `flowSpeed` ширины в секунду и замыкается по кругу. В тишине линия теряет цвет
-/// и становится тусклой серой, с уровнем цвет и яркость возвращаются. У выреза линия
-/// проявляется, к внешнему краю растворяется.
+/// (или от середины панели) наружу на `flowSpeed` ширины в секунду и замыкается по кругу.
+/// Слишком близкие цвета палитры разводятся поворотом оттенка, бас темнее, верх светлее,
+/// светлота не выше `maxLightness`, чтобы теплые палитры не выгорали в белый. В тишине
+/// линия тусклая, но сохраняет оттенок обложки. В крыле линия ярко выходит из выреза, в панели
+/// идет через середину без провала, к внешнему краю растворяется.
 public enum WavePaint {
     public struct Stop: Sendable, Equatable {
-        /// 0 у выреза, 1 у внешнего края.
+        /// 0...1 вдоль градиента: в крыле от выреза к краю, в панели от левого края к правому.
         public var location: Double
         public var color: RGBColor
         public var opacity: Float
@@ -119,42 +168,93 @@ public enum WavePaint {
     /// Скорость течения градиента, доля ширины в секунду.
     public static let flowSpeed = 0.05
     /// Прозрачность линии в тишине и на полном уровне.
-    public static let restOpacity: Float = 0.14
-    public static let fullOpacity: Float = 0.9
+    public static let restOpacity: Float = 0.06
+    public static let fullOpacity: Float = 0.75
+    /// Бас чуть прозрачнее остальных.
+    public static let layerOpacity: [Float] = [0.8, 1, 1]
     /// Уровень, на котором линия набирает полную яркость.
     static let opacityKnee: Float = 0.35
-    /// Уровни, между которыми серая линия набирает цвет.
+    /// Насыщенность в тишине (доля от цвета палитры) и уровни, между которыми она растет до полной.
+    static let restChroma: Float = 0.6
     static let chromaRange: (from: Float, to: Float) = (0.02, 0.3)
-    /// Доля прозрачности у самого выреза и ширина проявления.
-    static let fadeInStart = 0.08
-    static let fadeInWidth = 0.25
+    /// Сдвиг светлоты OKLab по слоям и ее потолок.
+    static let layerLightness: [Float] = [-0.06, 0, 0.06]
+    public static let maxLightness: Float = 0.88
+    /// Цвета палитры ближе этого расстояния в OKLab разводятся поворотом оттенка на `separationTurn`.
+    static let minimumSeparation: Float = 0.08
+    static let separationTurn: Float = 25
+    /// Крыло: прозрачность у самого выреза и ширина набора полной яркости.
+    static let fadeInStart = 0.85
+    static let fadeInWidth = 0.04
     /// Отсюда до внешнего края линия растворяется.
-    static let fadeOutStart = 0.7
+    static let fadeOutStart = 0.82
+    /// Свечение под островом: светлота и насыщенность не ниже этих.
+    static let glowLightness: Float = 0.72
+    static let glowChroma: Float = 0.12
 
     /// `count` точек градиента с шагом `1 / (count - 1)`; меньше двух точек дают пустой массив.
-    public static func stops(palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, count: Int) -> [Stop] {
+    public static func stops(
+        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, count: Int, profile: WaveProfile = .wing
+    ) -> [Stop] {
         guard count >= 2 else { return [] }
-        let colors = palette.isEmpty ? PaletteExtractor.fallback : palette
-        let own = colors[layer.rawValue % colors.count].oklab
-        let next = colors[(layer.rawValue + 1) % colors.count].oklab
+        let colors = distinct(palette.isEmpty ? PaletteExtractor.fallback : palette)
+        let index = layer.rawValue
+        let own = colors[index % colors.count]
+        let next = colors[(index + 1) % colors.count]
+        let lightnessShift = layerLightness[index]
 
         let level = level.isFinite ? min(max(level, 0), 1) : 0
-        let chroma = smoothstep(chromaRange.from, chromaRange.to, level)
-        let opacity = restOpacity + (fullOpacity - restOpacity) * smoothstep(0, opacityKnee, level)
+        let chroma = restChroma + (1 - restChroma) * smoothstep(chromaRange.from, chromaRange.to, level)
+        let opacity = (restOpacity + (fullOpacity - restOpacity) * smoothstep(0, opacityKnee, level)) * layerOpacity[index]
         let shift = time.isFinite ? (flowSpeed * time).truncatingRemainder(dividingBy: 1) : 0
 
-        return (0..<count).map { index in
-            let location = Double(index) / Double(count - 1)
-            let weight = Float(0.5 - 0.5 * cos(2 * Double.pi * (location - shift)))
+        return (0..<count).map { i in
+            let location = Double(i) / Double(count - 1)
+            let u: Double
+            let fadeIn: Double
+            switch profile {
+            case .wing:
+                u = location
+                fadeIn = fadeInStart + (1 - fadeInStart) * smoothstep(0, fadeInWidth, u)
+            case .panel:
+                u = abs(2 * location - 1)
+                fadeIn = 1
+            }
+            let weight = Float(0.5 - 0.5 * cos(2 * Double.pi * (u - shift)))
             let lab = OKLab(
-                l: own.l + (next.l - own.l) * weight,
+                l: min(own.l + (next.l - own.l) * weight + lightnessShift, maxLightness),
                 a: (own.a + (next.a - own.a) * weight) * chroma,
                 b: (own.b + (next.b - own.b) * weight) * chroma
             )
-            let fadeIn = fadeInStart + (1 - fadeInStart) * smoothstep(0, fadeInWidth, location)
-            let fadeOut = smoothstep(1, fadeOutStart, location)
+            let fadeOut = smoothstep(1, fadeOutStart, u)
             return Stop(location: location, color: RGBColor(oklab: lab), opacity: opacity * Float(fadeIn * fadeOut))
         }
+    }
+
+    /// Палитра в OKLab, где каждый цвет, слишком близкий к одному из предыдущих, повернут по
+    /// оттенку на ±25°: иначе две волны слились бы в одну.
+    static func distinct(_ palette: [RGBColor]) -> [OKLab] {
+        var labs = palette.map(\.oklab)
+        for i in labs.indices.dropFirst() {
+            if labs[..<i].contains(where: { $0.distance(to: labs[i]) < minimumSeparation }) {
+                labs[i] = labs[i].rotatedHue(degrees: i % 2 == 1 ? separationTurn : -separationTurn)
+            }
+        }
+        return labs
+    }
+
+    /// Цвет свечения под островом: цвет палитры, поднятый в OKLab до светлоты `glowLightness`
+    /// и насыщенности `glowChroma`, если он темнее или бледнее. Серый остается серым.
+    public static func glowColor(_ color: RGBColor) -> RGBColor {
+        var lab = color.oklab
+        lab.l = max(lab.l, glowLightness)
+        let chroma = lab.chroma
+        if chroma > 1e-4, chroma < glowChroma {
+            let scale = glowChroma / chroma
+            lab.a *= scale
+            lab.b *= scale
+        }
+        return RGBColor(oklab: lab)
     }
 
     /// Плавная ступенька: 0 при `x = edge0`, 1 при `x = edge1`; края могут идти в любом порядке.

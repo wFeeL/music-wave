@@ -128,7 +128,8 @@ struct NotchGeometryTests {
         #expect(layout.screenID == 2)
         #expect(layout.notch.size == NotchGeometry.pillSize)
         #expect(layout.notch.midX == screen.frame.midX)
-        #expect(layout.notch.maxY == screen.frame.maxY - 24 - 6)
+        #expect(layout.notch.maxY == screen.frame.maxY - 24 - 8)
+        #expect(NotchGeometry.pillSize == CGSize(width: 240, height: 28))
     }
 
     @Test func pillExpandedHangsFromPillTop() throws {

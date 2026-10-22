@@ -308,12 +308,17 @@ public struct PaletteFade: Sendable {
             self.start = nil
             return to
         }
+        if now < start {
+            // Часы пошли назад: переход начинается заново с того же места.
+            self.start = now
+            return from
+        }
         let raw = (now - start) / Self.duration
         if raw >= 1 - 1e-9 {
             self.start = nil
             return to
         }
-        let t = min(max(raw, 0), 1)
+        let t = min(raw, 1)
         return mixPalettes(from, to, t: Float(t * t * (3 - 2 * t)))
     }
 }

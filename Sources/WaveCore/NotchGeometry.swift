@@ -117,14 +117,14 @@ public struct NotchPointer: Sendable, Equatable {
 
 public enum NotchGeometry {
     public static let expandedSize = CGSize(width: 480, height: 170)
-    public static let pillSize = CGSize(width: 200, height: 32)
+    public static let pillSize = CGSize(width: 240, height: 28)
     public static let maxWingWidth: CGFloat = 120
     /// Насколько зона наведения выступает выше верха экрана.
     static let hoverTopOvershoot: CGFloat = 2
     /// Запас под панелью для свечения.
     static let glowMargin: CGFloat = 40
     /// Отступ капсулы от строки меню на экране без выреза.
-    static let pillGap: CGFloat = 6
+    static let pillGap: CGFloat = 8
     static let fakeNotchSize = CGSize(width: 185, height: 32)
 
     public static func layout(for screens: [ScreenDescriptor], fakeNotch: Bool = false) -> NotchLayout? {

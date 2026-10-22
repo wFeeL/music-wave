@@ -158,8 +158,15 @@ smoke_launch() {
     "$APP/Contents/MacOS/WaveFeels" --exit-after 3 --no-capture
 }
 
+# Сколько PNG должно получиться: 9 состояний и светлые версии 02 и 04.
+SNAPSHOT_COUNT=11
+
 render_snapshots() {
-    "$APP/Contents/MacOS/WaveFeels" --render-snapshots "$OUT/snapshots" --no-capture --exit-after 60
+    "$APP/Contents/MacOS/WaveFeels" --render-snapshots "$OUT/snapshots" --no-capture --exit-after 60 || return $?
+    local count
+    count=$(find "$OUT/snapshots" -type f -name '*.png' | wc -l | tr -d ' ')
+    echo "snapshots: $count of $SNAPSHOT_COUNT"
+    [[ $count -ge $SNAPSHOT_COUNT ]]
 }
 
 has_snapshot_renderer() {

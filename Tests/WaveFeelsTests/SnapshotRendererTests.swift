@@ -49,8 +49,9 @@ struct SnapshotRendererTests {
 private struct Bitmap {
     /// Насыщенность (HSV) выше этого порога считается цветом.
     static let saturationThreshold = 0.3
-    /// Почти черные пиксели не в счет: у них насыщенность неустойчива.
-    static let minimumValue = 40
+    /// Тусклые пиксели не в счет: у почти черных насыщенность неустойчива, а линия в тишине
+    /// намеренно сохраняет оттенок обложки при яркости около 6 %. Видимая волна намного ярче.
+    static let minimumValue = 64
 
     let width: Int
     let height: Int
