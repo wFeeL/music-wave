@@ -131,7 +131,7 @@ struct AppModelRenderTests {
         #expect(empty.rows.map(\.value) == ["нет", "0.00", "нет", output, "33 мс", "7 мс", "0 мс"])
 
         model.store.publishSchedule(BeatSchedule(events: [], bpm: 123.6, period: 60 / 123.6, confidence: 0.817, locked: true))
-        model.settings.syncOffsetMs = 15
+        model.settings.syncOffsets.set(15, deviceUID: model.output.deviceUID, name: model.output.deviceName)
         let section = try #require(model.diagnosticsSections().first { $0.title == "Ритм" })
         #expect(section.rows[0].value == "124 BPM")
         #expect(section.rows[1].value == "0.82")

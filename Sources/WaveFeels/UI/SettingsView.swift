@@ -9,10 +9,10 @@ import WaveCore
 /// стиле Системных настроек, изменения применяются сразу. Живой предпросмотр острова во вкладке
 /// «Вид» идет, только пока окно открыто, видно и выбрана она (`PreviewPlayer.isActive`).
 ///
-/// Пока окно открыто и не свернуто, задержка «Авто», статус запуска при входе и доступ к звуку
-/// обновляются раз в 3 с. Список источников (поиск Яндекс Музыки, браузеры, приложения со звуком)
-/// дороже: он обновляется при открытии окна, при запуске и закрытии приложений и не чаще раза
-/// в 10 с.
+/// Пока окно открыто и не свернуто, задержка «Авто», устройство вывода (для сдвига
+/// синхронизации), статус запуска при входе и доступ к звуку обновляются раз в 3 с. Список
+/// источников (поиск Яндекс Музыки, браузеры, приложения со звуком) дороже: он обновляется при
+/// открытии окна, при запуске и закрытии приложений и не чаще раза в 10 с.
 struct SettingsView: View {
     /// Вкладки окна.
     enum Tab: Hashable, CaseIterable {
@@ -45,6 +45,10 @@ struct SettingsView: View {
     @State private var catalog: SourceCatalog
     @State private var icons: AppIconCache
     @State private var autoLatency: Int
+    /// UID и имя устройства вывода: ползунок «Сдвиг синхронизации» правит его сдвиг. Пустой UID
+    /// (устройство неизвестно) значит общий сдвиг.
+    @State private var deviceUID: String
+    @State private var deviceName: String
     @State private var loginStatus: SMAppService.Status
     @State private var loginMessage: String?
     @State private var copied = false
@@ -75,6 +79,8 @@ struct SettingsView: View {
         _catalog = State(initialValue: catalog ?? SourceCatalog.current(model: model))
         _icons = State(initialValue: AppIconCache())
         _autoLatency = State(initialValue: Self.autoLatencyMilliseconds(model))
+        _deviceUID = State(initialValue: model.output.deviceUID)
+        _deviceName = State(initialValue: model.output.deviceName)
         _loginStatus = State(initialValue: login?.status ?? LaunchAtLogin.status)
     }
 
@@ -316,16 +322,39 @@ struct SettingsView: View {
                 text: "\(milliseconds) мс"
             )
         }
+        syncOffsetRows
+    }
+
+    /// «Сдвиг синхронизации» текущего устройства вывода. Под ползунком его имя и «Сбросить», если
+    /// у устройства свой сдвиг; без UID ползунок правит общий сдвиг, подписи нет.
+    @ViewBuilder
+    private var syncOffsetRows: some View {
+        let settings = model.settings
+        let uid = deviceUID
+        let name = deviceName.isEmpty ? deviceUID : deviceName
         SettingsSliderRow(
             "Сдвиг синхронизации",
             subtitle: "Меньше: свечение раньше звука, больше: позже",
             value: Binding(
-                get: { Double(settings.syncOffsetMs) },
-                set: { settings.syncOffsetMs = Int(($0 / 5).rounded()) * 5 }
+                get: { Double(settings.syncOffsets.offset(forDeviceUID: uid)) },
+                set: { settings.syncOffsets.set(Int($0.rounded()), deviceUID: uid, name: name) }
             ),
             in: Double(AppSettings.Limits.syncOffset.lowerBound)...Double(AppSettings.Limits.syncOffset.upperBound),
-            text: AppModel.syncOffsetText(settings.syncOffsetMs)
+            text: AppModel.syncOffsetText(settings.syncOffsets.offset(forDeviceUID: uid))
         )
+        if !uid.isEmpty {
+            LabeledContent {
+                if settings.syncOffsets.hasOwnOffset(forDeviceUID: uid) {
+                    Button("Сбросить") {
+                        settings.syncOffsets.reset(deviceUID: uid)
+                    }
+                    .controlSize(.small)
+                }
+            } label: {
+                Text("Для устройства: \(name)")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var latencyKind: Binding<LatencyKind> {
@@ -440,6 +469,9 @@ struct SettingsView: View {
     private func refreshStatus() {
         let latency = Self.autoLatencyMilliseconds(model)
         if latency != autoLatency { autoLatency = latency }
+        let output = model.output
+        if output.deviceUID != deviceUID { deviceUID = output.deviceUID }
+        if output.deviceName != deviceName { deviceName = output.deviceName }
         let status = LaunchAtLogin.status
         if status != loginStatus {
             loginStatus = status
