@@ -89,9 +89,20 @@ public struct BandMapper: Sendable {
 
     /// Уровни полос в dBFS, пол -120. Бины сверх `amplitudes.count` считаются нулевыми.
     public func bandLevels(_ amplitudes: [Float]) -> [Float] {
-        sources.map { source in
+        var levels = [Float](repeating: 0, count: Self.bandCount)
+        amplitudes.withUnsafeBufferPointer { amplitudes in
+            levels.withUnsafeMutableBufferPointer { bandLevels(amplitudes, into: $0) }
+        }
+        return levels
+    }
+
+    /// То же, что `bandLevels(_:)`, но в готовый буфер и без выделения памяти.
+    /// - Precondition: `levels.count == BandMapper.bandCount`.
+    public func bandLevels(_ amplitudes: UnsafeBufferPointer<Float>, into levels: UnsafeMutableBufferPointer<Float>) {
+        precondition(levels.count == Self.bandCount, "levels.count must equal bandCount")
+        for band in 0..<Self.bandCount {
             var power = 0.0
-            switch source {
+            switch sources[band] {
             case .bins(let range):
                 for k in range where k < amplitudes.count {
                     let a = Double(amplitudes[k])
@@ -103,7 +114,7 @@ public struct BandMapper: Sendable {
                 power = (1 - fraction) * a0 * a0 + fraction * a1 * a1
             }
             let scaled = max(power / Self.hannENBW, Self.floorPower)
-            return max(Float(10 * log10(scaled)), Self.floorDB)
+            levels[band] = max(Float(10 * log10(scaled)), Self.floorDB)
         }
     }
 

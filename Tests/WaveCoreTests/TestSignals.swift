@@ -1,6 +1,17 @@
 import Foundation
 import Synchronization
 
+/// Платформа, на которой идут тесты. Наборы на синтетических барабанах включаются только на
+/// Linux: отличия libm могут перевернуть пограничные случаи на маке, а там они добавили бы
+/// 30-60 с к каждому прогону.
+enum TestPlatform {
+    #if os(Linux)
+    static let isLinux = true
+    #else
+    static let isLinux = false
+    #endif
+}
+
 /// Небольшой seedable генератор только для тестов (SplitMix64).
 struct TestRNG {
     private var state: UInt64

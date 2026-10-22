@@ -60,28 +60,50 @@ public struct LevelProcessor: Sendable {
     }
 
     private let layerBands: [Range<Int>]
+    /// Слой каждой полосы по `layerBands` (при пересечении побеждает последний), -1 без слоя.
+    private let bandLayers: [Int]
     private var trackers: [PeakTracker]
 
     public init(layerBands: [Range<Int>]) {
         self.layerBands = layerBands
         self.trackers = [PeakTracker](repeating: PeakTracker(), count: layerBands.count)
+        var bandLayers = [Int](repeating: -1, count: layerBands.map(\.upperBound).max().map { max($0, 0) } ?? 0)
+        for (layer, range) in layerBands.enumerated() {
+            for band in range where band >= 0 {
+                bandLayers[band] = layer
+            }
+        }
+        self.bandLayers = bandLayers
     }
 
     public mutating func normalize(_ levelsDB: [Float], dt: Double, settings: LevelSettings) -> [Float] {
-        let dt = dt.isFinite ? max(dt, 0) : 0
-        // Значения выше +6 dB ограничиваются, NaN и -inf становятся -120.
-        let levels = levelsDB.map { $0.isNaN ? Self.floorDB : min(max($0, Self.floorDB), Self.ceilingDB) }
+        var output = [Float](repeating: 0, count: levelsDB.count)
+        levelsDB.withUnsafeBufferPointer { levelsDB in
+            output.withUnsafeMutableBufferPointer { normalize(levelsDB, dt: dt, settings: settings, into: $0) }
+        }
+        return output
+    }
 
-        var layerOfBand = [Int?](repeating: nil, count: levels.count)
+    /// То же, что `normalize(_:dt:settings:)`, но в готовый буфер и без выделения памяти.
+    /// - Precondition: `output.count == levelsDB.count`.
+    public mutating func normalize(
+        _ levelsDB: UnsafeBufferPointer<Float>,
+        dt: Double,
+        settings: LevelSettings,
+        into output: UnsafeMutableBufferPointer<Float>
+    ) {
+        precondition(output.count == levelsDB.count, "output.count must equal levelsDB.count")
+        let dt = dt.isFinite ? max(dt, 0) : 0
+        let count = levelsDB.count
+
         var globalPeak = Self.floorDB
         if settings.mode == .auto {
-            for (layer, range) in layerBands.enumerated() {
+            for layer in layerBands.indices {
                 var layerMax = Self.floorDB
-                for band in range where band >= 0 && band < levels.count {
-                    layerOfBand[band] = layer
+                for band in layerBands[layer] where band >= 0 && band < count {
                     // +inf это испорченный вход: он ограничивается на выходе, но пик не двигает.
                     if levelsDB[band] != .infinity {
-                        layerMax = max(layerMax, levels[band])
+                        layerMax = max(layerMax, Self.clamped(levelsDB[band]))
                     }
                 }
                 trackers[layer].update(with: layerMax, dt: dt)
@@ -94,11 +116,13 @@ public struct LevelProcessor: Sendable {
             ? (settings.systemVolume.isFinite ? max(settings.systemVolume, 0) : 1).squareRoot()
             : 1
 
-        return levels.enumerated().map { band, db in
+        for band in 0..<count {
+            let db = Self.clamped(levelsDB[band])
             var x: Float
             switch settings.mode {
             case .auto:
-                let layerPeak = layerOfBand[band].map { trackers[$0].peak } ?? Self.floorDB
+                let layer = band < bandLayers.count ? bandLayers[band] : -1
+                let layerPeak = layer >= 0 ? trackers[layer].peak : Self.floorDB
                 let effectivePeak = max(layerPeak, globalPeak - Self.layerPeakSpreadDB, Self.minPeakDB)
                 let lo = max(effectivePeak - Self.autoRangeDB, Self.noiseFloorDB)
                 x = (db - lo) / max(effectivePeak - lo, 1)
@@ -107,7 +131,12 @@ public struct LevelProcessor: Sendable {
             }
             x = db < Self.noiseFloorDB ? 0 : min(max(x, 0), 1)
             x = pow(x, Self.curveExponent) * sensitivity * volumeGain
-            return min(max(x, 0), 1)
+            output[band] = min(max(x, 0), 1)
         }
+    }
+
+    /// Значения выше +6 dB ограничиваются, NaN и -inf становятся -120.
+    private static func clamped(_ db: Float) -> Float {
+        db.isNaN ? floorDB : min(max(db, floorDB), ceilingDB)
     }
 }

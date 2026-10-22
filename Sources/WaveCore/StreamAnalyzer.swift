@@ -1,0 +1,283 @@
+import Foundation
+
+/// Размеры анализа для частоты дискретизации: шаг около 5.3 мс при любой частоте.
+public struct AnalysisConfig: Sendable, Equatable {
+    public let sampleRate: Double
+    /// 1024 до 50 кГц включительно, иначе 2048.
+    public let fftSize: Int
+    /// `fftSize / 4`.
+    public let hopSize: Int
+
+    /// Длительность шага в секундах.
+    public var hopDuration: Double { Double(hopSize) / sampleRate }
+    /// Шагов в секунду.
+    public var framesPerSecond: Double { sampleRate / Double(hopSize) }
+
+    public init(sampleRate: Double) {
+        precondition(sampleRate > 0, "sampleRate must be positive")
+        self.sampleRate = sampleRate
+        fftSize = sampleRate <= 50_000 ? 1024 : 2048
+        hopSize = fftSize / 4
+    }
+}
+
+/// Онсет на временной оси потока.
+public struct OnsetEvent: Sendable, Equatable {
+    /// `endSample / sampleRate - StreamAnalyzer.onsetLag`, секунды потока.
+    public var time: Double
+    /// `clamp(odf / P, 0, 1)`, P это следящий пик функции онсетов (спад 3 с).
+    public var strength: Float
+
+    public init(time: Double, strength: Float) {
+        self.time = time
+        self.strength = strength
+    }
+}
+
+/// Результат одного шага анализа. Времена в секундах потока (номер сэмпла / частота).
+public struct HopResult: Sendable {
+    public var frame: WaveFrame
+    /// `(endSample - fftSize / 2) / sampleRate`, центр окна.
+    public var frameTime: Double
+    /// `endSample / sampleRate`, конец окна (сэмпл, который завершил шаг).
+    public var endTime: Double
+    public var kickOnset: OnsetEvent?
+    public var broadbandOnset: OnsetEvent?
+    /// Широкополосная функция онсетов этого шага (вход оценки темпа и фазы).
+    public var broadbandODF: Float
+    /// `10 · log10` суммарной мощности бинов бочки (до 150 Гц, без бина 0), деленной на ENBW окна
+    /// Ханна, как у полос `BandMapper`: синус амплитуды A дает A². Пол -120 dBFS.
+    public var kickLevelDB: Float
+
+    public init(
+        frame: WaveFrame,
+        frameTime: Double,
+        endTime: Double,
+        kickOnset: OnsetEvent?,
+        broadbandOnset: OnsetEvent?,
+        broadbandODF: Float,
+        kickLevelDB: Float
+    ) {
+        self.frame = frame
+        self.frameTime = frameTime
+        self.endTime = endTime
+        self.kickOnset = kickOnset
+        self.broadbandOnset = broadbandOnset
+        self.broadbandODF = broadbandODF
+        self.kickLevelDB = kickLevelDB
+    }
+}
+
+/// Анализ потока по шагам `hopSize` сэмплов (`beat-sync.md` 2.2-2.3): одно окно Ханна дает уровни
+/// волн, функцию онсетов бочки (свечение) и широкополосную функцию онсетов (темп и фаза).
+///
+/// Время берется из номера сэмпла, а не из часов вызова, поэтому фаза таймера в него не попадает.
+/// Все буферы шага выделены в `init` и `reconfigure`; на шаг выделяются только массивы
+/// возвращаемого `WaveFrame`. Не потокобезопасен, все вызовы с одной очереди.
+public final class StreamAnalyzer {
+    /// Задержка обнаружения d_odf: онсет находится на фронте, в среднем через столько после начала
+    /// звука, и вычитается из времени каждого онсета.
+    public static let onsetLag = 0.007
+    public static let attack = 0.010
+    public static let release = 0.25
+
+    /// Верхняя граница центра бина бочки.
+    static let kickMaxHz = 150.0
+    /// Полосы с центром ниже сравниваются с шагом назад (μ = 1), выше с двумя (μ = 2): малый и хэт
+    /// размазаны на два шага.
+    static let broadbandLagSplitHz = 250.0
+    /// Полосы с центром от этой частоты входят в широкополосную функцию с весом 2.
+    static let broadbandHighHz = 4000.0
+    static let broadbandHighWeight: Float = 2
+    static let envelopeDecay = 0.06
+    /// Выбор пиков бочки. Порог odf 3 и подъем 7.5 дБ подобраны на синтетике: у розового шума
+    /// -20 dBFS в трех бинах бочки пики odf доходят до 3.3, у бочки на фронте 3.5-4.8. Совсем без
+    /// ложных онсетов в шуме три бина не обойтись без лишней задержки; редкие ложные удары гасят
+    /// уверенность и захват ритма в трекере.
+    static let kickPickerParameters = OnlinePeakPicker.Parameters(floor: 3.0, minRiseDB: 7.5)
+    /// Выбор пиков широкополосной функции. Проверки подъема уровня нет: уровень здесь это
+    /// максимум полос, его почти всегда держит бочка или бас, и хэт между ними его не поднимает
+    /// (с проверкой 9 дБ хип-хоп дает F 0.6). Шум отсекает порог odf 12: у розового шума -20 dBFS
+    /// пики около 8, у хэта от 30, у бочки и малого 70-90.
+    static let broadbandPickerParameters = OnlinePeakPicker.Parameters(floor: 12, minRiseDB: -.infinity)
+    private static let hannENBW: Float = 1.5
+    private static let floorDB: Float = -120
+
+    public private(set) var config: AnalysisConfig
+
+    private var fft: RealFFT
+    private var mapper: BandMapper
+    private var levelProcessor: LevelProcessor
+    private var smoothers: [AttackRelease]
+    private var envelope = BeatEnvelope(decay: StreamAnalyzer.envelopeDecay)
+    private var kickBins: Range<Int>
+    private var kickFlux: SuperFlux
+    private var broadbandFlux: SuperFlux
+    private var kickPicker: OnlinePeakPicker
+    private var broadbandPicker: OnlinePeakPicker
+
+    private var spectrum: [Float]
+    private var levelsDB: [Float]
+    private var normalized: [Float]
+    private var bandAmplitudes: [Float]
+
+    public init(sampleRate: Double) {
+        let config = AnalysisConfig(sampleRate: sampleRate)
+        self.config = config
+        let mapper = BandMapper(fftSize: config.fftSize, sampleRate: sampleRate)
+        fft = RealFFT(size: config.fftSize)
+        self.mapper = mapper
+        levelProcessor = Self.makeLevelProcessor(for: mapper)
+        smoothers = Self.makeSmoothers()
+        kickBins = Self.makeKickBins(for: config)
+        kickFlux = Self.makeKickFlux(bins: kickBins)
+        broadbandFlux = Self.makeBroadbandFlux(for: mapper)
+        kickPicker = OnlinePeakPicker(hopDuration: config.hopDuration, parameters: Self.kickPickerParameters)
+        broadbandPicker = OnlinePeakPicker(hopDuration: config.hopDuration, parameters: Self.broadbandPickerParameters)
+        spectrum = [Float](repeating: 0, count: config.fftSize / 2)
+        levelsDB = [Float](repeating: Self.floorDB, count: BandMapper.bandCount)
+        normalized = [Float](repeating: 0, count: BandMapper.bandCount)
+        bandAmplitudes = [Float](repeating: 0, count: BandMapper.bandCount)
+    }
+
+    /// Новые размеры и таблицы под частоту, все состояние начинается заново.
+    public func reconfigure(sampleRate: Double) {
+        let config = AnalysisConfig(sampleRate: sampleRate)
+        self.config = config
+        let mapper = BandMapper(fftSize: config.fftSize, sampleRate: sampleRate)
+        fft = RealFFT(size: config.fftSize)
+        self.mapper = mapper
+        kickBins = Self.makeKickBins(for: config)
+        kickFlux = Self.makeKickFlux(bins: kickBins)
+        broadbandFlux = Self.makeBroadbandFlux(for: mapper)
+        kickPicker = OnlinePeakPicker(hopDuration: config.hopDuration, parameters: Self.kickPickerParameters)
+        broadbandPicker = OnlinePeakPicker(hopDuration: config.hopDuration, parameters: Self.broadbandPickerParameters)
+        spectrum = [Float](repeating: 0, count: config.fftSize / 2)
+        reset()
+    }
+
+    /// Пауза, перемотка или смена источника: уровни, пики автоуровня, сглаживание, огибающая,
+    /// история функций онсетов и выбор пиков начинаются заново.
+    public func reset() {
+        levelProcessor = Self.makeLevelProcessor(for: mapper)
+        for index in smoothers.indices {
+            smoothers[index].reset()
+        }
+        envelope = BeatEnvelope(decay: Self.envelopeDecay)
+        kickFlux.reset()
+        broadbandFlux.reset()
+        kickPicker.reset()
+        broadbandPicker.reset()
+    }
+
+    /// Анализирует окно, которое заканчивается сэмплом потока `endSample` (не включая его).
+    /// - Precondition: `window.count == config.fftSize`.
+    public func processHop(window: UnsafeBufferPointer<Float>, endSample: Int, settings: LevelSettings) -> HopResult {
+        precondition(window.count == config.fftSize, "window.count must equal config.fftSize")
+        let rate = config.sampleRate
+        let dt = config.hopDuration
+
+        spectrum.withUnsafeMutableBufferPointer { fft.amplitudeSpectrum(window, into: $0) }
+        spectrum.withUnsafeBufferPointer { spectrum in
+            levelsDB.withUnsafeMutableBufferPointer { mapper.bandLevels(spectrum, into: $0) }
+        }
+
+        // Бочка: поток по бинам до 150 Гц и их мощность.
+        var kickPower: Float = 0
+        let kickODF = spectrum.withUnsafeBufferPointer { spectrum in
+            let bins = UnsafeBufferPointer(rebasing: spectrum[kickBins])
+            for a in bins {
+                kickPower += a * a
+            }
+            return kickFlux.process(bins)
+        }
+        // Мощность делится на ENBW окна Ханна один раз, как у полос `BandMapper`: сумма A_k² по
+        // бинам синуса амплитуды A уже равна 1.5 A², поэтому синус дает A² (0.5 → -6.02 dBFS).
+        let kickPowerDB = 10 * log10(kickPower / Self.hannENBW)
+        let kickLevelDB = kickPowerDB.isNaN ? Self.floorDB : max(kickPowerDB, Self.floorDB)
+
+        // Широкополосный поток по амплитудам 24 полос (корень мощности полосы).
+        var maxLevelDB = Self.floorDB
+        for band in 0..<BandMapper.bandCount {
+            let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
+            maxLevelDB = max(maxLevelDB, db)
+            bandAmplitudes[band] = Float(pow(10, Double(db) / 20))
+        }
+        let broadbandODF = bandAmplitudes.withUnsafeBufferPointer { broadbandFlux.process($0) }
+
+        let onsetTime = Double(endSample) / rate - Self.onsetLag
+        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB)
+            .map { OnsetEvent(time: onsetTime, strength: $0) }
+        let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB)
+            .map { OnsetEvent(time: onsetTime, strength: $0) }
+
+        // Уровни волн: нормировка, сглаживание, смесь слоев как у `Analyzer`.
+        levelsDB.withUnsafeBufferPointer { levelsDB in
+            normalized.withUnsafeMutableBufferPointer {
+                levelProcessor.normalize(levelsDB, dt: dt, settings: settings, into: $0)
+            }
+        }
+        var bands = [Float](repeating: 0, count: BandMapper.bandCount)
+        for band in 0..<BandMapper.bandCount {
+            bands[band] = smoothers[band].step(toward: normalized[band], dt: dt)
+        }
+        var layers = [Float](repeating: 0, count: WaveLayer.allCases.count)
+        for layer in WaveLayer.allCases {
+            let range = mapper.bands(for: layer)
+            guard !range.isEmpty else { continue }
+            var peak: Float = 0
+            var sum: Float = 0
+            for band in range {
+                peak = max(peak, bands[band])
+                sum += bands[band]
+            }
+            layers[layer.rawValue] = 0.5 * peak + 0.5 * sum / Float(range.count)
+        }
+
+        envelope.step(dt: dt)
+        if kickOnset != nil { envelope.trigger() }
+
+        let frame = WaveFrame(
+            bands: bands,
+            layers: layers,
+            beat: envelope.value,
+            level: layers.max() ?? 0,
+            rawLevelDB: maxLevelDB
+        )
+        return HopResult(
+            frame: frame,
+            frameTime: Double(endSample - config.fftSize / 2) / rate,
+            endTime: Double(endSample) / rate,
+            kickOnset: kickOnset,
+            broadbandOnset: broadbandOnset,
+            broadbandODF: broadbandODF,
+            kickLevelDB: kickLevelDB
+        )
+    }
+
+    private static func makeLevelProcessor(for mapper: BandMapper) -> LevelProcessor {
+        LevelProcessor(layerBands: WaveLayer.allCases.map { mapper.bands(for: $0) })
+    }
+
+    private static func makeSmoothers() -> [AttackRelease] {
+        [AttackRelease](repeating: AttackRelease(attack: attack, release: release), count: BandMapper.bandCount)
+    }
+
+    /// Бины с центром до 150 Гц, бин 0 не входит (1-3 при 1024 и 48 кГц).
+    private static func makeKickBins(for config: AnalysisConfig) -> Range<Int> {
+        let binWidth = config.sampleRate / Double(config.fftSize)
+        let last = min(Int((kickMaxHz / binWidth).rounded(.down)), config.fftSize / 2 - 1)
+        return 1..<max(last + 1, 2)
+    }
+
+    private static func makeKickFlux(bins: Range<Int>) -> SuperFlux {
+        SuperFlux(lags: [Int](repeating: 1, count: bins.count), weights: [Float](repeating: 1, count: bins.count))
+    }
+
+    private static func makeBroadbandFlux(for mapper: BandMapper) -> SuperFlux {
+        SuperFlux(
+            lags: mapper.centers.map { $0 < broadbandLagSplitHz ? 1 : 2 },
+            weights: mapper.centers.map { $0 >= broadbandHighHz ? broadbandHighWeight : 1 }
+        )
+    }
+}
