@@ -3,6 +3,9 @@
 #   fast: swift build --build-tests, swift test --skip-build
 #   snap: swift build -c release, bundle.sh, sign.sh, снимки и пробный запуск из бандла
 #   full: адаптер, release-сборка, тесты, бандл, подпись, снимки, пробный запуск, замер CPU, zip
+# С RELEASE=1 (release.yml) режим full дополнительно собирает вторую копию для проверки обновления:
+# тот же бинарник, CFBundleVersion "<номер запуска>1", dist/update-test/WaveFeels.app, подпись и
+# архив dist/WaveFeels-<тег>-update-test.zip. Designated requirement обеих копий пишется в sign.txt.
 # Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, sign.txt, snapshots/, cpu.txt.
 # Каждый шаг идет под своим лимитом времени (в macOS нет timeout, работает фоновый сторож).
 # Шаги из будущих задач (--render-snapshots, cpu-probe.sh) пропускаются, пока их нет,
@@ -37,7 +40,7 @@ REF=${GITHUB_REF_NAME:-local}
 REF_SAFE=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
 SHA=${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}
 RUN_NUMBER=${GITHUB_RUN_NUMBER:-0}
-if [[ "$REF" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+if [[ "$REF" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-.+)?$ ]]; then
     VERSION=${BASH_REMATCH[1]}
 else
     VERSION="0.0.$RUN_NUMBER"
@@ -45,6 +48,8 @@ fi
 BUILD=$RUN_NUMBER
 
 APP="$ROOT/dist/WaveFeels.app"
+UPDATE_APP="$ROOT/dist/update-test/WaveFeels.app"
+UPDATE_BUILD="${BUILD}1"
 APP_LOG="$HOME/Library/Logs/WaveFeels/wavefeels.log"
 
 # Лимиты шагов, секунды.
@@ -279,6 +284,37 @@ step_bundle() {
     [[ $signed -eq 1 ]]
 }
 
+# Печатает designated requirement обеих копий: по нему TCC узнает приложение после обновления.
+log_requirements() { # основное приложение, копия для обновления
+    local main update
+    main=$(codesign -dr - "$1" 2>&1 | grep '^designated' || true)
+    update=$(codesign -dr - "$2" 2>&1 | grep '^designated' || true)
+    echo "designated requirement (main): ${main:-none}"
+    echo "designated requirement (update-test): ${update:-none}"
+    if [[ -n "$main" && "$main" == "$update" ]]; then
+        echo "designated requirements match: yes"
+    else
+        echo "designated requirements match: NO"
+    fi
+}
+
+# Вторая копия для проверки обновления. Возвращает 0, если она собрана и подписана.
+step_update_test() {
+    if ! run_step bundle-update-test "$LIMIT_SMALL" "$OUT/bundle.log" \
+        bash scripts/bundle.sh "$VERSION" "$UPDATE_BUILD" "$UPDATE_APP"; then
+        skip sign-update-test "bundle failed"
+        skip zip-update-test "bundle failed"
+        return 1
+    fi
+    if ! run_step sign-update-test "$LIMIT_SIGN" "$OUT/sign.txt" bash scripts/sign.sh "$UPDATE_APP"; then
+        skip zip-update-test "sign failed"
+        return 1
+    fi
+    run_step requirements "$LIMIT_SMALL" "$OUT/sign.txt" log_requirements "$APP" "$UPDATE_APP"
+    run_step zip-update-test "$LIMIT_SMALL" "$OUT/zip.log" \
+        ditto -c -k --keepParent "$UPDATE_APP" "$ROOT/dist/WaveFeels-$REF_SAFE-update-test.zip"
+}
+
 skip_bundle() { # причина
     skip bundle "$1"
     skip sign "$1"
@@ -328,6 +364,13 @@ case "$MODE" in
                 ditto -c -k --keepParent "$APP" "$ROOT/dist/WaveFeels-$REF_SAFE.zip"
         else
             skip zip "no signed app"
+        fi
+        if [[ -n "${RELEASE:-}" ]]; then
+            if [[ $app_ok -eq 1 ]]; then
+                step_update_test
+            else
+                skip bundle-update-test "no signed app"
+            fi
         fi
         ;;
 esac

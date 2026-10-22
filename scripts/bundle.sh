@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Собирает dist/WaveFeels.app из release-бинарника SwiftPM.
-# Использование: scripts/bundle.sh <version> <build>, например 1.2.3 42.
+# Использование: scripts/bundle.sh <version> <build> [<output.app>], например 1.2.3 42.
+# Третий аргумент задает путь к собираемому .app (по умолчанию dist/WaveFeels.app,
+# относительный путь считается от корня репозитория).
 # Перед запуском нужен `swift build -c release`.
 # Необязательные части адаптера берутся из $ADAPTER_DIR (по умолчанию dist/adapter, туда их
 # кладет build-adapter.sh), если собраны.
@@ -8,12 +10,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [[ $# -ne 2 ]]; then
-    echo "usage: $0 <version> <build>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "usage: $0 <version> <build> [<output.app>]" >&2
     exit 2
 fi
 VERSION=$1
 BUILD=$2
+APP=${3:-dist/WaveFeels.app}
+
+if [[ "$APP" != *.app ]]; then
+    echo "error: output path must end with .app, got '$APP'" >&2
+    exit 2
+fi
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "error: version must look like 1.2.3, got '$VERSION'" >&2
@@ -32,7 +40,6 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 ADAPTER_DIR=${ADAPTER_DIR:-dist/adapter}
-APP=dist/WaveFeels.app
 CONTENTS="$APP/Contents"
 
 rm -rf "$APP"
