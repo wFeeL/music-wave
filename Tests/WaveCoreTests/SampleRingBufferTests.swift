@@ -128,7 +128,7 @@ private final class DoneFlag: Sendable {
 
 // MARK: - SampleFeedMonitor
 
-/// Писатель перестал писать (tap или демо встали): через 100 мс без новых сэмплов кольцо
+/// Писатель перестал писать (tap или демо встали): через 250 мс без новых сэмплов кольцо
 /// считается остановившимся, хотя `copyLatest` по-прежнему отдает последнее окно.
 @Test func feedMonitorNoticesWriterThatStopped() {
     let rb = SampleRingBuffer(capacity: 4096)
@@ -146,14 +146,14 @@ private final class DoneFlag: Sendable {
     var window = [Float](repeating: 0, count: 1024)
     let copied = window.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
     #expect(copied && window.allSatisfy { $0 == 0.5 })
-    let early = monitor.update(totalWritten: rb.totalWritten, now: 0.28)
+    let early = monitor.update(totalWritten: rb.totalWritten, now: 0.43)
     #expect(!early)
-    let late = monitor.update(totalWritten: rb.totalWritten, now: 0.30)
+    let late = monitor.update(totalWritten: rb.totalWritten, now: 0.45)
     #expect(late)
 
     // Писатель снова пишет: остановки нет сразу.
     block.withUnsafeBufferPointer { rb.write($0) }
-    let resumed = monitor.update(totalWritten: rb.totalWritten, now: 0.31)
+    let resumed = monitor.update(totalWritten: rb.totalWritten, now: 0.46)
     #expect(!resumed)
 }
 
@@ -162,7 +162,9 @@ private final class DoneFlag: Sendable {
     var monitor = SampleFeedMonitor()
     let first = monitor.update(totalWritten: 0, now: 5)
     #expect(!first)
-    let stalled = monitor.update(totalWritten: 0, now: 5.2)
+    let early = monitor.update(totalWritten: 0, now: 5.2)
+    #expect(!early)
+    let stalled = monitor.update(totalWritten: 0, now: 5.3)
     #expect(stalled)
     monitor.reset()
     let afterReset = monitor.update(totalWritten: 0, now: 9)

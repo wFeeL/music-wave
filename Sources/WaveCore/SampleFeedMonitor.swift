@@ -3,7 +3,9 @@
 /// передает `totalWritten` на каждом шаге; если счетчик не менялся дольше `stallLimit`, звук
 /// считается тишиной.
 public struct SampleFeedMonitor: Sendable {
-    public static let defaultStallLimit = 0.1
+    /// С запасом на большие буферы HAL: при буфере в несколько тысяч кадров блоки IOProc
+    /// приходят примерно раз в 100 мс.
+    public static let defaultStallLimit = 0.25
 
     public let stallLimit: Double
     private var lastTotal: Int?
