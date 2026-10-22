@@ -625,6 +625,11 @@ final class AppModel {
         lastVisualTime = time
     }
 
+    /// Снимки окна настроек: подсказка о доступе к звуку без проверки TCC.
+    func previewPermissionHint(_ shown: Bool) {
+        permissionHint = shown
+    }
+
     private func log(_ message: String) {
         Log.app.info("\(message, privacy: .public)")
         Log.file(message)

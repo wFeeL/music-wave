@@ -18,7 +18,8 @@ enum SnapshotError: Error, CustomStringConvertible {
 }
 
 /// Снимки острова для CI: PNG в масштабе 2 на фоне строки меню macOS. После них снимки окна
-/// настроек в светлом и темном оформлении.
+/// настроек в размере настоящего окна: светлый, темный и самый высокий (ручная задержка и
+/// подсказка о доступе к звуку), на котором видно, если содержимое не помещается.
 ///
 /// Кадры анализа не задаются руками: `demo.wav` прогоняется через `Analyzer` вне реального
 /// времени с шагом 1/60 с до нужного момента, вместе с ним двигаются фазы волн и «вздох».
@@ -118,13 +119,11 @@ enum SnapshotRenderer {
         return NotchGeometry.layout(for: [screen])!
     }
 
-    /// Размер окна настроек на снимке, pt: все разделы без прокрутки.
-    static let settingsSize = CGSize(width: 520, height: 800)
-
-    /// Снимки окна настроек: имя и темное ли оформление.
-    static let settingsScenes: [(name: String, dark: Bool)] = [
-        ("13-settings", false),
-        ("13-settings-dark", true),
+    /// Снимки окна настроек: имя, темное ли оформление и самое ли высокое состояние.
+    static let settingsScenes: [(name: String, dark: Bool, tall: Bool)] = [
+        ("13-settings", false, false),
+        ("13-settings-dark", true, false),
+        ("13-settings-tall", false, true),
     ]
 
     /// Внешний монитор без выреза: капсула под строкой меню.
@@ -248,7 +247,7 @@ enum SnapshotRenderer {
         }
         for scene in settingsScenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
-            try renderSettings(name: scene.name, dark: scene.dark, model: model, to: url)
+            try renderSettings(name: scene.name, dark: scene.dark, tall: scene.tall, model: model, to: url)
             written.append(url)
         }
         return written
@@ -309,10 +308,10 @@ enum SnapshotRenderer {
 // MARK: - Настройки
 
 extension SnapshotRenderer {
-    /// Источники на снимке настроек: Яндекс Музыка по умолчанию и Safari.
+    /// Источники на снимке настроек: Яндекс Музыка и Safari.
     static var settingsCatalog: SourceCatalog {
         SourceCatalog(
-            defaultSource: source,
+            yandexMusic: source,
             playing: [],
             browsers: [.application(
                 bundleID: "com.apple.Safari", bundlePath: "/Applications/Safari.app", displayName: "Safari"
@@ -322,20 +321,33 @@ extension SnapshotRenderer {
 
     /// Окно настроек через `NSHostingView` в невидимом окне: `ImageRenderer` не рисует
     /// элементы `Form`, за которыми стоят AppKit-контролы. Окно не выводится на экран,
-    /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана.
+    /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана. Размер тот же, что у окна
+    /// настроек. `tall`: ручная задержка 120 мс и подсказка о доступе к звуку.
     @MainActor
     fileprivate static func renderSettings(
         name: String,
         dark: Bool,
+        tall: Bool,
         model: AppModel,
         to url: URL
     ) throws {
+        if tall {
+            model.settings.latencyMode = .manual(milliseconds: 120)
+            model.previewPermissionHint(true)
+        }
+        defer {
+            if tall {
+                model.settings.latencyMode = .auto
+                model.previewPermissionHint(false)
+            }
+        }
         guard let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) else {
             throw SnapshotError.renderFailed(name)
         }
-        let frame = NSRect(origin: .zero, size: settingsSize)
+        let size = SettingsView.windowSize
+        let frame = NSRect(origin: .zero, size: size)
         let content = SettingsView(model: model, presence: WindowPresence(), catalog: settingsCatalog) {}
-            .frame(width: settingsSize.width, height: settingsSize.height)
+            .frame(width: size.width, height: size.height)
             .background(Color(nsColor: .windowBackgroundColor))
         let hosting = NSHostingView(rootView: content)
         hosting.frame = frame

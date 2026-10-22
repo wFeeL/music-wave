@@ -30,8 +30,10 @@ final class WindowsController: NSObject, NSWindowDelegate {
     func showSettings() {
         let window = settingsWindow ?? makeWindow(
             title: "Настройки WaveFeels",
-            size: NSSize(width: 520, height: 660),
-            autosaveName: "WaveFeelsSettings",
+            size: SettingsView.windowSize,
+            minSize: SettingsView.minSize,
+            // Новое имя: рамка заглушки прежних версий (460 × 280) не восстанавливается.
+            autosaveName: "WaveFeelsSettingsV2",
             content: SettingsView(model: model, presence: settingsPresence) { [weak self] in
                 self?.showDiagnostics()
             }
@@ -47,6 +49,7 @@ final class WindowsController: NSObject, NSWindowDelegate {
         let window = diagnosticsWindow ?? makeWindow(
             title: "Диагностика WaveFeels",
             size: NSSize(width: 680, height: 760),
+            minSize: NSSize(width: 560, height: 480),
             autosaveName: "WaveFeelsDiagnostics",
             content: DiagnosticsView(model: model, presence: diagnosticsPresence)
         )
@@ -99,6 +102,7 @@ final class WindowsController: NSObject, NSWindowDelegate {
     private func makeWindow<Content: View>(
         title: String,
         size: NSSize,
+        minSize: NSSize,
         autosaveName: String,
         content: Content
     ) -> NSWindow {
@@ -117,6 +121,14 @@ final class WindowsController: NSObject, NSWindowDelegate {
         window.setContentSize(size)
         window.center()
         window.setFrameAutosaveName(autosaveName)
+        // Сохраненная рамка могла остаться меньше минимума содержимого.
+        let restored = window.contentRect(forFrameRect: window.frame).size
+        if restored.width < minSize.width || restored.height < minSize.height {
+            window.setContentSize(NSSize(
+                width: max(restored.width, minSize.width),
+                height: max(restored.height, minSize.height)
+            ))
+        }
         window.delegate = self
         return window
     }

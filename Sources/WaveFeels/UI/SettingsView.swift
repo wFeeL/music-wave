@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
@@ -6,10 +7,18 @@ import WaveCore
 
 /// Окно настроек: `Form` в стиле Системных настроек, изменения применяются сразу.
 ///
-/// Список источников, задержка «Авто», статус запуска при входе и доступ к звуку обновляются
-/// при открытии окна и затем раз в несколько секунд, только пока окно открыто и не свернуто.
+/// Пока окно открыто и не свернуто, задержка «Авто», статус запуска при входе и доступ к звуку
+/// обновляются раз в 3 с. Список источников (поиск Яндекс Музыки, браузеры, приложения со звуком)
+/// дороже: он обновляется при открытии окна, при запуске и закрытии приложений и не чаще раза
+/// в 10 с.
 struct SettingsView: View {
-    static let refreshInterval: Duration = .seconds(3)
+    /// Размер окна: все разделы в самом высоком состоянии (ручная задержка и подсказка о доступе
+    /// к звуку) помещаются без прокрутки.
+    static let windowSize = CGSize(width: 520, height: 840)
+    static let minSize = CGSize(width: 480, height: 420)
+    static let statusInterval: Duration = .seconds(3)
+    /// Список источников обновляется раз в столько обновлений статуса, то есть раз в 12 с.
+    static let catalogEvery = 4
     static let sliderWidth: CGFloat = 190
     static let valueWidth: CGFloat = 52
 
@@ -65,14 +74,29 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 480, minHeight: 420)
+        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
         .task(id: presence.isOpen) {
             guard presence.isOpen else { return }
+            var step = 0
             while !Task.isCancelled {
-                refresh()
-                try? await Task.sleep(for: Self.refreshInterval)
+                if step % Self.catalogEvery == 0 {
+                    refreshCatalog()
+                }
+                refreshStatus()
+                step += 1
+                try? await Task.sleep(for: Self.statusInterval)
             }
         }
+        .onReceive(workspaceCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            if presence.isOpen { refreshCatalog() }
+        }
+        .onReceive(workspaceCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
+            if presence.isOpen { refreshCatalog() }
+        }
+    }
+
+    private var workspaceCenter: NotificationCenter {
+        NSWorkspace.shared.notificationCenter
     }
 
     // MARK: - Источник звука
@@ -91,7 +115,7 @@ struct SettingsView: View {
             playing: catalog.playing,
             browsers: catalog.browsers
         )
-        let defaultSource = catalog.defaultSource
+        let defaultSource = model.defaultSource
         return Picker("Источник звука", selection: sourceSelection) {
             sourceLabel("По умолчанию (\(defaultSource.displayName))", source: defaultSource)
                 .tag(SourceTag.byDefault)
@@ -169,7 +193,7 @@ struct SettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let source = AppModel.applicationSource(at: url.resolvingSymlinksInPath(), fallbackBundleID: nil)
         model.settings.source = source
-        refresh()
+        refreshCatalog()
     }
 
     // MARK: - Волны
@@ -317,8 +341,8 @@ struct SettingsView: View {
     }
 
     private var loginHint: String? {
-        if !LaunchAtLogin.isInApplications { return LaunchAtLogin.moveHint }
         if let loginMessage { return loginMessage }
+        if !LaunchAtLogin.isInApplications { return LaunchAtLogin.moveHint }
         return loginStatus == .requiresApproval ? LaunchAtLogin.approvalHint : nil
     }
 
@@ -353,9 +377,12 @@ struct SettingsView: View {
 
     // MARK: - Обновление
 
-    private func refresh() {
+    private func refreshCatalog() {
         let fresh = SourceCatalog.current(model: model)
         if fresh != catalog { catalog = fresh }
+    }
+
+    private func refreshStatus() {
         let latency = LatencyCalculator.delayMilliseconds(model.output.latency, mode: .auto)
         if latency != autoLatency { autoLatency = latency }
         let status = LaunchAtLogin.status
@@ -367,18 +394,12 @@ struct SettingsView: View {
     }
 }
 
-/// Найденные источники для списка «Источник звука»: что выбирается по умолчанию, приложения со
-/// звуком и установленные браузеры. Повторы убирает `SourceChoices.make`.
+/// Найденные источники для списка «Источник звука»: Яндекс Музыка, приложения со звуком
+/// (выводящие звук первыми) и установленные браузеры. Повторы убирает `SourceChoices.make`.
 struct SourceCatalog: Equatable {
-    var defaultSource: AudioSource
+    var yandexMusic: AudioSource?
     var playing: [AudioSource]
     var browsers: [AudioSource]
-
-    /// Найденная Яндекс Музыка: источник по умолчанию, если это приложение.
-    var yandexMusic: AudioSource? {
-        if case .application = defaultSource { return defaultSource }
-        return nil
-    }
 
     @MainActor
     static func current(model: AppModel) -> SourceCatalog {
@@ -387,8 +408,14 @@ struct SourceCatalog: Equatable {
             guard let url = workspace.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
             return AppModel.applicationSource(at: url, fallbackBundleID: bundleID)
         }
+        // Тот же поиск, что у источника по умолчанию; без Яндекс Музыки он дает весь звук системы.
+        let resolved = model.resolveDefaultSource()
+        var yandexMusic: AudioSource?
+        if case .application = resolved {
+            yandexMusic = resolved
+        }
         return SourceCatalog(
-            defaultSource: model.resolveDefaultSource(),
+            yandexMusic: yandexMusic,
             playing: model.processList.runningAudioApps(),
             browsers: browsers
         )

@@ -89,6 +89,18 @@ struct SourceChoicesTests {
         #expect(choices.playing == [noPath])
     }
 
+    @Test func outputtingAppsComeFirstInStableOrder() {
+        let vlc = Self.app("VLC", id: "org.videolan.vlc")
+        let ordered = SourceChoices.outputtingFirst([
+            (Self.chrome, false),
+            (Self.safari, true),
+            (Self.telegram, false),
+            (vlc, true),
+        ])
+        #expect(ordered == [Self.safari, vlc, Self.chrome, Self.telegram])
+        #expect(SourceChoices.outputtingFirst([]).isEmpty)
+    }
+
     @Test func browserListIsFixed() {
         #expect(SourceChoices.browserBundleIDs == [
             "ru.yandex.desktop.yandex-browser",

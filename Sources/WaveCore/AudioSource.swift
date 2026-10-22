@@ -137,6 +137,11 @@ public struct SourceChoices: Sendable, Equatable {
         return SourceChoices(yandexMusic: yandex, playing: playingApps, browsers: browserApps, other: other)
     }
 
+    /// Приложения, которые сейчас выводят звук, первыми; внутри обеих групп порядок прежний.
+    public static func outputtingFirst(_ apps: [(source: AudioSource, outputting: Bool)]) -> [AudioSource] {
+        apps.filter(\.outputting).map(\.source) + apps.filter { !$0.outputting }.map(\.source)
+    }
+
     /// Есть ли пункт для `source`. Весь звук системы есть всегда.
     public func contains(_ source: AudioSource) -> Bool {
         source == .systemWide || source == yandexMusic || source == other

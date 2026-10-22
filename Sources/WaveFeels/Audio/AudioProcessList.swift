@@ -42,8 +42,9 @@ final class AudioProcessList {
         }
     }
 
-    /// Приложения, у которых есть процессы со звуком. Помощник относится к приложению,
-    /// внутри бандла которого лежит его исполняемый файл.
+    /// Приложения, у которых есть процессы со звуком: сначала те, что выводят звук сейчас,
+    /// внутри групп по имени. Помощник относится к приложению, внутри бандла которого лежит
+    /// его исполняемый файл.
     func runningAudioApps() -> [AudioSource] {
         var runningByPath: [String: NSRunningApplication] = [:]
         for app in NSWorkspace.shared.runningApplications {
@@ -52,14 +53,18 @@ final class AudioProcessList {
         }
         let ownPath = Self.canonicalPath(Bundle.main.bundleURL)
 
-        var seen = Set<String>()
-        var result: [AudioSource] = []
+        var indexByPath: [String: Int] = [:]
+        var apps: [(source: AudioSource, outputting: Bool)] = []
         for process in snapshot() {
             let executable = process.executablePath
                 ?? NSRunningApplication(processIdentifier: process.pid)?.executableURL?.path(percentEncoded: false)
             guard let executable, let appPath = Self.outermostAppBundle(of: executable) else { continue }
             let canonical = Self.canonicalPath(URL(fileURLWithPath: appPath))
-            guard canonical != ownPath, seen.insert(canonical).inserted else { continue }
+            guard canonical != ownPath else { continue }
+            if let index = indexByPath[canonical] {
+                apps[index].outputting = apps[index].outputting || process.isRunningOutput
+                continue
+            }
 
             let app = runningByPath[canonical]
             let bundle = Bundle(path: canonical)
@@ -69,9 +74,13 @@ final class AudioProcessList {
                 ?? bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
                 ?? bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String
                 ?? fallbackName
-            result.append(.application(bundleID: bundleID, bundlePath: canonical, displayName: name))
+            indexByPath[canonical] = apps.count
+            apps.append((.application(bundleID: bundleID, bundlePath: canonical, displayName: name), process.isRunningOutput))
         }
-        return result.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let byName = apps.sorted {
+            $0.source.displayName.localizedStandardCompare($1.source.displayName) == .orderedAscending
+        }
+        return SourceChoices.outputtingFirst(byName)
     }
 
     /// Путь исполняемого файла процесса через `proc_pidpath`.
