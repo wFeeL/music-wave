@@ -60,6 +60,9 @@ struct Detail {
     var notchRadius: CGFloat = 36
     /// Радиус вогнутых плеч челки у верхнего края, 0 без плеч.
     var notchShoulder: CGFloat = 14
+    /// Верх челки. `nil`: челка выходит за верх тела и срезается по нему. В слое .icon челка
+    /// начинается чуть ниже края холста, чтобы стеклянная кромка системы шла над ней без разрыва.
+    var notchTop: CGFloat? = nil
     /// Объектив камеры в челке.
     var lens = true
     /// Тень под телом иконки и фиолетовое пятно света под челкой.
@@ -119,6 +122,8 @@ enum Icon {
     static let bodyBottom = RGB(hex: 0x0C0A16)
 
     static let notchCenter: CGFloat = 512
+    /// Отступ челки от верха холста в слое .icon, px холста 1024.
+    static let iconNotchInset: CGFloat = 12
     static let lensCenter = CGPoint(x: 512, y: 163)
     static let lensRadius: CGFloat = 11
     static let lensColor = RGB(hex: 0x15151E)
@@ -215,11 +220,12 @@ enum Icon {
     /// Челка: начинается выше тела (лишнее срежет обрезка по телу или маска системы), нижние
     /// углы скруглены, у верхнего края вогнутые плечи.
     static func notch(_ detail: Detail) -> CGPath {
-        let top = bodyOrigin, bottom = detail.notchBottom
+        let top = detail.notchTop ?? bodyOrigin, bottom = detail.notchBottom
+        let overshoot: CGFloat = detail.notchTop == nil ? 160 : 0
         let rB = detail.notchRadius, rS = detail.notchShoulder
         let l = notchCenter - detail.notchHalfWidth, r = notchCenter + detail.notchHalfWidth
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: l - rS, y: top - 160))
+        path.move(to: CGPoint(x: l - rS, y: top - overshoot))
         path.addLine(to: CGPoint(x: l - rS, y: top))
         if rS > 0 {
             path.addArc(center: CGPoint(x: l - rS, y: top + rS), radius: rS, startAngle: -.pi / 2, endAngle: 0, clockwise: false)
@@ -232,7 +238,7 @@ enum Icon {
         if rS > 0 {
             path.addArc(center: CGPoint(x: r + rS, y: top + rS), radius: rS, startAngle: .pi, endAngle: 1.5 * .pi, clockwise: false)
         }
-        path.addLine(to: CGPoint(x: r + rS, y: top - 160))
+        path.addLine(to: CGPoint(x: r + rS, y: top - overshoot))
         path.closeSubpath()
         return path
     }
@@ -278,12 +284,12 @@ enum Icon {
     /// Цвет вдоль волны: свой цвет в середине, к краям смесь со следующим и прозрачность.
     static func lineGradient(_ index: Int, alpha: Double) -> CGGradient {
         let layer = layers[index]
-        let edge = layer.color.mixed(with: layer.next, 0.55)
+        let edge = layer.color.mixed(with: layer.next, 0.4)
         return gradient([
             (0, edge.cg(0)),
-            (0.22, edge.cg(0.6 * alpha)),
+            (0.22, edge.cg(0.7 * alpha)),
             (0.5, layer.color.cg(alpha)),
-            (0.78, edge.cg(0.6 * alpha)),
+            (0.78, edge.cg(0.7 * alpha)),
             (1, edge.cg(0)),
         ])
     }
@@ -471,7 +477,8 @@ enum Icon {
 
     /// Пакет .icon для macOS 26: три слоя 1024 во весь холст (фон, волны со свечением, челка
     /// с камерой) без кромки и тени, их система рисует сама. Группы в icon.json идут сверху вниз.
-    /// Стекло выключено, чтобы цвета волн остались как в .icns.
+    /// Стекло выключено, чтобы цвета волн остались как в .icns. Челка здесь без плеч и висит
+    /// в 12 px от верха холста: иначе она разрывает стеклянную кромку системы.
     static func writeIconPackage(to url: URL) {
         let assets = url.appendingPathComponent("Assets", isDirectory: true)
         do {
@@ -479,7 +486,9 @@ enum Icon {
         } catch {
             fail("cannot create \(assets.path): \(error)")
         }
-        let detail = Detail.forPixels(1024)
+        var detail = Detail.forPixels(1024)
+        detail.notchShoulder = 0
+        detail.notchTop = bodyOrigin + iconNotchInset * bodySide / 1024
         let parts: [(name: String, draw: (Canvas, Detail) -> Void)] = [
             ("notch", drawNotch),
             ("waves", drawWaves),

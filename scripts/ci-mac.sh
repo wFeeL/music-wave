@@ -162,8 +162,8 @@ smoke_launch() {
 
 # Приложение до отрисовки пишет manifest.txt со списком PNG; шаг проходит, только если
 # список не пуст и каждый файл из него на месте и не пустой. Нарисованную иконку (icon.png и
-# icon-sizes.png кладет bundle.sh) скрипт дописывает в список сам. Превью icon-macos26.png
-# в список не входит: его рисует Icon Composer, если он есть в Xcode.
+# icon-sizes.png кладет bundle.sh) скрипт дописывает в список сам. Превью icon-macos26*.png
+# в список не входят: их рисует Icon Composer, если он есть в Xcode.
 render_snapshots() {
     local dir="$OUT/snapshots" manifest expected=0 missing=0 name
     manifest="$dir/manifest.txt"

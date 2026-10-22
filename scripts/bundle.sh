@@ -11,7 +11,8 @@
 # macOS 26. Пакет собирает `xcrun actool` в Assets.car, тогда в Info.plist добавляется
 # CFBundleIconName; не собрался, приложение остается с одним .icns (CFBundleIconFile).
 # С $ICON_SNAPSHOT_DIR туда кладутся icon.png (1024 px), icon-sizes.png (все размеры) и,
-# если Icon Composer на месте, icon-macos26.png (как .icon рисует система).
+# если Icon Composer на месте, icon-macos26.png (как .icon рисует система) и варианты
+# icon-macos26-dark.png, -clear.png, -tinted.png.
 # С $RELEASE без AppIcon.icns сборка падает.
 set -euo pipefail
 
@@ -82,9 +83,16 @@ compile_icon() {
     xcrun assetutil --info "$dir/car/Assets.car" || true
     ictool="${DEVELOPER_DIR:-$(xcode-select -p)}/../Applications/Icon Composer.app/Contents/Executables/ictool"
     if [[ -x "$ictool" ]]; then
-        "$ictool" "$dir/AppIcon.icon" --export-image --output-file "$dir/icon-macos26.png" \
-            --platform macOS --rendition Default --width 1024 --height 1024 --scale 1 ||
-            echo "warning: ictool could not render AppIcon.icon" >&2
+        # Справка в лог: по ней видно, какие варианты (renditions) знает эта версия ictool.
+        "$ictool" --help || true
+        local variant rendition suffix
+        for variant in Default: Dark:-dark ClearLight:-clear TintedLight:-tinted; do
+            rendition=${variant%%:*}
+            suffix=${variant#*:}
+            "$ictool" "$dir/AppIcon.icon" --export-image --output-file "$dir/icon-macos26$suffix.png" \
+                --platform macOS --rendition "$rendition" --width 1024 --height 1024 --scale 1 ||
+                echo "warning: ictool could not render AppIcon.icon ($rendition)" >&2
+        done
     fi
     return 0
 }
@@ -117,9 +125,11 @@ else
         mkdir -p "$ICON_SNAPSHOT_DIR"
         cp "$ICON_DIR/AppIcon.iconset/icon_512x512@2x.png" "$ICON_SNAPSHOT_DIR/icon.png"
         cp "$ICON_DIR/icon-sizes.png" "$ICON_SNAPSHOT_DIR/icon-sizes.png"
-        if [[ -f "$ICON_DIR/icon-macos26.png" ]]; then
-            cp "$ICON_DIR/icon-macos26.png" "$ICON_SNAPSHOT_DIR/icon-macos26.png"
-        fi
+        for preview in "$ICON_DIR"/icon-macos26*.png; do
+            if [[ -f "$preview" ]]; then
+                cp "$preview" "$ICON_SNAPSHOT_DIR/"
+            fi
+        done
     fi
 fi
 if [[ -f "$ICNS" ]]; then
