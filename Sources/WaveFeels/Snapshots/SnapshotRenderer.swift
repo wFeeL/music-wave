@@ -405,8 +405,13 @@ extension SnapshotRenderer {
     /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана. Размер тот же, что у окна
     /// настроек. `tall`: ручная задержка 120 мс и подсказка о доступе к звуку. Окно считается
     /// закрытым, поэтому предпросмотр вкладки «Вид» рисует один кадр и стоит.
+    ///
+    /// Переключатель вкладок `cacheDisplay` кладет в битмап полупрозрачным (альфа около 0.1 у
+    /// подложки), а не поверх фона окна. Просмотрщик кладет такой PNG на белое, и в темном
+    /// оформлении белый текст вкладок пропадает на белой «таблетке». Поэтому снимок сводится
+    /// на непрозрачный фон окна этого же оформления (`flattened`), как его видно на экране.
     @MainActor
-    fileprivate static func renderSettings(
+    static func renderSettings(
         name: String,
         dark: Bool,
         tall: Bool,
@@ -461,10 +466,35 @@ extension SnapshotRenderer {
         appearance.performAsCurrentDrawingAppearance {
             hosting.cacheDisplay(in: bounds, to: bitmap)
         }
-        guard let data = bitmap.representation(using: .png, properties: [:]) else {
+        guard let flat = flattened(bitmap, appearance: appearance),
+              let data = flat.representation(using: .png, properties: [:]) else {
             throw SnapshotError.encodeFailed(name)
         }
         try data.write(to: url, options: .atomic)
+    }
+
+    /// `bitmap` поверх непрозрачного `windowBackgroundColor` в оформлении `appearance`, sRGB,
+    /// тот же размер в pt и пикселях.
+    @MainActor
+    private static func flattened(_ bitmap: NSBitmapImageRep, appearance: NSAppearance) -> NSBitmapImageRep? {
+        guard let image = bitmap.cgImage,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        var background = CGColor(gray: 1, alpha: 1)
+        appearance.performAsCurrentDrawingAppearance {
+            background = NSColor.windowBackgroundColor.cgColor
+        }
+        let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        context.setFillColor(background)
+        context.fill(rect)
+        context.draw(image, in: rect)
+        guard let flat = context.makeImage() else { return nil }
+        let result = NSBitmapImageRep(cgImage: flat)
+        result.size = bitmap.size
+        return result
     }
 }
 
