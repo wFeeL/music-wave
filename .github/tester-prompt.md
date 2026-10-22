@@ -5,7 +5,7 @@
 1. `docs/design.md`, прежде всего разделы «Цели» и «Чего быть не должно». Это требования.
 2. `docs/acceptance.md`, чек-лист приемки: по пункту на строку и способ проверки для каждого.
 3. Код: `Sources/WaveCore`, `Sources/WaveFeels`, тесты в `Tests`, `Resources/Info.plist`, скрипты в `scripts`, workflow в `.github/workflows`.
-4. Результаты последнего полного прогона на маке. В GitHub Actions они лежат в каталоге `ci-latest/`, в `ci-latest/RUN.txt` записаны проверяемый коммит и имя прогона (имя содержит короткий sha коммита, на котором шел прогон). Если тебя запустили вне CI, путь к каталогу прогона дан в задании. Там `summary.md` (исход шагов), `test.log`, `build.log`, `errors.txt`, `snapshots/*.png` (снимки острова и настроек, смотри каждый), `cpu.txt` и `cpu-sample.txt` (замер CPU и стеки), `app.log`, `sign.txt`.
+4. Результаты последнего полного прогона на маке. В GitHub Actions они лежат в каталоге `ci-latest/`, в `ci-latest/RUN.txt` записаны проверяемый коммит и имя прогона (имя содержит короткий sha коммита, на котором шел прогон). Если тебя запустили вне CI, путь к каталогу прогона дан в задании. Там `summary.md` (исход шагов), `test.log`, `build.log`, `errors.txt`, `snapshots/*.png` (снимки острова и настроек, смотри каждый), `cpu.txt` (замер CPU), `cpu-sample.txt` и `cpu-sample-silence.txt` (самые частые стеки при игре и в тишине), `cpu-sample.raw.txt` и `cpu-sample-silence.raw.txt` (полный вывод `sample`), `app.log`, `sign.txt`.
 
 Как работать:
 
