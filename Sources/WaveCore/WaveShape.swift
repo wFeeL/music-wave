@@ -131,18 +131,33 @@ public enum WaveShape {
         gain: Double = 1
     ) -> [Float] {
         guard count > 0 else { return [] }
-        let swing = (gain.isFinite ? max(gain, 0) : 1) * (profile == .wing ? wingGain : 1)
-        let index = layer.rawValue
+        let envelope = Envelope(layer: layer, count: count, profile: profile)
+        var output = [Float](repeating: 0, count: count)
+        output.withUnsafeMutableBufferPointer {
+            samples(amplitude: amplitude, phase: phase, envelope: envelope, gain: gain, into: $0)
+        }
+        return output
+    }
+
+    /// То же, что `samples(layer:amplitude:phase:count:profile:gain:)`, но в готовый буфер и с
+    /// готовой огибающей: на точку остаются только синусы несущей и гармоники. Значения бит в
+    /// бит те же.
+    /// - Precondition: `output.count == envelope.count`.
+    public static func samples(
+        amplitude: Float, phase: WavePhase, envelope: Envelope, gain: Double = 1,
+        into output: UnsafeMutableBufferPointer<Float>
+    ) {
+        precondition(output.count == envelope.count, "output.count must equal envelope.count")
+        let swing = (gain.isFinite ? max(gain, 0) : 1) * (envelope.profile == .wing ? wingGain : 1)
+        let index = envelope.layer.rawValue
         let p = offsets[index]
-        let k = log(0.5) / log(peaks[index])
         let amp = Double(min(max(amplitude, 0), 1))
         let carrierPhase = phase.carrier.isFinite ? phase.carrier : 0
         let harmonicPhase = phase.harmonic.isFinite ? phase.harmonic : 0
-        let denominator = Double(max(count - 1, 1))
         let twoPi = 2 * Double.pi
 
         let c: Double, h: Double
-        switch profile {
+        switch envelope.profile {
         case .wing:
             c = wingCarriers[index]
             h = wingHarmonics[index]
@@ -150,24 +165,64 @@ public enum WaveShape {
             c = panelCarriers[index]
             h = panelHarmonics[index]
         }
+        // Те же произведения и в том же порядке, что `twoPi * c * u` и `twoPi * 2.3 * c * u`.
+        let carrierRate = twoPi * c
+        let harmonicRate = twoPi * 2.3 * c
 
-        return (0..<count).map { i in
-            let t = Double(i) / denominator
-            let u: Double
-            let envelope: Double
-            switch profile {
-            case .wing:
-                u = t
-                envelope = pow(max(0, sin(Double.pi * pow(u, k))), 1.5)
-            case .panel:
-                let x = 2 * t - 1
-                u = min((x * x + centerSoftness * centerSoftness).squareRoot(), 1)
-                let body = panelFloor + (1 - panelFloor) * sin(Double.pi * pow(u, k))
-                envelope = body * WavePaint.smoothstep(1, panelTaperStart, u)
+        envelope.positions.withUnsafeBufferPointer { positions in
+            envelope.values.withUnsafeBufferPointer { values in
+                for i in 0..<output.count {
+                    let u = positions[i]
+                    let carrier = (1 - h) * sin(carrierRate * u - carrierPhase + p) + h * sin(harmonicRate * u - harmonicPhase)
+                    let y = amp * values[i] * carrier
+                    output[i] = Float(softLimit(swing * y))
+                }
             }
-            let carrier = (1 - h) * sin(twoPi * c * u - carrierPhase + p) + h * sin(twoPi * 2.3 * c * u - harmonicPhase)
-            let y = amp * envelope * carrier
-            return Float(softLimit(swing * y))
+        }
+    }
+
+    /// Огибающая слоя на `count` точках: от размаха и фазы не зависит, поэтому считается один раз
+    /// на форму, профиль и число точек и годится для всех кадров и для эха. Степени и синус
+    /// огибающей это большая часть цены точки.
+    public struct Envelope: Sendable {
+        public let layer: WaveLayer
+        public let profile: WaveProfile
+        /// `u` каждой точки: в крыле доля от выреза, в панели мягкий модуль от середины.
+        let positions: [Double]
+        let values: [Double]
+
+        public var count: Int { values.count }
+
+        /// Отрицательное `count` дает пустую огибающую.
+        public init(layer: WaveLayer, count: Int, profile: WaveProfile = .wing) {
+            self.layer = layer
+            self.profile = profile
+            let count = max(count, 0)
+            let k = log(0.5) / log(WaveShape.peaks[layer.rawValue])
+            let denominator = Double(max(count - 1, 1))
+            var positions = [Double]()
+            var values = [Double]()
+            positions.reserveCapacity(count)
+            values.reserveCapacity(count)
+            for i in 0..<count {
+                let t = Double(i) / denominator
+                let u: Double
+                let envelope: Double
+                switch profile {
+                case .wing:
+                    u = t
+                    envelope = pow(max(0, sin(Double.pi * pow(u, k))), 1.5)
+                case .panel:
+                    let x = 2 * t - 1
+                    u = min((x * x + WaveShape.centerSoftness * WaveShape.centerSoftness).squareRoot(), 1)
+                    let body = WaveShape.panelFloor + (1 - WaveShape.panelFloor) * sin(Double.pi * pow(u, k))
+                    envelope = body * WavePaint.smoothstep(1, WaveShape.panelTaperStart, u)
+                }
+                positions.append(u)
+                values.append(envelope)
+            }
+            self.positions = positions
+            self.values = values
         }
     }
 
@@ -312,6 +367,23 @@ public enum WavePaint {
     public static func stops(
         palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, locations: [Double], profile: WaveProfile
     ) -> [Stop] {
+        let placeholder = Stop(location: 0, color: RGBColor(r: 0, g: 0, b: 0), opacity: 0)
+        var output = [Stop](repeating: placeholder, count: locations.count)
+        output.withUnsafeMutableBufferPointer {
+            stops(palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile, into: $0)
+        }
+        return output
+    }
+
+    /// То же, что `stops(palette:layer:level:time:locations:profile:)`, но в готовый буфер:
+    /// точки нескольких линий ложатся в один массив без выделения памяти на каждую линию.
+    /// Значения бит в бит те же.
+    /// - Precondition: `output.count == locations.count`.
+    public static func stops(
+        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, locations: [Double], profile: WaveProfile,
+        into output: UnsafeMutableBufferPointer<Stop>
+    ) {
+        precondition(output.count == locations.count, "output.count must equal locations.count")
         let colors = distinct(palette.isEmpty ? PaletteExtractor.fallback : palette)
         let index = layer.rawValue
         let own = colors[index % colors.count]
@@ -323,7 +395,7 @@ public enum WavePaint {
         let opacity = (restOpacity + (fullOpacity - restOpacity) * smoothstep(0, opacityKnee, level)) * layerOpacity[index]
         let shift = time.isFinite ? (flowSpeed * time).truncatingRemainder(dividingBy: 1) : 0
 
-        return locations.map { raw in
+        for (index, raw) in locations.enumerated() {
             let location = raw.isFinite ? min(max(raw, 0), 1) : 0
             let u: Double
             let fadeIn: Double
@@ -342,7 +414,7 @@ public enum WavePaint {
                 b: (own.b + (next.b - own.b) * weight) * chroma
             )
             let fadeOut = smoothstep(1, fadeOutStart, u)
-            return Stop(location: location, color: RGBColor(oklab: lab), opacity: opacity * Float(fadeIn * fadeOut))
+            output[index] = Stop(location: location, color: RGBColor(oklab: lab), opacity: opacity * Float(fadeIn * fadeOut))
         }
     }
 

@@ -96,7 +96,8 @@ struct IslandBodyView: View, Equatable {
 /// говорит, что он жив; иначе его холсты пустые. Каждый прямоугольник волн рисуется своей
 /// текстурой (`drawingGroup`) с полем `glowMargin` × «Радиус свечения» (не меньше 1×) под
 /// размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
-/// Число линий, заливка, толщина, размах и радиус свечения линий берутся из `appearance`.
+/// Число линий, заливка, толщина, размах и радиус свечения линий берутся из `appearance`; без
+/// прохода свечения (`WaveAppearance.glowPass`, режим энергосбережения) размытой копии линий нет.
 ///
 /// На паузе полоса панели сначала затихает в линию (около секунды), затем гаснет до 15 %.
 ///
@@ -214,7 +215,7 @@ struct IslandWavesView: View {
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
         return ZStack(alignment: .topLeading) {
             ZStack {
-                if glow > 0 {
+                if glow > 0 && appearance.glowPass {
                     WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
                         .blur(radius: Self.glowBlur * radius)
                         .opacity(min(Self.glowOpacity * glow * Double(max(radius, 1)).squareRoot(), 1))

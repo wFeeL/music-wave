@@ -39,11 +39,41 @@ struct WaveSetTests {
                     #expect(abs(echoStop.opacity - mainStop.opacity * opacities[index]) < 1e-6)
                 }
                 let phase = WaveMotion().phase(echo.shape, profile: style.profile).shifted(by: 0.6)
-                #expect(echo.samples == WaveShape.samples(
+                #expect(Array(echo.samples) == WaveShape.samples(
                     layer: echo.shape, amplitude: echo.level, phase: phase, count: echo.samples.count,
                     profile: style.profile
                 ))
             }
+        }
+    }
+
+    /// Эхо середины и верха в крыле на 32 точках, эхо баса и все линии панели с полным числом
+    /// точек. Эхо делит набор точек градиента со своей основной линией, все точки линий лежат
+    /// в одном массиве набора подряд.
+    @Test func echoesShareStopsAndThinOutInTheWing() {
+        let wing = Self.waves({ $0.lineCount = 6 }, style: .wing)
+        #expect(wing.layers.map(\.samples.count) == [64, 64, 64, 64, 32, 32])
+        #expect(wing.layers.map(\.stopSet) == [0, 1, 2, 0, 1, 2])
+        #expect(wing.layers.map(\.opacity) == [1, 1, 1, 0.45, 0.3, 0.28])
+        var next = 0
+        for layer in wing.layers {
+            #expect(layer.samples.startIndex == next)
+            next = layer.samples.endIndex
+        }
+        for index in 0..<3 {
+            #expect(wing.layers[index].baseStops == wing.layers[index + 3].baseStops)
+            #expect(wing.layers[index].stops == Array(wing.layers[index].baseStops))
+        }
+        let panel = Self.waves({ $0.lineCount = 6 }, style: .panel)
+        #expect(panel.layers.map(\.samples.count) == [Int](repeating: WaveSet.panelPoints, count: 6))
+        // Точки и цвета те же, что у прежнего расчета по линии.
+        for layer in wing.layers + panel.layers {
+            let style: WaveStyle = layer.samples.count == WaveSet.panelPoints ? .panel : .wing
+            let locations = style == .wing ? WaveSet.wingLocations : WaveSet.panelLocations
+            #expect(Array(layer.baseStops) == WavePaint.stops(
+                palette: PaletteExtractor.fallback, layer: layer.shape, level: Self.frame.layers[layer.shape.rawValue],
+                time: 1, locations: locations, profile: style.profile
+            ))
         }
     }
 
@@ -81,7 +111,7 @@ struct WaveSetTests {
         #expect(styled.thickness == 2)
         #expect(styled.fill == 0.5)
         let bass = styled.layers[0]
-        #expect(bass.samples == WaveShape.samples(
+        #expect(Array(bass.samples) == WaveShape.samples(
             layer: .bass, amplitude: bass.level, phase: WaveMotion().phase(.bass, profile: .wing),
             count: bass.samples.count, profile: .wing, gain: 2
         ))

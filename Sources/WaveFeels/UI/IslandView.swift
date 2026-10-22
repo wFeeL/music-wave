@@ -15,7 +15,8 @@ import WaveCore
 ///
 /// Кадры идут от `TimelineView(.animation)`, на паузе, пока остров скрыт (после скрытия еще
 /// `IslandTransition.overlap`, чтобы волны двигались, пока остров гаснет); в режиме
-/// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет кадр анализа и свечение
+/// энергосбережения не чаще 30 в секунду, без эха и без свечения линий
+/// (`WaveAppearance.lightened()`). На каждом кадре модель берет кадр анализа и свечение
 /// доли на момент показа кадра по часам хоста (`CACurrentMediaTime()` плюс два периода
 /// отрисовки), сглаживает уровни пружинами и двигает фазы волн, «вздох» и переход палитры
 /// (`AppModel.islandVisuals`). Сцена из трех слоев (`IslandScene.swift`): свечение под островом
@@ -207,7 +208,9 @@ struct IslandView: View {
         let visuals = model.islandVisuals(now: now, timelineTime: timelineTime, reduceMotion: reduceMotion)
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.
         let glow = reduceMotion ? 0 : model.settings.glowIntensity
-        let appearance = model.settings.appearance
+        // В режиме энергосбережения вид облегчен: без эха и без свечения линий. Настройки и
+        // предпросмотр во вкладке «Вид» остаются как есть.
+        let appearance = model.lowPower ? model.settings.appearance.lightened() : model.settings.appearance
         let bannerVisible = model.bannerVisible
         // Баннер открылся или закрылся меньше `overlap` назад: живы и крылья, и волны баннера.
         // Волны баннера только у свернутого острова: у раскрытой панели они не видны.
