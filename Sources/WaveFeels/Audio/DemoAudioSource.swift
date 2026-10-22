@@ -30,6 +30,14 @@ nonisolated final class DemoAudioSource: @unchecked Sendable {
     private var position = 0
 
     init(ring: SampleRingBuffer, file: URL) throws {
+        let (samples, sampleRate) = try Self.loadMono(file)
+        self.ring = ring
+        self.samples = samples
+        self.sampleRate = sampleRate
+    }
+
+    /// Файл целиком в память, моно (среднее каналов), и его частота дискретизации.
+    static func loadMono(_ file: URL) throws -> (samples: [Float], sampleRate: Double) {
         let audioFile = try AVAudioFile(forReading: file)
         let format = audioFile.processingFormat
         let length = AVAudioFrameCount(clamping: audioFile.length)
@@ -56,10 +64,7 @@ nonisolated final class DemoAudioSource: @unchecked Sendable {
         for frame in 0..<frames {
             mono[frame] *= scale
         }
-
-        self.ring = ring
-        self.samples = mono
-        self.sampleRate = format.sampleRate
+        return (mono, format.sampleRate)
     }
 
     func start() {

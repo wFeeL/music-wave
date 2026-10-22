@@ -22,7 +22,7 @@ final class NotchWindowController {
     private let arguments: LaunchArguments
     private let fullscreen = FullscreenDetector()
     private var panel: NotchPanel?
-    private var hostingView: NSHostingView<IslandPlaceholderView>?
+    private var hostingView: NSHostingView<IslandView>?
     private var isShown = false
     private var screenObserver: (any NSObjectProtocol)?
     private var globalMonitor: Any?
@@ -86,7 +86,7 @@ final class NotchWindowController {
             log(Self.describe(newLayout))
             if let panel, let hostingView {
                 panel.setFrame(newLayout.panelFrame, display: true)
-                hostingView.rootView = IslandPlaceholderView(model: model, layout: newLayout)
+                hostingView.rootView = IslandView(model: model, layout: newLayout)
             } else {
                 makePanel(layout: newLayout)
             }
@@ -125,7 +125,7 @@ final class NotchWindowController {
     private func makePanel(layout: NotchLayout) {
         let frame = layout.panelFrame
         let panel = NotchPanel(contentRect: frame)
-        let hostingView = NSHostingView(rootView: IslandPlaceholderView(model: model, layout: layout))
+        let hostingView = NSHostingView(rootView: IslandView(model: model, layout: layout))
         // Размер окна задает только геометрия выреза, не содержимое SwiftUI.
         hostingView.sizingOptions = []
         hostingView.frame = NSRect(origin: .zero, size: frame.size)
@@ -225,42 +225,5 @@ extension CGRect {
     /// «x 642.5, y 924.0, 185.0 × 32.0» для логов окна у выреза.
     var logDescription: String {
         String(format: "x %.1f, y %.1f, %.1f × %.1f", minX, minY, width, height)
-    }
-}
-
-/// Временный остров до `IslandView`: черная капсула свернутого острова или прямоугольник
-/// раскрытого, при скрытом острове панель прозрачна. Координаты из `NotchLayout` (AppKit,
-/// снизу вверх) переводятся в координаты панели (SwiftUI, сверху вниз).
-private struct IslandPlaceholderView: View {
-    static let expandedCornerRadius: CGFloat = 24
-
-    let model: AppModel
-    let layout: NotchLayout
-
-    var body: some View {
-        let panel = layout.panelFrame
-        ZStack(alignment: .topLeading) {
-            Color.clear
-            if let island = islandRect {
-                let radius = model.islandState == .expanded ? Self.expandedCornerRadius : island.height / 2
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(Color.black)
-                    .frame(width: island.width, height: island.height)
-                    .offset(x: island.minX - panel.minX, y: panel.maxY - island.maxY)
-            }
-        }
-        .frame(width: panel.width, height: panel.height, alignment: .topLeading)
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .animation(.spring(duration: 0.35), value: model.islandState)
-        .animation(.spring(duration: 0.35), value: model.settings.wingWidth)
-    }
-
-    private var islandRect: CGRect? {
-        switch model.islandState {
-        case .hidden: nil
-        case .collapsed: layout.collapsedIsland(wingWidth: model.settings.wingWidth)
-        case .expanded: layout.expandedIsland
-        }
     }
 }

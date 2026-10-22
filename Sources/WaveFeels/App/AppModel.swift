@@ -21,6 +21,8 @@ final class AppModel {
     static let logTailLines = 200
     static let privacyAudioCaptureURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"
     static let privacyScreenCaptureURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+    /// Самый длинный шаг анимации острова между кадрами, с.
+    static let maxVisualStep = 0.1
 
     let settings: AppSettings
     let store: FrameStore
@@ -44,6 +46,10 @@ final class AppModel {
     var pointerInHoverZone = false
     var fullscreenSuppressed = false
     var screenLocked = false
+    /// Режим энергосбережения: остров рисуется не чаще 30 кадров в секунду.
+    var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// Фазы волн. Сдвигаются на каждом кадре отрисовки, поэтому не наблюдаются.
+    @ObservationIgnored var motion = WaveMotion()
 
     @ObservationIgnored private(set) var arguments = LaunchArguments()
     @ObservationIgnored private var gate = ActivityGate()
@@ -61,6 +67,9 @@ final class AppModel {
     @ObservationIgnored private var silentSince: Double?
     @ObservationIgnored private var watchdogExhausted = false
     @ObservationIgnored private var cachedSigning: String?
+    @ObservationIgnored private var pulse = BeatPulse()
+    @ObservationIgnored private var paletteFade = PaletteFade(palette: PaletteExtractor.fallback)
+    @ObservationIgnored private var lastVisualTime: Double?
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         settings = AppSettings(defaults: defaults)
@@ -314,6 +323,10 @@ final class AppModel {
             islandState = state
         }
         updatePermissionHint()
+        let low = ProcessInfo.processInfo.isLowPowerModeEnabled
+        if low != lowPower {
+            lowPower = low
+        }
     }
 
     /// Настройки пользователя в `AudioPipeline`. Свойства конвейера сами отбрасывают
@@ -414,10 +427,64 @@ final class AppModel {
         }
     }
 
+    // MARK: - Кадр острова
+
+    /// Шаг анимации острова на момент `now` (секунды монотонных часов): последний кадр анализа,
+    /// фазы волн (при «Уменьшении движения» вдвое медленнее), «вздох» и палитра в середине
+    /// перехода. Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает.
+    func islandVisuals(now: Double, reduceMotion: Bool) -> IslandVisuals {
+        let frame = store.latest
+        var dt = 0.0
+        if let lastVisualTime, now.isFinite {
+            dt = min(max(now - lastVisualTime, 0), Self.maxVisualStep)
+        }
+        if now.isFinite {
+            lastVisualTime = now
+        }
+        motion.advance(layers: frame.layers, dt: reduceMotion ? dt / 2 : dt)
+        let beat = pulse.step(beat: frame.beat, dt: dt)
+        let shown = paletteFade.palette(target: palette, now: now)
+        return IslandVisuals(frame: frame, motion: motion, palette: shown, pulse: beat, time: now)
+    }
+
+    /// Снимки острова: модель не запущена, состояние, трек, палитра и кадр задаются напрямую.
+    /// Часы анимации встают на `time`, поэтому кадр на этот момент рисуется без шага анимации
+    /// и без перехода палитры.
+    func showPreview(
+        state: IslandState,
+        track: NowPlayingInfo?,
+        palette: [PaletteColor],
+        frame: WaveFrame,
+        motion: WaveMotion,
+        pulse: BeatPulse,
+        time: Double
+    ) {
+        islandState = state
+        lastTrack = track
+        self.palette = palette
+        store.publish(frame)
+        self.motion = motion
+        self.pulse = pulse
+        paletteFade = PaletteFade(palette: palette)
+        lastVisualTime = time
+    }
+
     private func log(_ message: String) {
         Log.app.info("\(message, privacy: .public)")
         Log.file(message)
     }
+}
+
+/// Все, что нужно острову на один кадр.
+struct IslandVisuals {
+    var frame: WaveFrame
+    var motion: WaveMotion
+    /// Палитра с учетом перехода.
+    var palette: [PaletteColor]
+    /// «Вздох» 0...1.
+    var pulse: Float
+    /// Время кадра, с: по нему течет градиент волн.
+    var time: Double
 }
 
 // MARK: - Диагностика

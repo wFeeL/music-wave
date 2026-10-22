@@ -159,8 +159,7 @@ smoke_launch() {
 }
 
 render_snapshots() {
-    "$APP/Contents/MacOS/WaveFeels" --render-snapshots "$OUT/snapshots" \
-        --demo "$APP/Contents/Resources/Demo/demo.wav" --fake-notch --no-capture
+    "$APP/Contents/MacOS/WaveFeels" --render-snapshots "$OUT/snapshots" --no-capture --exit-after 60
 }
 
 has_snapshot_renderer() {

@@ -28,6 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let arguments = self.arguments
+        if let directory = arguments.snapshotDirectory {
+            Task { @MainActor in
+                await Self.warmUpCoreAudio()
+                Self.renderSnapshots(to: directory)
+            }
+            return
+        }
         Task { @MainActor in
             // Модель читает свойства Core Audio в главном потоке. Первое обращение к HAL
             // процесса может идти секундами, поэтому оно делается заранее вне главного потока.
@@ -59,6 +66,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             diagnosticsRequested = true
             Log.file("диагностика откроется после запуска модели")
+        }
+    }
+
+    /// `--render-snapshots`: снимки острова в каталог и выход; при ошибке код выхода 1.
+    private static func renderSnapshots(to directory: URL) {
+        do {
+            let urls = try SnapshotRenderer.renderAll(to: directory)
+            Self.log("снимков записано: \(urls.count) в \(directory.path(percentEncoded: false))")
+            Log.flush()
+            NSApp.terminate(nil)
+        } catch {
+            Self.log("снимки не получились: \(error)")
+            Log.flush()
+            exit(1)
         }
     }
 

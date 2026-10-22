@@ -136,4 +136,53 @@ struct PaletteTests {
         #expect(palette.count == 3)
         for c in palette { #expect(c.isFinite) }
     }
+
+    // MARK: - PaletteFade
+
+    private static let cold = [RGBColor(hex: 0x3D8BFF), RGBColor(hex: 0x5EEAD4), RGBColor(hex: 0xA78BFA)]
+
+    private func paletteDistance(_ a: [RGBColor], _ b: [RGBColor]) -> Float {
+        zip(a, b).map { distance($0, $1) }.max() ?? .infinity
+    }
+
+    @Test func fadeHoldsInitialPalette() {
+        var fade = PaletteFade(palette: PaletteExtractor.fallback)
+        #expect(fade.palette(target: PaletteExtractor.fallback, now: 10) == PaletteExtractor.fallback)
+        #expect(fade.palette(target: PaletteExtractor.fallback, now: 99) == PaletteExtractor.fallback)
+    }
+
+    @Test func fadeTakesPointEightSeconds() {
+        let start = PaletteExtractor.fallback
+        var fade = PaletteFade(palette: start)
+        #expect(paletteDistance(fade.palette(target: Self.cold, now: 5), start) < 1e-3)
+        let middle = fade.palette(target: Self.cold, now: 5.4)
+        #expect(paletteDistance(middle, mixPalettes(start, Self.cold, t: 0.5)) < 1e-3)
+        // Ease-in-out: в начале медленнее линейного.
+        let early = fade.palette(target: Self.cold, now: 5.1)
+        let linear = mixPalettes(start, Self.cold, t: 0.125)
+        #expect(paletteDistance(early, start) < paletteDistance(linear, start))
+        #expect(fade.palette(target: Self.cold, now: 5.8) == Self.cold)
+        #expect(fade.palette(target: Self.cold, now: 30) == Self.cold)
+        #expect(PaletteFade.duration == 0.8)
+    }
+
+    @Test func retargetStartsFromWhatIsShown() {
+        var fade = PaletteFade(palette: PaletteExtractor.fallback)
+        _ = fade.palette(target: Self.cold, now: 1)
+        let shown = fade.palette(target: Self.cold, now: 1.3)
+        let warm = [RGBColor(hex: 0xFF8A3D), RGBColor(hex: 0xFFC857), RGBColor(hex: 0xF2545B)]
+        let restarted = fade.palette(target: warm, now: 1.3)
+        #expect(paletteDistance(restarted, shown) < 1e-3)
+        #expect(fade.palette(target: warm, now: 2.1) == warm)
+    }
+
+    @Test func fadeSurvivesOddClocks() {
+        var fade = PaletteFade(palette: PaletteExtractor.fallback)
+        _ = fade.palette(target: Self.cold, now: 10)
+        // Часы назад: переход стоит в начале, не ломается.
+        let back = fade.palette(target: Self.cold, now: 9)
+        #expect(paletteDistance(back, PaletteExtractor.fallback) < 1e-3)
+        #expect(fade.palette(target: Self.cold, now: .nan) == Self.cold)
+        #expect(fade.palette(target: Self.cold, now: 11) == Self.cold)
+    }
 }

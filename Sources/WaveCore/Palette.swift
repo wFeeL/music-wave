@@ -277,3 +277,43 @@ public func mixPalettes(_ a: [RGBColor], _ b: [RGBColor], t: Float) -> [RGBColor
             b: x.b + (y.b - x.b) * t))
     }
 }
+
+/// Плавная смена палитры: к новой цели за `duration` секунд с ease-in-out через `mixPalettes`.
+/// Новая цель посреди перехода начинает свой переход от того, что видно сейчас, без скачка.
+public struct PaletteFade: Sendable {
+    public static let duration = 0.8
+
+    private var from: [RGBColor]
+    private var to: [RGBColor]
+    private var start: Double?
+
+    public init(palette: [RGBColor]) {
+        from = palette
+        to = palette
+    }
+
+    /// Палитра на момент `now` (секунды, любые монотонные часы).
+    public mutating func palette(target: [RGBColor], now: Double) -> [RGBColor] {
+        if target != to {
+            from = shown(at: now)
+            to = target
+            start = now.isFinite ? now : nil
+        }
+        return shown(at: now)
+    }
+
+    private mutating func shown(at now: Double) -> [RGBColor] {
+        guard let start else { return to }
+        guard now.isFinite else {
+            self.start = nil
+            return to
+        }
+        let raw = (now - start) / Self.duration
+        if raw >= 1 - 1e-9 {
+            self.start = nil
+            return to
+        }
+        let t = min(max(raw, 0), 1)
+        return mixPalettes(from, to, t: Float(t * t * (3 - 2 * t)))
+    }
+}
