@@ -160,11 +160,14 @@ final class NotchWindowController {
     // MARK: - Панель
 
     /// Запоминает `newLayout` и ставит по нему панель: рамку окна и остров в одном проходе.
+    /// Сначала новый остров, потом рамка без немедленной отрисовки: окно и содержимое
+    /// показываются вместе в следующем проходе, а не старый остров в новой рамке (сдвиг на
+    /// кадр, когда крылья шире 150 pt меняют ширину окна).
     private func place(_ newLayout: NotchLayout) {
         layout = newLayout
         if let panel, let hostingView {
-            panel.setFrame(newLayout.panelFrame, display: true)
             hostingView.rootView = IslandView(model: model, layout: newLayout)
+            panel.setFrame(newLayout.panelFrame, display: false)
         } else {
             makePanel(layout: newLayout)
         }
