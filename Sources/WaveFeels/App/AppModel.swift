@@ -23,6 +23,9 @@ final class AppModel {
     static let privacyScreenCaptureURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
     /// Самый длинный шаг анимации острова между кадрами, с.
     static let maxVisualStep = 0.1
+    /// Сколько трек может быть без обложки, прежде чем панель и волны вернутся к стандартной
+    /// палитре: адаптер иногда присылает обложку следом за названием.
+    static let missingArtworkGrace: Duration = .milliseconds(500)
 
     let settings: AppSettings
     let store: FrameStore
@@ -35,7 +38,11 @@ final class AppModel {
     private(set) var islandState: IslandState = .hidden
     /// Последний трек выбранного источника, держится и на паузе.
     private(set) var lastTrack: NowPlayingInfo?
+    /// Палитра волн: из обложки `lastTrack`, без обложки стандартная. Остров переходит к ней
+    /// плавно (`PaletteFade`).
     private(set) var palette: [PaletteColor] = PaletteExtractor.fallback
+    /// Обложка `lastTrack` для панели, уже уменьшенная до `ExpandedPanelView.artworkPixels`.
+    private(set) var artwork: PanelArtwork?
     /// Показать подсказку о доступе к звуку.
     private(set) var permissionHint = false
     /// Последний результат `AudioCapturePermission.preflight()`.
@@ -70,6 +77,13 @@ final class AppModel {
     @ObservationIgnored private var pulse = BeatPulse()
     @ObservationIgnored private var paletteFade = PaletteFade(palette: PaletteExtractor.fallback)
     @ObservationIgnored private var lastVisualTime: Double?
+    /// Обложка, из которой получены `artwork` и `palette` (или ждут разбора).
+    @ObservationIgnored private var artworkData: Data?
+    @ObservationIgnored private var artworkTask: Task<Void, Never>?
+    /// Номер последнего запроса обложки: ответы старых запросов отбрасываются.
+    @ObservationIgnored private var artworkGeneration = 0
+    /// Снимки: работает ли Now Playing, вместо `adapter.isAvailable`.
+    @ObservationIgnored private var previewNowPlaying: Bool?
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         settings = AppSettings(defaults: defaults)
@@ -134,6 +148,8 @@ final class AppModel {
         appObservers = []
         pipeline.stop()
         adapter.stop()
+        artworkTask?.cancel()
+        artworkTask = nil
         silentSince = nil
     }
 
@@ -300,6 +316,7 @@ final class AppModel {
         let sourcePlaying = sourceInfo?.isPlaying ?? false
         if let sourceInfo, sourceInfo != lastTrack {
             lastTrack = sourceInfo
+            updateArtwork()
         }
 
         pipeline.adapterAvailable = adapter.isAvailable
@@ -343,6 +360,7 @@ final class AppModel {
             pipeline.source = source
             if let track = lastTrack, !Self.belongs(track, to: source) {
                 lastTrack = nil
+                updateArtwork()
             }
             refreshSourceAppRunning()
         }
@@ -427,6 +445,55 @@ final class AppModel {
         }
     }
 
+    // MARK: - Обложка и палитра
+
+    /// Now Playing работает: в панели есть трек, кнопки и прогресс.
+    var nowPlayingAvailable: Bool {
+        previewNowPlaying ?? adapter.isAvailable
+    }
+
+    /// Обложка `lastTrack` сменилась: картинка для панели и палитра считаются вне главного
+    /// актора, затем палитра плавно перетекает в новую. Трек без обложки (или без трека)
+    /// через `missingArtworkGrace` получает стандартную палитру. На паузе `lastTrack` и его
+    /// обложка остаются.
+    private func updateArtwork() {
+        let data = lastTrack?.artworkData
+        guard data != artworkData else { return }
+        artworkData = data
+        artworkTask?.cancel()
+        artworkGeneration += 1
+        let generation = artworkGeneration
+        let pixels = ExpandedPanelView.artworkPixels
+        artworkTask = Task { [weak self] in
+            let analysis: ArtworkAnalysis?
+            if let data {
+                analysis = await Task.detached(priority: .utility) {
+                    ArtworkAnalysis(data: data, displayPixels: pixels)
+                }.value
+            } else {
+                do {
+                    try await Task.sleep(for: Self.missingArtworkGrace)
+                } catch {
+                    return
+                }
+                analysis = nil
+            }
+            guard let self, !Task.isCancelled, generation == self.artworkGeneration else { return }
+            self.applyArtwork(analysis, generation: generation)
+        }
+    }
+
+    private func applyArtwork(_ analysis: ArtworkAnalysis?, generation: Int) {
+        artwork = analysis?.image.map { PanelArtwork(image: $0, id: generation) }
+        let target = analysis?.palette ?? PaletteExtractor.fallback
+        if target != palette {
+            palette = target
+        }
+        if let analysis, analysis.image == nil {
+            log("обложка не прочиталась, палитра стандартная")
+        }
+    }
+
     // MARK: - Кадр острова
 
     /// Шаг анимации острова на момент `now` (секунды часов кадра): последний кадр анализа,
@@ -450,6 +517,7 @@ final class AppModel {
     /// Снимки острова: модель не запущена, состояние, трек, палитра и кадр задаются напрямую.
     /// Часы анимации встают на `time`, поэтому кадр на этот момент рисуется без шага анимации
     /// и без перехода палитры.
+    /// Обложка трека разбирается здесь же, синхронно; палитра задается отдельно.
     func showPreview(
         state: IslandState,
         track: NowPlayingInfo?,
@@ -457,10 +525,20 @@ final class AppModel {
         frame: WaveFrame,
         motion: WaveMotion,
         pulse: BeatPulse,
-        time: Double
+        time: Double,
+        nowPlayingAvailable: Bool = true
     ) {
         islandState = state
         lastTrack = track
+        artworkTask?.cancel()
+        artworkTask = nil
+        artworkGeneration += 1
+        artworkData = track?.artworkData
+        let generation = artworkGeneration
+        artwork = artworkData
+            .flatMap { ArtworkPixels.image(from: $0, maxPixelSize: ExpandedPanelView.artworkPixels) }
+            .map { PanelArtwork(image: $0, id: generation) }
+        previewNowPlaying = nowPlayingAvailable
         self.palette = palette
         store.publish(frame)
         self.motion = motion
@@ -473,6 +551,12 @@ final class AppModel {
         Log.app.info("\(message, privacy: .public)")
         Log.file(message)
     }
+}
+
+/// Обложка в панели. `id` меняется с каждой новой обложкой: по нему панель плавно сменяет картинку.
+struct PanelArtwork {
+    let image: CGImage
+    let id: Int
 }
 
 /// Все, что нужно острову на один кадр.

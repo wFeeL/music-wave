@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 import WaveCore
 
@@ -32,22 +33,85 @@ enum SnapshotRenderer {
     static let warmPalette = [PaletteColor(hex: 0xFF8A3D), PaletteColor(hex: 0xFFC857), PaletteColor(hex: 0xF2545B)]
     static let coldPalette = [PaletteColor(hex: 0x3D8BFF), PaletteColor(hex: 0x5EEAD4), PaletteColor(hex: 0xA78BFA)]
 
+    /// Источник снимков: Яндекс Музыка, как у владельца.
+    static let source = AudioSource.application(
+        bundleID: "ru.yandex.desktop.music",
+        bundlePath: "/Applications/Яндекс Музыка.app",
+        displayName: "Яндекс Музыка"
+    )
+
     static let track = NowPlayingInfo(
         bundleIdentifier: "ru.yandex.desktop.music",
         title: "Ночной город",
         artist: "Синтетика",
         isPlaying: true,
         duration: 214,
-        elapsedTime: 63
+        elapsedTime: 63,
+        artworkData: testArtwork
     )
     static let longTitleTrack = NowPlayingInfo(
         bundleIdentifier: "ru.yandex.desktop.music",
-        title: "Очень длинное название трека, которое целиком не помещается в панель",
-        artist: "Оркестр синтезаторов и голосов",
+        title: "Очень длинное название трека, которое не помещается целиком",
+        artist: "Полина Северная",
         isPlaying: true,
         duration: 377,
-        elapsedTime: 141
+        elapsedTime: 141,
+        artworkData: testArtwork
     )
+
+    /// Тестовая обложка 300×300 PNG: плавный диагональный градиент индиго, малинового и янтарного
+    /// с бирюзовым пятном в нижнем левом углу. Проходит тот же путь, что настоящая обложка:
+    /// ImageIO, `ArtworkPixels`, `PaletteExtractor`.
+    static let testArtwork: Data = makeTestArtwork()
+
+    private static func makeTestArtwork() -> Data {
+        let side = 300
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return Data() }
+        func color(_ hex: UInt32, alpha: CGFloat = 1) -> CGColor {
+            CGColor(
+                srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255, alpha: alpha
+            )
+        }
+        let size = CGFloat(side)
+        // CGContext: начало снизу слева. Индиго сверху слева, янтарный снизу справа.
+        if let diagonal = CGGradient(
+            colorsSpace: space,
+            colors: [color(0x2E2A8C), color(0xB83A7A), color(0xF2A65A)] as CFArray,
+            locations: [0, 0.55, 1]
+        ) {
+            context.drawLinearGradient(
+                diagonal, start: CGPoint(x: 0, y: size), end: CGPoint(x: size, y: 0), options: []
+            )
+        }
+        if let glow = CGGradient(
+            colorsSpace: space,
+            colors: [color(0x2EC4B6, alpha: 0.85), color(0x2EC4B6, alpha: 0)] as CFArray,
+            locations: [0, 1]
+        ) {
+            let center = CGPoint(x: size * 0.18, y: size * 0.2)
+            context.drawRadialGradient(
+                glow, startCenter: center, startRadius: 0, endCenter: center, endRadius: size * 0.55, options: []
+            )
+        }
+        guard let image = context.makeImage() else { return Data() }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, "public.png" as CFString, 1, nil) else {
+            return Data()
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? data as Data : Data()
+    }
+
+    /// Палитра тестовой обложки, как ее получило бы приложение.
+    static var testArtworkPalette: [PaletteColor] {
+        guard let raster = ArtworkPixels.rgba64(from: testArtwork) else { return PaletteExtractor.fallback }
+        return PaletteExtractor.extract(rgba: raster.pixels, width: raster.width, height: raster.height)
+    }
 
     /// Экран со встроенным вырезом по центру.
     static var notchLayout: NotchLayout {
@@ -84,6 +148,23 @@ enum SnapshotRenderer {
         ]
     }
 
+    /// Середина обложки раскрытой панели на снимке (pt, начало сверху слева), с запасом 12 pt
+    /// от краев обложки.
+    @MainActor
+    static func artworkSampleRect() -> CGRect {
+        let layout = notchLayout
+        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(AppSettings.Default.wingWidth))
+        let content = geometry.panelContent
+        let size = ExpandedPanelView.artworkSize
+        let panelTop = screenSize.height - layout.panelFrame.maxY
+        let artwork = CGRect(
+            x: layout.panelFrame.minX + content.minX + ExpandedPanelView.leadingInset,
+            y: panelTop + content.midY - size / 2,
+            width: size, height: size
+        )
+        return artwork.insetBy(dx: 12, dy: 12)
+    }
+
     /// Список снимков в каталоге: имена PNG по строке. Пишется до отрисовки, CI сверяет с ним,
     /// все ли файлы на месте.
     static let manifestName = "manifest.txt"
@@ -103,18 +184,27 @@ enum SnapshotRenderer {
         let silent = fading.last
 
         let fallback = PaletteExtractor.fallback
+        let cover = testArtworkPalette
+        var noArtwork = track
+        noArtwork.artworkData = nil
         let scenes = [
             SnapshotScene(name: "01-silent", state: .collapsed, moment: silent, palette: fallback),
             SnapshotScene(name: "02-loud-beat", state: .collapsed, moment: loudBeat, palette: fallback),
             SnapshotScene(name: "02-loud-beat-light", state: .collapsed, moment: loudBeat, palette: fallback, backdrop: .light),
             SnapshotScene(name: "03-loud-no-beat", state: .collapsed, moment: loudCalm, palette: fallback),
-            SnapshotScene(name: "04-expanded", state: .expanded, moment: loudBeat, palette: fallback),
-            SnapshotScene(name: "04-expanded-light", state: .expanded, moment: loudBeat, palette: fallback, backdrop: .light),
-            SnapshotScene(name: "05-expanded-paused", state: .expanded, moment: silent, palette: fallback, track: pausedTrack),
-            SnapshotScene(name: "06-long-title", state: .expanded, moment: loudCalm, palette: fallback, track: longTitleTrack),
+            SnapshotScene(name: "04-expanded", state: .expanded, moment: loudBeat, palette: cover),
+            SnapshotScene(name: "04-expanded-light", state: .expanded, moment: loudBeat, palette: cover, backdrop: .light),
+            SnapshotScene(name: "05-expanded-paused", state: .expanded, moment: silent, palette: cover, track: pausedTrack),
+            SnapshotScene(name: "06-long-title", state: .expanded, moment: loudCalm, palette: cover, track: longTitleTrack),
             SnapshotScene(name: "07-palette-warm", state: .collapsed, moment: groove, palette: warmPalette),
             SnapshotScene(name: "08-palette-cold", state: .collapsed, moment: groove, palette: coldPalette),
             SnapshotScene(name: "09-pill-external", state: .collapsed, moment: loudBeat, palette: fallback, pill: true),
+            SnapshotScene(name: "10-expanded-no-artwork", state: .expanded, moment: loudCalm, palette: fallback, track: noArtwork),
+            SnapshotScene(
+                name: "11-expanded-no-adapter", state: .expanded, moment: loudCalm, palette: fallback,
+                track: nil, nowPlaying: false
+            ),
+            SnapshotScene(name: "12-pill-expanded", state: .expanded, moment: loudBeat, palette: cover, pill: true),
         ]
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -122,6 +212,7 @@ enum SnapshotRenderer {
         try Data(manifest.utf8).write(to: directory.appendingPathComponent(manifestName), options: .atomic)
         let defaults = snapshotDefaults()
         let model = AppModel(defaults: defaults)
+        model.settings.source = source
         var written: [URL] = []
         for scene in scenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
@@ -155,7 +246,8 @@ enum SnapshotRenderer {
             frame: moment.frame,
             motion: moment.motion,
             pulse: moment.pulse,
-            time: moment.time
+            time: moment.time,
+            nowPlayingAvailable: scene.nowPlaying
         )
         let layout = scene.pill ? pillLayout : notchLayout
         let time = moment.time
@@ -192,11 +284,13 @@ private struct SnapshotScene {
     let backdrop: SnapshotBackdropAppearance
     let pill: Bool
     let track: NowPlayingInfo?
+    /// Now Playing работает: в панели кнопки и прогресс.
+    let nowPlaying: Bool
 
     init(
         name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor],
         backdrop: SnapshotBackdropAppearance = .dark, pill: Bool = false,
-        track: NowPlayingInfo? = SnapshotRenderer.track
+        track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true
     ) {
         self.name = name
         self.state = state
@@ -205,6 +299,7 @@ private struct SnapshotScene {
         self.backdrop = backdrop
         self.pill = pill
         self.track = track
+        self.nowPlaying = nowPlaying
     }
 }
 

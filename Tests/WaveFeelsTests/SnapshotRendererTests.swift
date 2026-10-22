@@ -8,6 +8,7 @@ struct SnapshotRendererTests {
     static let names = [
         "01-silent", "02-loud-beat", "03-loud-no-beat", "04-expanded", "05-expanded-paused",
         "06-long-title", "07-palette-warm", "08-palette-cold", "09-pill-external",
+        "10-expanded-no-artwork", "11-expanded-no-adapter", "12-pill-expanded",
     ]
 
     @Test func rendersAllSnapshotsWithVisibleWaves() throws {
@@ -40,6 +41,13 @@ struct SnapshotRendererTests {
         let silentCount = wings.map { silent.saturatedPixels(in: $0, scale: SnapshotRenderer.scale) }.reduce(0, +)
         #expect(loudCount > 100, "02-loud-beat: насыщенных пикселей в крыльях \(loudCount)")
         #expect(silentCount == 0, "01-silent: насыщенных пикселей в крыльях \(silentCount)")
+
+        // Раскрытая панель показывает обложку: середина обложки цветная, не черная.
+        let artwork = SnapshotRenderer.artworkSampleRect()
+        let expanded = try Bitmap(url: directory.appendingPathComponent("04-expanded.png"))
+        let artworkCount = expanded.saturatedPixels(in: artwork, scale: SnapshotRenderer.scale)
+        let artworkArea = Int(artwork.width * artwork.height * SnapshotRenderer.scale * SnapshotRenderer.scale)
+        #expect(artworkCount > artworkArea / 2, "04-expanded: цветных пикселей обложки \(artworkCount) из \(artworkArea)")
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
