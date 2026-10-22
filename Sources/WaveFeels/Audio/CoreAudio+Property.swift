@@ -165,6 +165,11 @@ nonisolated final class CAListenerToken: @unchecked Sendable {
         self.active = Mutex(isActive)
     }
 
+    /// Класс не привязан к актору, поэтому отписка в `deinit` безопасна.
+    deinit {
+        cancel()
+    }
+
     /// Снимает подписку. Повторный вызов ничего не делает.
     func cancel() {
         let wasActive = active.withLock { value -> Bool in

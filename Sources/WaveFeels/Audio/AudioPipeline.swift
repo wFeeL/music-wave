@@ -9,6 +9,8 @@ enum PipelineStatus: Equatable, Sendable {
     case capturing(TapStatus)
     case waitingForSource
     case rebuilding(attempt: Int)
+    /// Долгая тишина: IOProc и анализ остановлены, подписки работают.
+    case suspended
 }
 
 /// Выбор источника, сборка и пересборка захвата, сторож нулей.
@@ -34,6 +36,11 @@ final class AudioPipeline {
     /// Источник по Now Playing «играет». Выставляет `AppModel`.
     @ObservationIgnored var adapterSaysPlaying = false {
         didSet { if adapterSaysPlaying != oldValue { updateSourceOutputting() } }
+    }
+
+    /// Now Playing работает. Тогда «источник звучит» решает только он. Выставляет `AppModel`.
+    @ObservationIgnored var adapterAvailable = false {
+        didSet { if adapterAvailable != oldValue { updateSourceOutputting() } }
     }
 
     @ObservationIgnored var source: AudioSource = .systemWide {
@@ -74,7 +81,6 @@ final class AudioPipeline {
     @ObservationIgnored private var lastRebuildAt = -Double.infinity
     @ObservationIgnored private var rebuildTask: Task<Void, Never>?
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
-    @ObservationIgnored private var lastSystemOutputCheck = -Double.infinity
 
     init(store: FrameStore, processes: AudioProcessList, output: OutputDeviceMonitor) {
         self.processes = processes
@@ -149,7 +155,7 @@ final class AudioPipeline {
         rebuildTask = nil
         capture.stop()
         engine.stop()
-        status = .capturing(capture.status)
+        status = .suspended
         log("захват приостановлен в тишине")
     }
 
@@ -263,7 +269,7 @@ final class AudioPipeline {
     private func watchdogTick() {
         guard mode == .live, case .capturing(.running) = status else { return }
         let zeroRun = engine.zeroRunDuration
-        refreshOutputting(zeroRun: zeroRun)
+        refreshOutputting()
 
         // Ненулевой звук после пересборки: счетчик попыток сбрасывается.
         if zeroRun == 0, Self.now() - lastRebuildAt > 1 {
@@ -288,21 +294,10 @@ final class AudioPipeline {
         }
     }
 
-    /// Обновляет `isRunningOutput` совпавших процессов. Для всего звука системы опрашивает все
-    /// процессы, только когда окно уже давно нулевое, и не чаще раза в 2 с.
-    private func refreshOutputting(zeroRun: Double) {
-        if source == .systemWide {
-            guard zeroRun > Self.zeroRunLimit, Self.now() - lastSystemOutputCheck >= 2 else { return }
-            lastSystemOutputCheck = Self.now()
-            let ownPID = ProcessInfo.processInfo.processIdentifier
-            let objects: [AudioObjectID] = CAProperty.readArray(CAProperty.systemObject, kAudioHardwarePropertyProcessObjectList)
-            let outputting = objects.contains { object in
-                let pid: pid_t = CAProperty.read(object, kAudioProcessPropertyPID, default: -1)
-                let running: UInt32 = CAProperty.read(object, kAudioProcessPropertyIsRunningOutput, default: 0)
-                return pid != ownPID && running != 0
-            }
-            systemOutputting = outputting
-        } else {
+    /// Перечитывает `isRunningOutput` совпавших процессов, когда «звучит» решают они
+    /// (Now Playing недоступен и источник это приложение).
+    private func refreshOutputting() {
+        if !adapterAvailable, source != .systemWide {
             let refreshed = matchedProcesses.map { process -> AudioProcessInfo in
                 var copy = process
                 let running: UInt32 = CAProperty.read(process.objectID, kAudioProcessPropertyIsRunningOutput, default: 0)
@@ -314,18 +309,21 @@ final class AudioPipeline {
         updateSourceOutputting()
     }
 
-    @ObservationIgnored private var systemOutputting = false
-
     private func setMatched(_ processes: [AudioProcessInfo]) {
         if processes != matchedProcesses { matchedProcesses = processes }
         updateSourceOutputting()
     }
 
+    /// Сигнал для сторожа нулей. Если Now Playing работает, решает только он; без него для
+    /// приложения решает `IsRunningOutput` совпавших процессов, а для всего звука системы
+    /// сигнала нет (любой процесс со звуком дал бы ложные пересборки на каждой паузе).
     private func updateSourceOutputting() {
-        let processOutput = source == .systemWide
-            ? systemOutputting
-            : matchedProcesses.contains { $0.isRunningOutput }
-        let value = adapterSaysPlaying || processOutput
+        let value: Bool
+        if adapterAvailable || source == .systemWide {
+            value = adapterSaysPlaying
+        } else {
+            value = matchedProcesses.contains { $0.isRunningOutput }
+        }
         if value != sourceOutputting { sourceOutputting = value }
     }
 

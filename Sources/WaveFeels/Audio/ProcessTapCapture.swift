@@ -96,7 +96,8 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
             )
             aggregateID = newAggregate
 
-            let rate = try Self.inputSampleRate(aggregate: newAggregate, tapFormat: tapFormat)
+            let layout = Self.inputLayout(aggregate: newAggregate, tapFormat: tapFormat)
+            let rate = try Self.inputSampleRate(aggregate: newAggregate, layout: layout, tapFormat: tapFormat)
 
             var newProc: AudioDeviceIOProcID?
             try Self.check(
@@ -104,6 +105,11 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
                 "AudioDeviceCreateIOProcIDWithBlock"
             )
             procID = newProc
+            if let newProc {
+                Self.enableOnlyTapStreams(aggregate: newAggregate, procID: newProc, layout: layout)
+            }
+            // IOProc еще не запущен: смена номера первого буфера tap не гоняется с аудиопотоком.
+            mixer.setFirstTapBuffer(layout.firstTapStream)
             try Self.check(AudioDeviceStart(newAggregate, newProc), "AudioDeviceStart")
 
             let count = systemWide ? 0 : processObjectIDs.count
@@ -197,17 +203,106 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         return description
     }
 
-    /// Частота входа агрегата. Проверяет, что вход это Float32 (1 буфер с чередованием или
-    /// по буферу на канал), и сверяет его с форматом tap.
-    private static func inputSampleRate(aggregate: AudioObjectID, tapFormat: AudioStreamBasicDescription) throws -> Double {
+    /// Входные потоки агрегата: сначала входы подустройства (микрофон AirPods или гарнитуры),
+    /// за ними потоки tap. IOProc видит по буферу на каждый поток.
+    private struct InputLayout {
+        var streams: [AudioStreamID]
+        var channels: [Int]
+        var formats: [AudioStreamBasicDescription]
+        /// Индекс первого потока tap; потоки tap идут до конца списка.
+        var firstTapStream: Int
+
+        var tapStreams: Range<Int> { firstTapStream..<max(firstTapStream, streams.count) }
+    }
+
+    /// Находит потоки tap: они идут после входных потоков подустройств. Сверяет число их каналов
+    /// с форматом tap и пишет раскладку в лог (ее показывает диагностика).
+    private static func inputLayout(aggregate: AudioObjectID, tapFormat: AudioStreamBasicDescription) -> InputLayout {
         let streams: [AudioStreamID] = CAProperty.readArray(
             aggregate,
             kAudioDevicePropertyStreams,
             scope: kAudioDevicePropertyScopeInput
         )
+        let formats = streams.map { stream -> AudioStreamBasicDescription in
+            CAProperty.read(stream, kAudioStreamPropertyVirtualFormat, default: AudioStreamBasicDescription())
+        }
+        let channels = formats.map { Int($0.mChannelsPerFrame) }
+
+        let subDevices: [AudioObjectID] = CAProperty.readArray(aggregate, kAudioAggregateDevicePropertyActiveSubDeviceList)
+        var subDeviceInputs = 0
+        for device in subDevices {
+            let inputs: [AudioStreamID] = CAProperty.readArray(
+                device,
+                kAudioDevicePropertyStreams,
+                scope: kAudioDevicePropertyScopeInput
+            )
+            subDeviceInputs += inputs.count
+        }
+
+        var first = subDeviceInputs
+        if first >= streams.count {
+            log("входных потоков агрегата \(streams.count), у подустройств \(subDeviceInputs): беру последний поток как tap")
+            first = max(streams.count - 1, 0)
+        }
+        let tapChannels = Int(tapFormat.mChannelsPerFrame)
+        let foundChannels = first < channels.count ? channels[first...].reduce(0, +) : 0
+        if tapChannels > 0, foundChannels != tapChannels {
+            log("каналов в потоках tap \(foundChannels), в формате tap \(tapChannels)")
+        }
+
+        let perStream = channels.enumerated()
+            .map { index, count in "#\(index): \(count) кан.\(index >= first ? " tap" : "")" }
+            .joined(separator: ", ")
+        log("входных потоков агрегата \(streams.count) (у подустройств \(subDeviceInputs)): \(perStream)")
+        return InputLayout(streams: streams, channels: channels, formats: formats, firstTapStream: first)
+    }
+
+    /// Включает для IOProc только потоки tap (`kAudioDevicePropertyIOProcStreamUsage`), чтобы
+    /// микрофон подустройства не работал и Bluetooth-гарнитура не переходила в профиль звонка.
+    /// Ошибка только пишется в лог: tap работает и без этого, `MonoMixer` все равно берет
+    /// только буферы tap.
+    private static func enableOnlyTapStreams(aggregate: AudioObjectID, procID: AudioDeviceIOProcID, layout: InputLayout) {
+        let count = layout.streams.count
+        guard count > 0 else { return }
+
+        // Структура переменной длины: `mStreamIsOn` это первый элемент массива из `count` значений.
+        typealias Usage = AudioHardwareIOProcStreamUsage
+        let procOffset = MemoryLayout<Usage>.offset(of: \Usage.mIOProc) ?? 0
+        let countOffset = MemoryLayout<Usage>.offset(of: \Usage.mNumberStreams) ?? MemoryLayout<UnsafeMutableRawPointer>.size
+        let flagsOffset = MemoryLayout<Usage>.offset(of: \Usage.mStreamIsOn) ?? countOffset + MemoryLayout<UInt32>.size
+        let byteCount = max(
+            MemoryLayout<Usage>.size + (count - 1) * MemoryLayout<UInt32>.size,
+            flagsOffset + count * MemoryLayout<UInt32>.size
+        )
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: MemoryLayout<Usage>.alignment)
+        defer { raw.deallocate() }
+        _ = raw.initializeMemory(as: UInt8.self, repeating: 0, count: byteCount)
+        raw.storeBytes(of: procID, toByteOffset: procOffset, as: AudioDeviceIOProcID.self)
+        raw.storeBytes(of: UInt32(count), toByteOffset: countOffset, as: UInt32.self)
+        let tapStreams = layout.tapStreams
+        for index in 0..<count {
+            let isOn: UInt32 = tapStreams.contains(index) ? 1 : 0
+            raw.storeBytes(of: isOn, toByteOffset: flagsOffset + index * MemoryLayout<UInt32>.size, as: UInt32.self)
+        }
+
+        var address = CAProperty.makeAddress(kAudioDevicePropertyIOProcStreamUsage, scope: kAudioDevicePropertyScopeInput)
+        let status = AudioObjectSetPropertyData(aggregate, &address, 0, nil, UInt32(byteCount), raw)
+        if status == noErr {
+            log("IOProc получает только потоки tap: \(tapStreams.map { "#\($0)" }.joined(separator: ", ")) из \(count)")
+        } else {
+            log("kAudioDevicePropertyIOProcStreamUsage не применен: \(CAProperty.describe(status)), микрофон подустройства может работать")
+        }
+    }
+
+    /// Частота входа агрегата. Проверяет, что поток tap это Float32, и сверяет его с форматом tap.
+    private static func inputSampleRate(
+        aggregate: AudioObjectID,
+        layout: InputLayout,
+        tapFormat: AudioStreamBasicDescription
+    ) throws -> Double {
         var streamFormat = AudioStreamBasicDescription()
-        if let stream = streams.first {
-            streamFormat = CAProperty.read(stream, kAudioStreamPropertyVirtualFormat, default: AudioStreamBasicDescription())
+        if layout.firstTapStream < layout.formats.count {
+            streamFormat = layout.formats[layout.firstTapStream]
         }
         let nominal: Float64 = CAProperty.read(aggregate, kAudioDevicePropertyNominalSampleRate, default: 0)
 
@@ -267,6 +362,8 @@ nonisolated final class MonoMixer: @unchecked Sendable {
 
     private let ring: SampleRingBuffer
     private let scratch: UnsafeMutablePointer<Float>
+    /// Индекс первого буфера tap во входе агрегата; буферы до него принадлежат подустройству.
+    private let firstTapBuffer = Atomic<Int>(0)
 
     init(ring: SampleRingBuffer) {
         self.ring = ring
@@ -278,12 +375,21 @@ nonisolated final class MonoMixer: @unchecked Sendable {
         scratch.deallocate()
     }
 
+    /// Вызывать, пока IOProc не запущен.
+    func setFirstTapBuffer(_ index: Int) {
+        firstTapBuffer.store(max(0, index), ordering: .releasing)
+    }
+
     /// Чередующиеся каналы (1 буфер, N каналов) и раздельные (N буферов по 1 каналу) Float32.
+    /// Сводятся только буферы tap, начиная с `firstTapBuffer`; выключенные потоки приходят с `mData == nil`.
     func process(_ input: UnsafePointer<AudioBufferList>) {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+        let first = firstTapBuffer.load(ordering: .acquiring)
+        guard first < buffers.count else { return }
         var frames = Self.maxFrames
         var channels = 0
-        for buffer in buffers {
+        for index in first..<buffers.count {
+            let buffer = buffers[index]
             let count = Int(buffer.mNumberChannels)
             guard count > 0, buffer.mData != nil else { continue }
             frames = min(frames, Int(buffer.mDataByteSize) / (count * MemoryLayout<Float>.size))
@@ -293,7 +399,8 @@ nonisolated final class MonoMixer: @unchecked Sendable {
 
         let out = scratch
         out.update(repeating: 0, count: frames)
-        for buffer in buffers {
+        for index in first..<buffers.count {
+            let buffer = buffers[index]
             let count = Int(buffer.mNumberChannels)
             guard count > 0, let data = buffer.mData else { continue }
             let samples = data.assumingMemoryBound(to: Float.self)
