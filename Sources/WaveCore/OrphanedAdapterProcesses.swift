@@ -23,6 +23,17 @@ public enum OrphanedAdapterProcesses {
         return result
     }
 
+    /// Перед SIGTERM: строка `ps -o ppid=,command= -p <pid>` все еще про процесс адаптера без
+    /// родителя (родитель launchd, скрипт этого бандла отдельным словом). Между двумя вызовами
+    /// `ps` процесс мог выйти, а его pid достаться другому; пустая строка значит, что процесса нет.
+    public static func stillOrphan(psLine: String, scriptPath: String) -> Bool {
+        guard !scriptPath.isEmpty else { return false }
+        let fields = psLine.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard fields.count == 2, let parent = Int32(fields[0]), parent == 1 else { return false }
+        let command = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return mentions(command, path: scriptPath)
+    }
+
     /// `path` есть в `command` и за ним конец строки или пробел.
     private static func mentions(_ command: String, path: String) -> Bool {
         var rest = command[...]

@@ -224,35 +224,48 @@ final class MediaRemoteAdapter {
 
     /// Вне главного потока: SIGTERM процессам адаптера этого бандла, которые остались от
     /// прошлого запуска (родитель launchd). Свои дочерние процессы не задеваются: их родитель
-    /// это приложение. Сколько нашлось, пишется в лог.
+    /// это приложение. Перед сигналом каждый pid проверяется заново (`ps -p`): процесс мог выйти,
+    /// а его pid достаться другому. Сколько нашлось, пишется в лог.
     nonisolated static func terminateOrphans(scriptPath: String) {
         DispatchQueue.global(qos: .utility).async {
-            let ps = Process()
-            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-            ps.arguments = ["-axww", "-o", "pid=,ppid=,command="]
-            let pipe = Pipe()
-            ps.standardOutput = pipe
-            ps.standardError = FileHandle.nullDevice
-            ps.standardInput = FileHandle.nullDevice
+            let listing: String
             do {
-                try ps.run()
+                listing = try runPS(["-axww", "-o", "pid=,ppid=,command="])
             } catch {
                 logFromAnyThread("процессы адаптера от прошлого запуска не проверены: \(error.localizedDescription)")
                 return
             }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            ps.waitUntilExit()
             let pids = OrphanedAdapterProcesses.pids(
-                psOutput: String(decoding: data, as: UTF8.self),
+                psOutput: listing,
                 scriptPath: scriptPath,
                 excluding: getpid()
             )
+            var terminated: [Int32] = []
             for pid in pids {
+                guard let line = try? runPS(["-ww", "-o", "ppid=,command=", "-p", String(pid)]),
+                      OrphanedAdapterProcesses.stillOrphan(psLine: line, scriptPath: scriptPath)
+                else { continue }
                 kill(pid, SIGTERM)
+                terminated.append(pid)
             }
             logFromAnyThread("процессов адаптера от прошлого запуска: \(pids.count)"
-                + (pids.isEmpty ? "" : ", завершены (SIGTERM): \(pids.map { String($0) }.joined(separator: ", "))"))
+                + (terminated.isEmpty ? "" : ", завершены (SIGTERM): \(terminated.map { String($0) }.joined(separator: ", "))"))
         }
+    }
+
+    /// Вывод `/bin/ps` с аргументами `arguments`; ждет выхода `ps`.
+    nonisolated private static func runPS(_ arguments: [String]) throws -> String {
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = arguments
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        ps.standardError = FileHandle.nullDevice
+        ps.standardInput = FileHandle.nullDevice
+        try ps.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
     }
 
     nonisolated private static func logFromAnyThread(_ message: String) {
