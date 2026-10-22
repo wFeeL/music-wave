@@ -8,17 +8,19 @@ import WaveCore
 /// их в пределах и заменяет не конечные.
 struct AppearanceSettingsView: View {
     let model: AppModel
+    /// Игрок предпросмотра; живет в `SettingsView`, а не создается на каждом пересчете вкладки.
+    let player: PreviewPlayer
     /// Предпросмотр идет (`PreviewPlayer.isActive`).
     let active: Bool
     /// Снимки: экран острова задан, а не берется с текущих экранов.
     let fixedScreen: NotchLayout?
 
-    @State private var player = PreviewPlayer()
     /// Экран острова, как его видит `NotchWindowController`: по нему предел крыла.
     @State private var screen: NotchLayout?
 
-    init(model: AppModel, active: Bool, fixedScreen: NotchLayout? = nil) {
+    init(model: AppModel, player: PreviewPlayer, active: Bool, fixedScreen: NotchLayout? = nil) {
         self.model = model
+        self.player = player
         self.active = active
         self.fixedScreen = fixedScreen
         _screen = State(initialValue: fixedScreen)
@@ -57,15 +59,20 @@ struct AppearanceSettingsView: View {
         return screen.wingLimit
     }
 
+    /// Подпись под «Шириной крыльев», когда экран с вырезом не дает крылу `wing` pt и остров
+    /// рисует его по пределу `limit` (до целого pt вниз). Без выреза крыльев нет, подписи тоже.
+    static func wingCaption(wing: Double, limit: CGFloat?, hasNotch: Bool) -> String? {
+        guard hasNotch, let limit, limit.isFinite, CGFloat(wing) > limit else { return nil }
+        return "ограничено до \(Int(limit.rounded(.down))) pt"
+    }
+
     private var wingRow: some View {
         let settings = model.settings
-        var caption: String?
-        if let wingLimit, CGFloat(settings.wingWidth) > wingLimit {
-            caption = "ограничено до \(Int(wingLimit.rounded(.down))) pt"
-        }
         return SettingsSliderRow(
             "Ширина крыльев",
-            subtitle: caption,
+            subtitle: Self.wingCaption(
+                wing: settings.wingWidth, limit: screen?.wingLimit, hasNotch: screen?.hasNotch ?? false
+            ),
             value: Binding(get: { settings.wingWidth }, set: { settings.wingWidth = ($0 / 4).rounded() * 4 }),
             in: AppSettings.Limits.wingWidth,
             text: "\(Int(settings.wingWidth.rounded())) pt"

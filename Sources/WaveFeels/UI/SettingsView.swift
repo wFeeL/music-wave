@@ -40,6 +40,8 @@ struct SettingsView: View {
     private let fixedScreen: NotchLayout?
 
     @State private var tab: Tab
+    /// Игрок предпросмотра вкладки «Вид», один на окно.
+    @State private var player: PreviewPlayer
     @State private var catalog: SourceCatalog
     @State private var icons: AppIconCache
     @State private var autoLatency: Int
@@ -69,6 +71,7 @@ struct SettingsView: View {
         inApplications = login?.inApplications ?? LaunchAtLogin.isInApplications
         fixedScreen = screen
         _tab = State(initialValue: tab)
+        _player = State(initialValue: PreviewPlayer())
         _catalog = State(initialValue: catalog ?? SourceCatalog.current(model: model))
         _icons = State(initialValue: AppIconCache())
         _autoLatency = State(initialValue: Self.autoLatencyMilliseconds(model))
@@ -85,6 +88,7 @@ struct SettingsView: View {
             SwiftUI.Tab(value: Tab.appearance) {
                 AppearanceSettingsView(
                     model: model,
+                    player: player,
                     active: PreviewPlayer.isActive(
                         windowOpen: presence.isOpen, windowVisible: presence.isVisible, tab: tab
                     ),
