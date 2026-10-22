@@ -13,9 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// запуска модели.
     private var settingsRequested = false
     private var diagnosticsRequested = false
-    /// Сон и пробуждение (`NSWorkspace`) и блокировка экрана (`DistributedNotificationCenter`).
+    /// Сон и пробуждение (`NSWorkspace`). Блокировка экрана подписана через селекторы
+    /// (`subscribedToScreenLock`).
     private var workspaceObservers: [any NSObjectProtocol] = []
-    private var distributedObservers: [any NSObjectProtocol] = []
+    private var subscribedToScreenLock = false
 
     static let screenLockedNotification = Notification.Name("com.apple.screenIsLocked")
     static let screenUnlockedNotification = Notification.Name("com.apple.screenIsUnlocked")
@@ -84,33 +85,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Сон, пробуждение и блокировка экрана
 
     private func subscribeToSystemEvents() {
-        guard workspaceObservers.isEmpty, distributedObservers.isEmpty else { return }
-        let workspace = NSWorkspace.shared.notificationCenter
-        workspaceObservers = [
-            workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.model?.systemWillSleep()
-                }
-            },
-            workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.model?.systemDidWake()
-                }
-            },
-        ]
-        let distributed = DistributedNotificationCenter.default()
-        distributedObservers = [
-            distributed.addObserver(forName: Self.screenLockedNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.model?.screenLockChanged(true)
-                }
-            },
-            distributed.addObserver(forName: Self.screenUnlockedNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.model?.screenLockChanged(false)
-                }
-            },
-        ]
+        if workspaceObservers.isEmpty {
+            let workspace = NSWorkspace.shared.notificationCenter
+            workspaceObservers = [
+                workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.model?.systemWillSleep()
+                    }
+                },
+                workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.model?.systemDidWake()
+                    }
+                },
+            ]
+        }
+        if !subscribedToScreenLock {
+            subscribedToScreenLock = true
+            // `.deliverImmediately`: иначе, пока приложение неактивно (а после закрытия настроек
+            // оно неактивно почти всегда), распределенные уведомления копятся и
+            // `screenLocked` может застрять.
+            let distributed = DistributedNotificationCenter.default()
+            distributed.addObserver(
+                self,
+                selector: #selector(screenDidLock(_:)),
+                name: Self.screenLockedNotification,
+                object: nil,
+                suspensionBehavior: .deliverImmediately
+            )
+            distributed.addObserver(
+                self,
+                selector: #selector(screenDidUnlock(_:)),
+                name: Self.screenUnlockedNotification,
+                object: nil,
+                suspensionBehavior: .deliverImmediately
+            )
+        }
     }
 
     private func unsubscribeFromSystemEvents() {
@@ -119,28 +129,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workspace.removeObserver(observer)
         }
         workspaceObservers = []
-        let distributed = DistributedNotificationCenter.default()
-        for observer in distributedObservers {
-            distributed.removeObserver(observer)
-        }
-        distributedObservers = []
-    }
-
-    func showSettings() {
-        if let windows {
-            windows.showSettings()
-        } else {
-            settingsRequested = true
-            Log.file("настройки откроются после запуска модели")
+        if subscribedToScreenLock {
+            subscribedToScreenLock = false
+            let distributed = DistributedNotificationCenter.default()
+            distributed.removeObserver(self, name: Self.screenLockedNotification, object: nil)
+            distributed.removeObserver(self, name: Self.screenUnlockedNotification, object: nil)
         }
     }
 
-    func showDiagnostics() {
-        if let windows {
-            windows.showDiagnostics()
-        } else {
-            diagnosticsRequested = true
-            Log.file("диагностика откроется после запуска модели")
+    /// Уведомления приходят через Objective-C: метод не привязан к актору и передает событие
+    /// на главную очередь в порядке прихода.
+    @objc nonisolated private func screenDidLock(_ notification: Notification) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                self.model?.screenLockChanged(true)
+            }
+        }
+    }
+
+    @objc nonisolated private func screenDidUnlock(_ notification: Notification) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                self.model?.screenLockChanged(false)
+            }
         }
     }
 

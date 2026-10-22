@@ -13,6 +13,9 @@ enum TapStatus: Equatable, Sendable {
 struct TapError: Error, CustomStringConvertible, Sendable {
     let message: String
     var description: String { message }
+
+    /// Запуск пропущен: за ним в очереди уже стоял более новый запуск или остановка.
+    static let superseded = TapError(message: "запуск пропущен: есть более новый")
 }
 
 /// Захват звука процессов через Core Audio process tap и приватное агрегатное устройство.
@@ -32,6 +35,9 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
     private let controlQueue = DispatchQueue(label: "com.wfeels.wavefeels.tap-control")
     private let ioQueue = DispatchQueue(label: "com.wfeels.wavefeels.tap-io", qos: .userInteractive)
     private let published = Mutex(Published(status: .idle, sampleRate: 0))
+    /// Номер последнего вызова `start`, `stop` или `stopInBackground`. Запуск, за которым в
+    /// очереди уже стоит более новый вызов, пропускается: его tap все равно сразу удалили бы.
+    private let latestRequest = Atomic<Int>(0)
 
     // Только на controlQueue.
     private var tapID: AudioObjectID = kAudioObjectUnknown
@@ -53,23 +59,33 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
     /// Пересоздает tap и агрегат на очереди управления: сначала удаляет прежние, затем обнуляет
     /// кольцо и создает новые. Вызывающий должен остановить читателя кольца (анализ) до вызова
     /// и не запускать его до `completion`. `completion` приходит на очереди управления: частота
-    /// входа или ошибка; при ошибке все созданное удалено, статус `failed`.
+    /// входа или ошибка; при ошибке все созданное удалено, статус `failed`. Второй аргумент:
+    /// ошибка удаления прежнего tap или остатков неудачного запуска, если она была.
+    /// Запуск, который успел устареть до начала, не выполняется и завершается ошибкой
+    /// `TapError.superseded`.
     func start(
         processObjectIDs: [AudioObjectID],
         systemWide: Bool,
         outputDeviceUID: String,
-        completion: @escaping @Sendable (Result<Double, TapError>) -> Void
+        completion: @escaping @Sendable (Result<Double, TapError>, String?) -> Void
     ) {
+        let ticket = nextRequest()
         controlQueue.async {
+            guard self.latestRequest.load(ordering: .acquiring) == ticket else {
+                completion(.failure(.superseded), nil)
+                return
+            }
+            var teardownError: String?
             do {
                 let rate = try self.startOnControlQueue(
                     processObjectIDs: processObjectIDs,
                     systemWide: systemWide,
-                    outputDeviceUID: outputDeviceUID
+                    outputDeviceUID: outputDeviceUID,
+                    teardownError: &teardownError
                 )
-                completion(.success(rate))
+                completion(.success(rate), teardownError)
             } catch {
-                completion(.failure(error as? TapError ?? TapError(message: "\(error)")))
+                completion(.failure(error as? TapError ?? TapError(message: "\(error)")), teardownError)
             }
         }
     }
@@ -77,13 +93,15 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
     /// Останавливает IOProc, удаляет агрегат и tap и ждет этого. Возвращает текст первой ошибки.
     @discardableResult
     func stop() -> String? {
-        controlQueue.sync {
+        _ = nextRequest()
+        return controlQueue.sync {
             self.stopOnControlQueue()
         }
     }
 
     /// То же, что `stop()`, но без ожидания. `completion` на очереди управления.
     func stopInBackground(completion: @escaping @Sendable (String?) -> Void) {
+        _ = nextRequest()
         controlQueue.async {
             completion(self.stopOnControlQueue())
         }
@@ -99,6 +117,10 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         return done.wait(timeout: .now() + timeout) == .success
     }
 
+    private func nextRequest() -> Int {
+        latestRequest.wrappingAdd(1, ordering: .acquiringAndReleasing).newValue
+    }
+
     // MARK: - Очередь управления
 
     private func stopOnControlQueue() -> String? {
@@ -112,10 +134,16 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         return error
     }
 
-    private func startOnControlQueue(processObjectIDs: [AudioObjectID], systemWide: Bool, outputDeviceUID: String) throws -> Double {
+    private func startOnControlQueue(
+        processObjectIDs: [AudioObjectID],
+        systemWide: Bool,
+        outputDeviceUID: String,
+        teardownError: inout String?
+    ) throws -> Double {
         // Прежний агрегат удаляется до создания нового.
         if let error = teardown() {
             Self.log("остановка прошлого tap: \(error)")
+            teardownError = error
         }
         // Писатель остановлен, читатель остановлен вызывающим.
         ring.reset()
@@ -171,7 +199,10 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         } catch {
             let message = (error as? TapError)?.message ?? "\(error)"
             Self.log("tap не запущен: \(message)")
-            _ = teardown()
+            if let error = teardown(), teardownError == nil {
+                Self.log("удаление остатков tap: \(error)")
+                teardownError = error
+            }
             publish(.failed(message), sampleRate: 0)
             throw error
         }

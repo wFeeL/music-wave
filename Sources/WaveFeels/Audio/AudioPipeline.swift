@@ -136,6 +136,9 @@ final class AudioPipeline {
         output.onVolumeChange = { [weak self] in
             self?.volumeChanged()
         }
+        output.onServiceRestart = { [weak self] in
+            self?.serviceRestarted()
+        }
     }
 
     // MARK: - Управление
@@ -353,8 +356,11 @@ final class AudioPipeline {
             processObjectIDs: ids,
             systemWide: systemWide,
             outputDeviceUID: output.deviceUID
-        ) { @Sendable result in
+        ) { @Sendable result, teardownError in
             Task { @MainActor in
+                if let teardownError {
+                    self.noteCaptureError("остановка прошлого tap: \(teardownError)")
+                }
                 self.finishStart(result, generation: generation, reason: reason, attempt: attempt, summary: summary)
             }
         }
@@ -395,6 +401,18 @@ final class AudioPipeline {
                 self.performRebuild(reason: "повтор создания tap \(next)", attempt: next)
             }
         }
+    }
+
+    /// coreaudiod перезапущен: подписка на список процессов ставится заново (подписки
+    /// `OutputDeviceMonitor` он уже пересоздал), tap пересобирается.
+    private func serviceRestarted() {
+        guard mode == .live || mode == .suspended else { return }
+        log("coreaudiod перезапущен: подписки и tap пересоздаются")
+        processes.stop()
+        processes.start()
+        pushSettings()
+        processesChanged()
+        rebuild(reason: "перезапуск coreaudiod")
     }
 
     private func processesChanged() {

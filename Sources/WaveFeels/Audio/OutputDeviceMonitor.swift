@@ -20,8 +20,11 @@ final class OutputDeviceMonitor {
         isBluetooth: false
     )
 
-    /// Сменилось устройство по умолчанию, его частота или перезапустился coreaudiod.
+    /// Сменилось устройство по умолчанию или его частота.
     var onDeviceChange: (() -> Void)?
+    /// Перезапустился coreaudiod. Подписки монитора к этому моменту уже пересозданы; остальные
+    /// подписки на объекты Core Audio владелец должен пересоздать сам.
+    var onServiceRestart: (() -> Void)?
     /// Изменилась громкость или mute.
     var onVolumeChange: (() -> Void)?
 
@@ -44,7 +47,7 @@ final class OutputDeviceMonitor {
                 MainActor.assumeIsolated { self?.defaultDeviceChanged() }
             },
             CAProperty.listen(CAProperty.systemObject, kAudioHardwarePropertyServiceRestarted, queue: .main) { [weak self] in
-                MainActor.assumeIsolated { self?.defaultDeviceChanged() }
+                MainActor.assumeIsolated { self?.serviceRestarted() }
             },
         ]
     }
@@ -61,6 +64,25 @@ final class OutputDeviceMonitor {
         reloadDevice()
         subscribeToDevice()
         onDeviceChange?()
+    }
+
+    /// По заголовку `kAudioHardwarePropertyServiceRestarted` после перезапуска coreaudiod
+    /// подписки нужно установить заново. Подписку нельзя снимать внутри ее же обработчика,
+    /// поэтому пересоздание идет на следующем обороте главной очереди.
+    private func serviceRestarted() {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.resubscribeAfterRestart()
+            }
+        }
+    }
+
+    private func resubscribeAfterRestart() {
+        // Монитор остановили, пока ждали оборота очереди.
+        guard !systemTokens.isEmpty else { return }
+        stop()
+        start()
+        onServiceRestart?()
     }
 
     private func formatChanged() {
