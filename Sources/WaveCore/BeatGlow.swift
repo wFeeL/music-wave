@@ -61,8 +61,12 @@ public struct BeatSchedule: Sendable, Equatable {
 ///
 /// Изменяемый вариант помнит события по id. Событие, которое впервые видно уже после своего начала
 /// (не позже `lateLimit`), вспыхивает в полную яркость на этом кадре: вспышку, которая начинается уже
-/// спавшей, легко пропустить. Начавшееся событие держит свое начало, поэтому подстройка времени того же
-/// id не дает второй вспышки. Id, которых нет в расписании дольше `memory`, забываются.
+/// спавшей, легко пропустить. Событие, впервые видное позже `lateLimit`, не светится совсем.
+/// Начавшееся событие держит свое начало, поэтому подстройка времени того же id не дает второй
+/// вспышки. Id, которых нет в расписании дольше `memory`, забываются, поэтому один id не должен
+/// означать другое событие раньше чем через `memory` секунд.
+///
+/// Нечисловые время кадра, время или яркость события не светятся.
 public struct BeatGlow: Sendable {
     /// λ, на сколько вспышка опережает звук.
     public static let lead = 0.015
@@ -72,7 +76,7 @@ public struct BeatGlow: Sendable {
     public static let memory = 2.0
     /// Событие, впервые видное позже своего начала не больше чем на столько секунд, считается
     /// опоздавшим и вспыхивает полностью. Более старое уже прошлое (например, первое расписание после
-    /// появления рендера) и показывается по своей форме, почти погасшим.
+    /// появления рендера) и в изменяемом варианте не светится вовсе.
     public static let lateLimit = 0.2
     /// Допуск округления на границе атаки.
     private static let edgeTolerance = 1e-9
@@ -80,6 +84,8 @@ public struct BeatGlow: Sendable {
     private struct Record: Sendable {
         /// Время, от которого считается `a` у начавшегося события; `nil`, пока событие не началось.
         var origin: Double?
+        /// Впервые видно позже `lateLimit`: не светится.
+        var stale = false
         var lastSeen: Double
     }
 
@@ -92,15 +98,16 @@ public struct BeatGlow: Sendable {
 
     /// Постоянная спада: 30 % периода доли в пределах 80-180 мс, 120 мс без темпа.
     public static func decay(period: Double?) -> Double {
-        guard let period else { return 0.12 }
+        guard let period, period.isFinite else { return 0.12 }
         return min(max(0.3 * period, 0.08), 0.18)
     }
 
     /// Свечение без памяти: только расписание и время кадра.
     public static func value(at t: Double, schedule: BeatSchedule, refreshPeriod: Double) -> Float {
+        guard t.isFinite else { return 0 }
         let decay = decay(period: schedule.period)
         var glow: Float = 0
-        for event in schedule.events {
+        for event in schedule.events where isValid(event) {
             let a = t - scheduledOrigin(of: event, refreshPeriod: refreshPeriod)
             glow = max(glow, contribution(event.amplitude, a: a, decay: decay))
         }
@@ -109,21 +116,23 @@ public struct BeatGlow: Sendable {
 
     /// Свечение на кадре, показанном в момент `t`, с памятью о событиях прошлых кадров.
     public mutating func value(at t: Double, schedule: BeatSchedule, refreshPeriod: Double) -> Float {
+        guard t.isFinite else { return 0 }
         let decay = Self.decay(period: schedule.period)
         var glow: Float = 0
-        for event in schedule.events {
+        for event in schedule.events where Self.isValid(event) {
             let scheduled = Self.scheduledOrigin(of: event, refreshPeriod: refreshPeriod)
             let late = t - scheduled
             var record = records[event.id] ?? {
-                // Впервые видно: опоздавшее событие начинается с этого кадра.
+                // Впервые видно: опоздавшее событие начинается с этого кадра, слишком старое не светится.
                 let isLate = late > Self.edgeTolerance && late <= Self.lateLimit
-                return Record(origin: isLate ? t : nil, lastSeen: t)
+                return Record(origin: isLate ? t : nil, stale: late > Self.lateLimit, lastSeen: t)
             }()
             record.lastSeen = t
             if record.origin == nil, late >= -Self.edgeTolerance {
                 record.origin = scheduled
             }
             records[event.id] = record
+            guard !record.stale else { continue }
             let a = record.origin.map { t - $0 } ?? late
             glow = max(glow, Self.contribution(event.amplitude, a: a, decay: decay))
         }
@@ -143,9 +152,15 @@ public struct BeatGlow: Sendable {
         return result
     }
 
-    /// Момент, когда по расписанию `a = 0`: `event.time - lead - R / 2`.
+    /// Момент, когда по расписанию `a = 0`: `event.time - lead - R / 2`. Нечисловой или
+    /// отрицательный период обновления считается нулем.
     private static func scheduledOrigin(of event: GlowEvent, refreshPeriod: Double) -> Double {
-        event.time - lead - refreshPeriod / 2
+        let refresh = refreshPeriod.isFinite ? max(refreshPeriod, 0) : 0
+        return event.time - lead - refresh / 2
+    }
+
+    private static func isValid(_ event: GlowEvent) -> Bool {
+        event.time.isFinite && event.amplitude.isFinite
     }
 
     private static func contribution(_ amplitude: Float, a: Double, decay: Double) -> Float {

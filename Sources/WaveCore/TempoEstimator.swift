@@ -17,12 +17,14 @@ public struct TempoEstimate: Sendable, Equatable {
 ///
 /// `append` принимает функцию онсетов каждого шага анализа, `update` вызывается каждые
 /// `updateInterval` секунд времени потока и смотрит на последние `historySeconds`:
-/// 1. функция возводится в квадрат, прореживается вдвое (средние пар) и центрируется. Квадрат
-///    отдает автокорреляцию громким акцентам (бочка, малый), а не частым тихим (хэт): у
-///    широкополосной функции хэт восьмыми почти так же силен, как бочка с хэтом на доле, и без
-///    квадрата на 160 BPM выигрывал лаг в три восьмых (107 BPM), а на 90 BPM восьмые (180 BPM);
+/// 1. функция возводится в куб, прореживается вдвое (средние пар) и центрируется. Куб отдает
+///    автокорреляцию громким акцентам (бочка, малый), а не частым тихим (хэт): у широкополосной
+///    функции хэт восьмыми почти так же силен, как бочка с хэтом на доле, и без степени на 160 BPM
+///    выигрывал лаг в три восьмых (107 BPM), а на 90 BPM восьмые (180 BPM). Квадрата не хватало при
+///    неровной игре (165 и 170 BPM уходили в 3:2);
 /// 2. автокорреляция `acf[l]` нормирована на число пар `n - l`, чтобы длинные лаги (медленные темпы,
-///    старшие гармоники) не проигрывали коротким только из-за короткой истории;
+///    старшие гармоники) не проигрывали коротким только из-за короткой истории, и сглажена ядром
+///    [1, 2, 1] / 4;
 /// 3. для лагов τ темпов 70-180 BPM `S(τ) = Σ_{h=1..4} max(acf[hτ-1...hτ+1]) / √h` умножается на
 ///    лог-гауссов приоритет вокруг 120 BPM с σ = 0.9 октавы. τ перебирается с шагом в половину шага
 ///    истории: при целом τ четвертая гармоника уходит от настоящего пика на два шага, за окно ±1, и
@@ -31,7 +33,7 @@ public struct TempoEstimate: Sendable, Equatable {
 ///    растягивается на полный вес гребенки: иначе в первые секунды быстрый темп собирал бы больше
 ///    гармоник и выигрывал октавой;
 /// 4. лучший лаг уточняется параболой по трем соседним `S`;
-/// 5. шаг устойчивости `accept(period:)`.
+/// 5. шаг устойчивости `accept(period:)` с удержанием от кратных перебросов.
 ///
 /// Тишина или история без периодичности дают `nil`. Буферы выделены в `init`, `update` не выделяет.
 public struct TempoEstimator: Sendable {
@@ -42,6 +44,12 @@ public struct TempoEstimator: Sendable {
     public static let historySeconds = 6.0
     public static let updateInterval = 0.25
     public static let minimumHistory = 2.0
+    /// Сколько подряд согласных оценок нужно, чтобы сменить установившийся темп на кратный ему
+    /// (2, ½, 3/2, 2/3, 4/3, 3/4 в пределах 4 %). 8 и меньше пропускали переброс 170 и 85 BPM при
+    /// разбросе бочки 8 мс; 12 оценок это 3 с.
+    public static let relatedSwitchUpdates = 12
+    /// Через столько секунд потока после первой оценки темп считается установившимся.
+    public static let establishedAfter = 3.0
 
     /// Оценка в пределах этой доли от текущего периода подтягивает его на `followRate`.
     static let followTolerance = 0.06
@@ -49,6 +57,9 @@ public struct TempoEstimator: Sendable {
     /// Далекая оценка принимается, когда следующая совпадает с ней в пределах этой доли.
     static let switchTolerance = 0.03
     static let harmonics = 4
+    /// Кратные отношения, переход на которые сдерживается, и допуск к ним.
+    static let relatedRatios: [Double] = [2, 0.5, 1.5, 2.0 / 3, 4.0 / 3, 0.75]
+    static let relatedTolerance = 0.04
     /// Меньше стольких секунд пар гармоника не учитывается.
     static let minimumOverlapSeconds = 1.0
 
@@ -56,6 +67,11 @@ public struct TempoEstimator: Sendable {
     /// Текущий период доли в секундах, `nil` до первой оценки.
     public private(set) var period: Double?
     private var candidate: Double?
+    /// Сколько оценок подряд совпали с кандидатом, включая первую.
+    private var agreeingUpdates = 0
+    /// Шагов функции онсетов с `reset` и номер шага первой оценки.
+    private var framesAppended = 0
+    private var firstEstimateFrame: Int?
 
     /// Кольцо функции онсетов на `historySeconds`.
     private var history: [Float]
@@ -75,6 +91,8 @@ public struct TempoEstimator: Sendable {
 
     private var decimated: [Double]
     private var acf: [Double]
+    /// `acf`, сглаженная ядром [1, 2, 1] / 4.
+    private var smoothedACF: [Double]
     private var score: [Double]
 
     public init(framesPerSecond: Double) {
@@ -95,15 +113,17 @@ public struct TempoEstimator: Sendable {
         }
         combWeight = (1...Self.harmonics).reduce(0) { $0 + 1 / Double($1).squareRoot() }
         decimated = [Double](repeating: 0, count: capacity / 2)
-        acf = [Double](repeating: 0, count: Self.center(harmonic: Self.harmonics, halfLag: halfLagMax + 1) + 2)
+        acf = [Double](repeating: 0, count: Self.center(harmonic: Self.harmonics, halfLag: halfLagMax + 1) + 3)
+        smoothedACF = acf
         score = [Double](repeating: 0, count: halfLagMax + 2)
     }
 
     /// Функция онсетов очередного шага анализа.
     public mutating func append(_ odf: Float) {
-        history[writeIndex] = odf.isFinite ? odf : 0
+        history[writeIndex] = odf.isFinite ? max(odf, 0) : 0
         writeIndex = (writeIndex + 1) % history.count
         count = min(count + 1, history.count)
+        framesAppended += 1
     }
 
     /// Новая оценка по последним `historySeconds`; `nil`, пока истории меньше `minimumHistory` или в
@@ -117,25 +137,54 @@ public struct TempoEstimator: Sendable {
 
     /// Шаг устойчивости отдельно от оценки: близкое значение (до 6 %) подтягивает период на 20 %,
     /// далекое становится кандидатом и принимается, только если следующее совпадает с ним до 3 %.
+    /// Когда темп установился (`establishedAfter` секунд потока после первой оценки), кандидат в
+    /// кратном отношении к нему (`relatedRatios`) принимается только после `relatedSwitchUpdates`
+    /// согласных оценок подряд: переброс октавы или 3:2 сбрасывает захват трекера. Первые секунды
+    /// и некратные кандидаты (настоящая смена темпа) переключаются как раньше. Значение не больше нуля
+    /// или не конечное пропускается: возвращается текущий период (без него 0.5 с) без переключения.
     public mutating func accept(period estimate: Double) -> TempoEstimate {
+        guard estimate.isFinite, estimate > 0 else {
+            return TempoEstimate(period: period ?? 60 / Self.priorBPM, switched: false)
+        }
         guard let current = period else {
             period = estimate
             candidate = nil
+            agreeingUpdates = 0
+            firstEstimateFrame = framesAppended
             return TempoEstimate(period: estimate, switched: true)
         }
         if abs(estimate - current) / current < Self.followTolerance {
             let moved = current + Self.followRate * (estimate - current)
             period = moved
             candidate = nil
+            agreeingUpdates = 0
             return TempoEstimate(period: moved, switched: false)
         }
         if let candidate, abs(estimate - candidate) / candidate < Self.switchTolerance {
-            period = estimate
-            self.candidate = nil
-            return TempoEstimate(period: estimate, switched: true)
+            agreeingUpdates += 1
+            let needed = isEstablished && Self.isRelated(estimate, to: current) ? Self.relatedSwitchUpdates : 2
+            if agreeingUpdates >= needed {
+                period = estimate
+                self.candidate = nil
+                agreeingUpdates = 0
+                return TempoEstimate(period: estimate, switched: true)
+            }
+            self.candidate = estimate
+            return TempoEstimate(period: current, switched: false)
         }
         candidate = estimate
+        agreeingUpdates = 1
         return TempoEstimate(period: current, switched: false)
+    }
+
+    private var isEstablished: Bool {
+        guard let firstEstimateFrame else { return false }
+        return Double(framesAppended - firstEstimateFrame) / framesPerSecond >= Self.establishedAfter
+    }
+
+    private static func isRelated(_ estimate: Double, to current: Double) -> Bool {
+        let ratio = estimate / current
+        return relatedRatios.contains { abs(ratio / $0 - 1) < relatedTolerance }
     }
 
     /// Пауза, перемотка или смена источника: история и темп начинаются заново.
@@ -147,6 +196,9 @@ public struct TempoEstimator: Sendable {
         count = 0
         period = nil
         candidate = nil
+        agreeingUpdates = 0
+        framesAppended = 0
+        firstEstimateFrame = nil
     }
 
     /// Центр окна гармоники `h` лага `halfLag / 2`: `h · halfLag / 2`, половина вверх.
@@ -158,14 +210,14 @@ public struct TempoEstimator: Sendable {
     private mutating func bestHalfLag() -> Double? {
         let capacity = history.count
         let n = count / 2
-        // Пары от самого старого из последних 2n шагов, в квадрате; среднее вычитается.
+        // Пары от самого старого из последних 2n шагов, в кубе; среднее вычитается.
         var start = (writeIndex - 2 * n + capacity) % capacity
         var mean = 0.0
         for i in 0..<n {
             let next = (start + 1) % capacity
             let first = Double(history[start])
             let second = Double(history[next])
-            let value = 0.5 * (first * first + second * second)
+            let value = 0.5 * (first * first * first + second * second * second)
             decimated[i] = value
             mean += value
             start = (next + 1) % capacity
@@ -179,8 +231,11 @@ public struct TempoEstimator: Sendable {
         guard energy > 1e-9 * Double(max(n, 1)) else { return nil }
 
         // Автокорреляция на число пар; лаги, у которых меньше `minimumOverlap` пар, не считаются.
+        // Сглаживание [1, 2, 1] / 4 собирает пик, размазанный неровной игрой (σ 8 мс у бочки дает
+        // разброс разности двух ударов 11 мс, больше шага истории), иначе лаги бочки к бочке
+        // проигрывали лагам бочки к хэту, и 160 BPM уходил в 107.
         let maxLag = min(acf.count - 1, n - minimumOverlap)
-        guard maxLag >= Self.center(harmonic: 1, halfLag: halfLagMax + 1) + 1 else { return nil }
+        guard maxLag >= Self.center(harmonic: 1, halfLag: halfLagMax + 1) + 2 else { return nil }
         for l in 1...maxLag {
             var sum = 0.0
             for i in 0..<(n - l) {
@@ -188,6 +243,10 @@ public struct TempoEstimator: Sendable {
             }
             acf[l] = sum / Double(n - l)
         }
+        for l in 2..<maxLag {
+            smoothedACF[l] = 0.25 * (acf[l - 1] + 2 * acf[l] + acf[l + 1])
+        }
+        let combLag = maxLag - 1
 
         // Гребенка с приоритетом; соседи по краям диапазона нужны только параболе.
         for halfLag in (halfLagMin - 1)...(halfLagMax + 1) {
@@ -195,9 +254,9 @@ public struct TempoEstimator: Sendable {
             var weight = 0.0
             for h in 1...Self.harmonics {
                 let center = Self.center(harmonic: h, halfLag: halfLag)
-                guard center + 1 <= maxLag else { break }
+                guard center + 1 <= combLag else { break }
                 let w = 1 / Double(h).squareRoot()
-                sum += max(acf[center - 1], acf[center], acf[center + 1]) * w
+                sum += max(smoothedACF[center - 1], smoothedACF[center], smoothedACF[center + 1]) * w
                 weight += w
             }
             score[halfLag] = sum / weight * combWeight * prior[halfLag]

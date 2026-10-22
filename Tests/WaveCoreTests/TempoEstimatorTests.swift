@@ -34,6 +34,74 @@ struct TempoStickinessTests {
         #expect(tempo.accept(period: 0.75) == TempoEstimate(period: 0.5, switched: false))
     }
 
+    @Test func ignoresInvalidPeriods() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        for bad in [Double.nan, .infinity, -.infinity, 0, -0.5] {
+            #expect(!tempo.accept(period: bad).switched)
+            #expect(tempo.period == nil)
+        }
+        _ = tempo.accept(period: 0.5)
+        for bad in [Double.nan, .infinity, 0, -0.5] {
+            #expect(tempo.accept(period: bad) == TempoEstimate(period: 0.5, switched: false))
+        }
+        // Неверные значения не сбрасывают и не подтверждают кандидата.
+        _ = tempo.accept(period: 0.7)
+        _ = tempo.accept(period: .nan)
+        #expect(tempo.accept(period: 0.7) == TempoEstimate(period: 0.7, switched: true))
+    }
+
+    /// Секунды потока для шага устойчивости без самой оценки.
+    private static func advance(_ tempo: inout TempoEstimator, seconds: Double) {
+        for _ in 0..<Int(seconds * 187.5) {
+            tempo.append(0)
+        }
+    }
+
+    @Test func relatedRatioNeedsLongAgreementOnceEstablished() {
+        for ratio in [2.0, 0.5, 1.5, 2.0 / 3, 4.0 / 3, 0.75] {
+            var tempo = TempoEstimator(framesPerSecond: 187.5)
+            _ = tempo.accept(period: 0.5)
+            Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 0.1)
+            let related = 0.5 * ratio
+            for update in 1..<TempoEstimator.relatedSwitchUpdates {
+                #expect(tempo.accept(period: related) == TempoEstimate(period: 0.5, switched: false), "×\(ratio) #\(update)")
+            }
+            #expect(tempo.accept(period: related) == TempoEstimate(period: related, switched: true), "×\(ratio)")
+        }
+    }
+
+    @Test func relatedRatioSwitchesQuicklyAtFirst() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 0.333)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter - 0.5)
+        #expect(!tempo.accept(period: 0.666).switched)
+        #expect(tempo.accept(period: 0.666) == TempoEstimate(period: 0.666, switched: true))
+    }
+
+    @Test func unrelatedTempoSwitchesQuicklyLater() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 0.6)
+        Self.advance(&tempo, seconds: 10)
+        // 100 -> 140 BPM: отношение 1.4 не кратное.
+        #expect(!tempo.accept(period: 60.0 / 140).switched)
+        #expect(tempo.accept(period: 60.0 / 140) == TempoEstimate(period: 60.0 / 140, switched: true))
+    }
+
+    @Test func interruptedAgreementStartsOver() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 0.5)
+        Self.advance(&tempo, seconds: 4)
+        for _ in 1..<TempoEstimator.relatedSwitchUpdates {
+            _ = tempo.accept(period: 1.0)
+        }
+        // Оценка рядом с текущим периодом прерывает серию.
+        _ = tempo.accept(period: 0.5)
+        for _ in 1..<TempoEstimator.relatedSwitchUpdates {
+            #expect(!tempo.accept(period: 1.0).switched)
+        }
+        #expect(tempo.accept(period: 1.0).switched)
+    }
+
     /// Импульсы ровно на 120 BPM при 187.5 шагах в секунду (93.75 шага на долю).
     private static func impulses(seconds: Double, bpm: Double = 120) -> [Float] {
         let fps = 187.5
@@ -118,6 +186,77 @@ struct TempoEstimatorTests {
             let error = abs(estimate.period - period) / period
             #expect(error < tolerance, "t \(time): \(60 / estimate.period) BPM, want \(60 / period)")
             #expect(!estimate.switched, "switch at \(time) to \(60 / estimate.period) BPM")
+        }
+    }
+
+    struct SweepCase: Sendable, CustomTestStringConvertible {
+        var bpm: Double
+        var humanize: Double
+        var seed: UInt64
+
+        var testDescription: String {
+            "\(Int(bpm)) BPM, humanize \(Int(humanize * 1000)) ms, seed \(seed)"
+        }
+
+        /// 90...170 BPM через 5 ровно; 140...170 с разбросом бочки 8 мс на двух зернах.
+        static let all: [SweepCase] = {
+            var cases: [SweepCase] = []
+            for step in 0...16 {
+                cases.append(SweepCase(bpm: 90 + 5 * Double(step), humanize: 0, seed: 1))
+            }
+            for step in 0...6 {
+                for seed: UInt64 in [1, 2] {
+                    cases.append(SweepCase(bpm: 140 + 5 * Double(step), humanize: 0.008, seed: seed))
+                }
+            }
+            return cases
+        }()
+    }
+
+    /// Хэт восьмыми, 16 с, оценки с 4 с: каждая в пределах 4 % от темпа или его октавы (½× или 2×),
+    /// не больше одного переключения и никаких 3:2, 2:3, 4:3, 3:4. Каждое переключение сбрасывает
+    /// захват трекера, а кратные темпы ставят свечение не на доли.
+    @Test(arguments: SweepCase.all)
+    func tempoSweepIsStable(_ sweep: SweepCase) async {
+        let run = await runOffCooperativePool {
+            Self.run(
+                Drums.fourOnFloor(
+                    bpm: sweep.bpm, seconds: 16, hats: .eighths, humanizeSigma: sweep.humanize, seed: sweep.seed
+                ).samples
+            )
+        }
+        Self.checkStable(run, bpm: sweep.bpm)
+    }
+
+    /// Шум -20 dBFS под сценой -6 dB на 150 и 160 BPM: хэтов почти не видно, и у одной бочки октаву
+    /// выбирает приоритет. Октава допустима, переброс туда и обратно нет.
+    @Test(arguments: [150.0, 160])
+    func noisyTempoDoesNotFlip(bpm: Double) async {
+        let runs = await runOffCooperativePool { () -> [Run] in
+            [UInt64(3), 4, 5].map { seed in
+                let scene = Drums.fourOnFloor(bpm: bpm, seconds: 16, hats: .eighths, levelDB: -6)
+                let noise = Drums.pinkNoise(levelDB: -20, count: scene.samples.count, seed: seed)
+                return Self.run(zip(scene.samples, noise).map { $0 + $1 })
+            }
+        }
+        for run in runs {
+            Self.checkStable(run, bpm: bpm)
+        }
+    }
+
+    /// Оценки с 4 с: каждая в пределах 4 % от темпа или его октавы, не больше одного переключения.
+    private static func checkStable(_ run: Run, bpm: Double) {
+        let late = run.estimates.filter { $0.time >= 4 }
+        #expect(late.count >= 40)
+        let switches = late.filter(\.estimate.switched).map(\.time)
+        #expect(switches.count <= 1, "switches at \(switches)")
+        let octaves: [Double] = [1, 2, 0.5]
+        let related: [Double] = [1.5, 2.0 / 3, 4.0 / 3, 0.75]
+        for (time, estimate) in late {
+            let ratio: Double = 60 / estimate.period / bpm
+            let isOctave = octaves.contains { (multiple: Double) -> Bool in abs(ratio / multiple - 1) < 0.04 }
+            let isRelated = related.contains { (multiple: Double) -> Bool in abs(ratio / multiple - 1) < 0.04 }
+            #expect(isOctave && !isRelated, "t \(time): \(60 / estimate.period) BPM")
         }
     }
 

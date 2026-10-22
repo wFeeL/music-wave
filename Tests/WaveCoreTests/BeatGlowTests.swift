@@ -55,13 +55,35 @@ struct BeatGlowTests {
         #expect(BeatGlow.value(at: firstSeen, schedule: schedule, refreshPeriod: Self.refresh) < 0.8 * 0.85)
     }
 
-    @Test func staleEventDoesNotFlash() {
-        // Событие, впервые увиденное через 1 с после начала (новое состояние рендера при готовом
-        // расписании), не вспыхивает: это не опоздание, а прошлое.
+    /// Событие, впервые увиденное позже `lateLimit` после своего начала (например, первое расписание
+    /// после появления рендера), не светится вовсе: это не опоздание, а прошлое.
+    @Test(arguments: [0.25, 1.0])
+    func staleEventStaysDark(age: Double) {
         let schedule = Self.schedule([Self.event(id: 3, time: 10)])
+        let start = 10 - BeatGlow.lead - Self.refresh / 2
         var glow = BeatGlow()
-        let value = glow.value(at: 11, schedule: schedule, refreshPeriod: Self.refresh)
-        #expect(value < 0.01)
+        #expect(glow.value(at: start + age, schedule: schedule, refreshPeriod: Self.refresh) == 0)
+        #expect(glow.value(at: start + age + Self.refresh, schedule: schedule, refreshPeriod: Self.refresh) == 0)
+        // Опоздание внутри предела по-прежнему вспыхивает.
+        var fresh = BeatGlow()
+        let late = fresh.value(at: start + BeatGlow.lateLimit - 0.01, schedule: schedule, refreshPeriod: Self.refresh)
+        #expect(abs(late - 1) < 1e-6)
+    }
+
+    @Test func ignoresNonFiniteInput() {
+        let schedule = Self.schedule([
+            GlowEvent(id: 1, time: 10, amplitude: .nan, predicted: true),
+            GlowEvent(id: 2, time: .nan, amplitude: 1, predicted: true),
+            GlowEvent(id: 3, time: 10, amplitude: .infinity, predicted: true),
+            GlowEvent(id: 4, time: 10, amplitude: 0.5, predicted: true),
+        ])
+        let peak = 10 - BeatGlow.lead - Self.refresh / 2
+        var glow = BeatGlow()
+        #expect(BeatGlow.value(at: peak, schedule: schedule, refreshPeriod: Self.refresh) == 0.5)
+        #expect(glow.value(at: peak, schedule: schedule, refreshPeriod: Self.refresh) == 0.5)
+        #expect(BeatGlow.value(at: .nan, schedule: schedule, refreshPeriod: Self.refresh) == 0)
+        #expect(glow.value(at: .infinity, schedule: schedule, refreshPeriod: Self.refresh) == 0)
+        #expect(glow.value(at: peak + 0.001, schedule: schedule, refreshPeriod: Self.refresh) > 0.49)
     }
 
     /// Кадры через 1 мс: сдвиг приходит, когда вспышка горит меньше 3 мс, и без памяти она погасла
