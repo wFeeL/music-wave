@@ -99,7 +99,10 @@ struct AppModelRenderTests {
             "Темп", "Уверенность", "Захват ритма", "Задержка вывода", "Задержка показа",
             "Запаздывание онсета", "Сдвиг синхронизации",
         ])
-        #expect(empty.rows.map(\.value) == ["нет", "0.00", "нет", "0 мс", "33 мс", "7 мс", "0 мс"])
+        // Задержка вывода зависит от устройства машины (на CI 13 мс): ожидание считается так же.
+        let latency = LatencyCalculator.outputLatency(model.output.latency, mode: model.settings.latencyMode)
+        let output = "\(AppModel.milliseconds(latency)) мс"
+        #expect(empty.rows.map(\.value) == ["нет", "0.00", "нет", output, "33 мс", "7 мс", "0 мс"])
 
         model.store.publishSchedule(BeatSchedule(events: [], bpm: 123.6, period: 60 / 123.6, confidence: 0.817, locked: true))
         model.settings.syncOffsetMs = 15
