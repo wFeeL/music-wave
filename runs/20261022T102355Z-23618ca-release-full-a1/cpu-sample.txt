@@ -1,0 +1,40 @@
+# sample <pid> 3 of the play run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 8048) every 1 millisecond
+Process:         WaveFeels [8048]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x100cd8000
+Identifier:      com.wfeels.wavefeels
+Version:         0.9.0 (3)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [8008]
+Target Type:     live task
+
+Date/Time:       2026-10-22 10:22:52.924 +0000
+Launch Time:     2026-10-22 10:22:32.101 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         23.6M
+Physical footprint (peak):  24.0M
+Idle exit:                  untracked
+Samples per thread:
+    117 Thread_26852: Main Thread   DispatchQueue_<multiple>
+    117 Thread_26857
+    117 Thread_26858
+    117 Thread_26869: com.apple.NSEventThread
+    117 Thread_26872
+    117 Thread_26890: caulk.messenger.shared:17
+    117 Thread_26891: caulk.messenger.shared:high
+    117 Thread_26901: caulk::deferred_logger
+    115 Thread_26860
+    1 Thread_26860   DispatchQueue_446: CA DispatchGroup  (serial)
+    1 Thread_26860   DispatchQueue_406: com.wfeels.wavefeels.demo  (serial)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        456
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        351
+        mach_msg2_trap  (in libsystem_kernel.dylib)        211
+        start_wqthread  (in libsystem_pthread.dylib)        10
