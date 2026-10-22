@@ -30,6 +30,9 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// Тишина получается так же: после 6 с звук обнуляется, и волны затихают 2 с.
 /// Снимки 14-19 показывают вид волн из вкладки «Вид»: широкие крылья, готовые палитры, свой
 /// цвет, полную заливку (обычную и с толщиной и размахом), одну и шесть волн, свечение радиусом 3×.
+/// Снимки 21 показывают открытый баннер нового трека: у выреза темный и светлый, с длинным
+/// названием, без обложки, на капсуле и с крыльями 200 pt (свернутый остров 585 pt шире баннера
+/// 400 pt).
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
     /// Размер экрана снимка, pt: панель с крыльями 200 pt и свечением радиусом 3× целиком.
@@ -189,6 +192,19 @@ enum SnapshotRenderer {
         return (square(forwardX - 2 * pitch, 12), square(forwardX - pitch, 20))
     }
 
+    /// Название и исполнитель баннера на снимке (pt, начало сверху слева): левая часть полосы
+    /// текста под вырезом, высотой с нее.
+    @MainActor
+    static func bannerTextSampleRect(pill: Bool) -> CGRect {
+        let layout = pill ? pillLayout : notchLayout
+        let banner = layout.bannerIsland
+        let text = layout.bannerContent.text
+        return CGRect(
+            x: banner.minX + text.minX, y: screenSize.height - banner.maxY + text.minY,
+            width: min(text.width, 100), height: text.height
+        )
+    }
+
     /// Геометрия острова на экране с вырезом и левый верхний угол панели на снимке.
     @MainActor
     private static func expandedGeometry() -> (IslandGeometry, CGPoint) {
@@ -286,7 +302,28 @@ enum SnapshotRenderer {
                 nowPlaying: false
             ),
             SnapshotScene(name: "12-pill-expanded", state: .expanded, moment: loudBeat, palette: fromModel, pill: true),
-        ] + appearanceScenes
+        ] + appearanceScenes + [
+            SnapshotScene(name: "21-banner", state: .collapsed, moment: groove, palette: fromModel, banner: true),
+            SnapshotScene(
+                name: "21-banner-light", state: .collapsed, moment: groove, palette: fromModel, backdrop: .light,
+                banner: true
+            ),
+            SnapshotScene(
+                name: "21-banner-long-title", state: .collapsed, moment: groove, palette: fromModel,
+                track: longTitleTrack, banner: true
+            ),
+            SnapshotScene(
+                name: "21-banner-pill", state: .collapsed, moment: groove, palette: fromModel, pill: true, banner: true
+            ),
+            SnapshotScene(
+                name: "21-banner-no-artwork", state: .collapsed, moment: groove, palette: fromModel,
+                track: noArtwork, banner: true
+            ),
+            SnapshotScene(
+                name: "21-banner-wide-wings", state: .collapsed, moment: groove, palette: fromModel,
+                appearance: look { $0.wingWidth = 200 }, banner: true
+            ),
+        ]
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let names = scenes.map(\.name) + settingsScenes.map(\.name)
@@ -355,7 +392,8 @@ enum SnapshotRenderer {
             glow: moment.glow,
             pulse: moment.pulse,
             time: moment.time,
-            nowPlayingAvailable: scene.nowPlaying
+            nowPlayingAvailable: scene.nowPlaying,
+            showsBanner: scene.banner
         )
         // Рамка панели по крылу и радиусу свечения сцены, как у окна в работе.
         var sized = scene.pill ? pillLayout : notchLayout
@@ -513,12 +551,14 @@ private struct SnapshotScene {
     let nowPlaying: Bool
     /// Вид волн («Вид» в настройках).
     let appearance: WaveAppearance
+    /// Открыт баннер нового трека с `track`.
+    let banner: Bool
 
     init(
         name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor]?,
         backdrop: SnapshotBackdropAppearance = .dark, pill: Bool = false,
         track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true,
-        appearance: WaveAppearance = .standard
+        appearance: WaveAppearance = .standard, banner: Bool = false
     ) {
         self.name = name
         self.state = state
@@ -529,6 +569,7 @@ private struct SnapshotScene {
         self.track = track
         self.nowPlaying = nowPlaying
         self.appearance = appearance
+        self.banner = banner
     }
 }
 

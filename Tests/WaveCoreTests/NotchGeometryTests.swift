@@ -657,6 +657,45 @@ struct NotchGeometryTests {
                 var layout = try #require(NotchGeometry.layout(for: [screen]))
                 layout.wingWidth = wing
                 #expect(layout.panelFrame.contains(layout.bannerIsland), "\(screen.id), крыло \(wing)")
+                #expect(layout.panelFrame.contains(layout.bannerFrame), "\(screen.id), крыло \(wing)")
+            }
+        }
+    }
+
+    /// У выреза рамка формы баннера шире видимого тела на вогнутые плечи с каждой стороны,
+    /// тело остается 400 pt, содержимое в 16 pt от его краев. У капсулы плеч нет.
+    @Test func bannerFrameAddsShouldersAtNotchOnly() throws {
+        let shoulder = NotchGeometry.bannerShoulderRadius
+        #expect(shoulder == 9)
+        var tall = notched()
+        tall.safeAreaTop = 38
+        for screen in [notched(), tall, notched(left: 700, right: 600)] {
+            let layout = try #require(NotchGeometry.layout(for: [screen]))
+            let body = layout.bannerIsland
+            #expect(body.width == 400)
+            #expect(layout.bannerFrame == body.insetBy(dx: -shoulder, dy: 0))
+            let content = layout.bannerContent
+            #expect(content.artwork.minX == 16)
+            #expect(body.width - content.text.maxX == 16)
+            #expect(body.width - content.waves.maxX == 16)
+        }
+        let pill = try #require(NotchGeometry.layout(for: [external()]))
+        #expect(pill.bannerFrame == pill.bannerIsland)
+    }
+
+    /// Остров подавлен (пауза, блокировка, полноэкранное окно): баннер не расширяет зону
+    /// наведения, кликов и опроса нет.
+    @Test func suppressedIgnoresBannerZone() throws {
+        for screen in [notched(), external()] {
+            let layout = try #require(NotchGeometry.layout(for: [screen]))
+            let text = onScreen(layout.bannerContent.text, in: layout.bannerIsland)
+            let point = CGPoint(x: text.midX, y: text.midY)
+            for state in [IslandState.hidden, .collapsed, .expanded] {
+                let pointer = layout.pointer(at: point, state: state, suppressed: true, banner: true)
+                #expect(pointer == layout.pointer(at: point, state: state, suppressed: true), "\(state)")
+                #expect(!pointer.inHoverZone, "\(state)")
+                #expect(!pointer.acceptsClicks, "\(state)")
+                #expect(!pointer.needsPolling, "\(state)")
             }
         }
     }

@@ -121,6 +121,13 @@ public struct NotchLayout: Sendable, Equatable {
         )
     }
 
+    /// Рамка формы баннера: у выреза шире видимого тела `bannerIsland` на вогнутые плечи
+    /// `NotchGeometry.bannerShoulderRadius` с каждой стороны (как `expandedIsland`), поэтому тело
+    /// остается 400 pt, а содержимое в 16 pt от его краев. У капсулы плеч нет: `bannerIsland`.
+    public var bannerFrame: CGRect {
+        hasNotch ? bannerIsland.insetBy(dx: -NotchGeometry.bannerShoulderRadius, dy: 0) : bannerIsland
+    }
+
     /// Раскладка содержимого баннера в его локальных координатах: начало сверху слева
     /// `bannerIsland`, ось Y вниз. Обложка слева, текст под вырезом, волны в полосе справа от
     /// выреза. У капсулы те же прямоугольники, что у условного выреза 32 pt
@@ -152,11 +159,11 @@ public struct NotchLayout: Sendable, Equatable {
 
     /// Рамка панели: раскрытый и свернутый остров с текущим крылом плюс запас снизу под
     /// свечение текущего радиуса (`NotchGeometry.glowMargin(radius:)`) и по бокам под тень и
-    /// «вздох», по горизонтали не выходит за экран. Баннер в объединении для надежности: он
-    /// и так внутри раскрытого острова. Окно не больше, чем нужно сейчас: прозрачная
+    /// «вздох», по горизонтали не выходит за экран. Баннер (`bannerFrame`) в объединении для
+    /// надежности: он и так внутри раскрытого острова. Окно не больше, чем нужно сейчас: прозрачная
     /// площадь тоже стоит времени композитору. При настройках по умолчанию рамка та же, что в 0.9.0.
     public var panelFrame: CGRect {
-        let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth)).union(bannerIsland)
+        let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth)).union(bannerFrame)
         let glow = NotchGeometry.glowMargin(radius: glowRadius)
         let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
         let maxX = min(union.maxX + NotchGeometry.panelSideMargin, screenFrame.maxX)
@@ -259,6 +266,8 @@ public enum NotchGeometry {
     public static let bannerSize = CGSize(width: 400, height: 84)
     /// Радиус нижних углов баннера.
     public static let bannerBottomRadius: CGFloat = 22
+    /// Вогнутые плечи баннера у выреза, как у раскрытой панели (`NotchLayout.bannerFrame`).
+    public static let bannerShoulderRadius: CGFloat = expandedShoulderRadius
     /// Отступ содержимого баннера слева и справа.
     static let bannerInset: CGFloat = 16
     /// Сторона обложки в баннере.

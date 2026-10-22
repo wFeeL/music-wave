@@ -7,13 +7,16 @@ import WaveCore
 
 /// Форма острова в состоянии `state` на своем месте в координатах панели: у выреза
 /// `IslandShape`, у капсулы скругленный прямоугольник. Заливка из `foregroundStyle`. По ней
-/// рисуется тело острова и обрезаются волны и содержимое панели.
+/// рисуется тело острова и обрезаются волны и содержимое панели. `banner`: свернутый остров
+/// показывает баннер нового трека (`IslandGeometry.banner`, нижние углы 22 pt, у выреза плечи
+/// 9 pt, у капсулы плеч нет).
 struct IslandOutline: View {
     static let collapsedRadius: CGFloat = 10
     static let expandedRadius: CGFloat = 28
 
     let geometry: IslandGeometry
     let state: IslandState
+    var banner = false
 
     /// Радиус капсулы: свернутая скруглена на половину высоты.
     static func pillRadius(state: IslandState, rect: CGRect) -> CGFloat {
@@ -21,15 +24,21 @@ struct IslandOutline: View {
     }
 
     var body: some View {
-        let rect = geometry.island(for: state)
+        let form = banner && state == .collapsed
+        let rect = geometry.island(for: state, banner: banner)
         Group {
             if geometry.hasNotch {
                 IslandShape(
-                    bottomRadius: state == .expanded ? Self.expandedRadius : Self.collapsedRadius,
-                    shoulderRadius: IslandGeometry.shoulder(for: state)
+                    bottomRadius: form
+                        ? NotchGeometry.bannerBottomRadius
+                        : (state == .expanded ? Self.expandedRadius : Self.collapsedRadius),
+                    shoulderRadius: form ? NotchGeometry.bannerShoulderRadius : IslandGeometry.shoulder(for: state)
                 )
             } else {
-                RoundedRectangle(cornerRadius: Self.pillRadius(state: state, rect: rect), style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: form ? NotchGeometry.bannerBottomRadius : Self.pillRadius(state: state, rect: rect),
+                    style: .continuous
+                )
             }
         }
         .frame(width: rect.width, height: rect.height)
@@ -37,9 +46,9 @@ struct IslandOutline: View {
     }
 }
 
-/// Черное тело острова: форма, мягкая тень у раскрытой панели, тонкая обводка свернутой
-/// капсулы. От кадров не зависит: пересчитывается только при смене состояния или геометрии
-/// (`==`), а «вздох» снаружи масштабирует его готовым (`scaleEffect`).
+/// Черное тело острова: форма, мягкая тень у раскрытой панели и баннера, тонкая обводка
+/// свернутой капсулы. От кадров не зависит: пересчитывается только при смене состояния,
+/// баннера или геометрии (`==`), а «вздох» снаружи масштабирует его готовым (`scaleEffect`).
 struct IslandBodyView: View, Equatable {
     static let expandedShadowOpacity = 0.25
     static let expandedShadowRadius: CGFloat = 16
@@ -50,18 +59,21 @@ struct IslandBodyView: View, Equatable {
 
     let geometry: IslandGeometry
     let state: IslandState
+    /// Свернутый остров показывает баннер нового трека.
+    var banner = false
 
     nonisolated static func == (lhs: IslandBodyView, rhs: IslandBodyView) -> Bool {
-        lhs.geometry == rhs.geometry && lhs.state == rhs.state
+        lhs.geometry == rhs.geometry && lhs.state == rhs.state && lhs.banner == rhs.banner
     }
 
     var body: some View {
         let rect = geometry.island(for: state)
+        let panelLike = state == .expanded || (banner && state == .collapsed)
         ZStack(alignment: .topLeading) {
-            IslandOutline(geometry: geometry, state: state)
+            IslandOutline(geometry: geometry, state: state, banner: banner)
                 .foregroundStyle(Color.black)
                 .shadow(
-                    color: Color.black.opacity(state == .expanded ? Self.expandedShadowOpacity : 0),
+                    color: Color.black.opacity(panelLike ? Self.expandedShadowOpacity : 0),
                     radius: Self.expandedShadowRadius, x: 0, y: Self.expandedShadowOffset
                 )
             if !geometry.hasNotch {
@@ -69,7 +81,7 @@ struct IslandBodyView: View, Equatable {
                     .strokeBorder(Color.white.opacity(Self.pillStrokeOpacity), lineWidth: Self.pillStrokeWidth)
                     .frame(width: rect.width, height: rect.height)
                     .offset(x: rect.minX, y: rect.minY)
-                    .opacity(state == .expanded ? 0 : 1)
+                    .opacity(panelLike ? 0 : 1)
             }
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
@@ -87,6 +99,12 @@ struct IslandBodyView: View, Equatable {
 /// Число линий, заливка, толщина, размах и радиус свечения линий берутся из `appearance`.
 ///
 /// На паузе полоса панели сначала затихает в линию (около секунды), затем гаснет до 15 %.
+///
+/// Баннер нового трека: волны крыльев (линия капсулы) гаснут, справа от выреза идут волны
+/// баннера (`IslandGeometry.bannerWaves`) с профилем крыла, не зеркально; точки у них общие
+/// с крыльями. Оба слоя считаются, пока баннер открывается или закрывается (`wingLayer`,
+/// `bannerLayer`). Без «Уменьшения движения» все слои обрезаются текущей формой (она перетекает
+/// из свернутой в баннер), с ним у каждого слоя своя форма и меняется только прозрачность.
 struct IslandWavesView: View {
     /// Свечение линий: размытая копия основных волн, радиус размытия × «Радиус свечения».
     static let glowBlur: CGFloat = 2
@@ -112,21 +130,39 @@ struct IslandWavesView: View {
     let appearance: WaveAppearance
     /// Источник на паузе: полоса панели гаснет.
     let paused: Bool
+    /// Свернутый остров показывает баннер нового трека.
+    var banner = false
+    /// Волны баннера нужны на этом кадре: баннер открыт, открывается или закрывается.
+    var bannerLayer = false
+    /// Волны крыльев (линия капсулы) нужны на этом кадре: нет, пока баннер давно открыт.
+    var wingLayer = true
+    /// «Уменьшение движения»: каждый слой обрезается своей формой, без перетекания.
+    var reduceMotion = false
 
     var body: some View {
         // У капсулы свернутая линия и полоса панели одного стиля: точки общие.
         let collapsedStyle: WaveStyle = geometry.hasNotch ? .wing : .panel
-        let needsPanelSet = layers.panel || (layers.wing && collapsedStyle == .panel)
+        let wings = layers.wing && wingLayer
+        let needsPanelSet = layers.panel || (wings && collapsedStyle == .panel)
         let panelSet = needsPanelSet ? makeSet(.panel) : WaveSet(empty: .panel)
-        let collapsedSet = layers.wing
-            ? (collapsedStyle == .panel ? panelSet : makeSet(.wing))
+        let needsWingSet = (wings && collapsedStyle == .wing) || bannerLayer
+        let wingSet = needsWingSet ? makeSet(.wing) : WaveSet(empty: .wing)
+        let collapsedSet = wings
+            ? (collapsedStyle == .panel ? panelSet : wingSet)
             : WaveSet(empty: collapsedStyle)
         let shownPanelSet = layers.panel ? panelSet : WaveSet(empty: .panel)
+        let form = banner && state == .collapsed
+        // Форма, которой обрезаются волны крыльев и панели.
+        let mask = reduceMotion ? false : form
 
         ZStack(alignment: .topLeading) {
-            collapsedWaves(collapsedSet)
-                .opacity(state == .expanded ? 0 : 1)
-            waveLayer(shownPanelSet, rect: geometry.panelWaves, mirrored: false)
+            collapsedWaves(collapsedSet, maskBanner: mask)
+                .opacity(state == .expanded || form ? 0 : 1)
+            if bannerLayer {
+                waveLayer(wingSet, rect: geometry.bannerWaves, mirrored: false, maskBanner: reduceMotion || form)
+                    .opacity(form ? 1 : 0)
+            }
+            waveLayer(shownPanelSet, rect: geometry.panelWaves, mirrored: false, maskBanner: mask)
                 .opacity(paused ? Self.pausedWaveOpacity : 1)
                 .animation(
                     .easeInOut(duration: Self.pausedWaveFade).delay(paused ? Self.pausedWaveDelay : 0),
@@ -148,27 +184,30 @@ struct IslandWavesView: View {
     /// крыльях они стоят на своих местах, пока остров раскрывается или прячется, и
     /// открываются или закрываются краем формы.
     @ViewBuilder
-    private func collapsedWaves(_ waves: WaveSet) -> some View {
+    private func collapsedWaves(_ waves: WaveSet, maskBanner: Bool) -> some View {
         if geometry.hasNotch {
             ZStack(alignment: .topLeading) {
                 waveLayer(
-                    waves, rect: geometry.leftWing, mirrored: true,
+                    waves, rect: geometry.leftWing, mirrored: true, maskBanner: maskBanner,
                     accent: CGPoint(x: geometry.notch.minX - Self.accentSize / 2, y: geometry.leftWing.midY)
                 )
                 waveLayer(
-                    waves, rect: geometry.rightWing, mirrored: false,
+                    waves, rect: geometry.rightWing, mirrored: false, maskBanner: maskBanner,
                     accent: CGPoint(x: geometry.notch.maxX + Self.accentSize / 2, y: geometry.rightWing.midY)
                 )
             }
         } else {
-            waveLayer(waves, rect: geometry.pillWaves, mirrored: false)
+            waveLayer(waves, rect: geometry.pillWaves, mirrored: false, maskBanner: maskBanner)
         }
     }
 
     /// Волны в `rect` и их свечение (размытая копия толстых линий под ними), обе в режиме
     /// `.plusLighter`, плюс точка удара в `accent` (координаты панели). Все рисуется одной
-    /// текстурой размером `rect` плюс поле под свечение с каждой стороны и обрезается формой острова.
-    private func waveLayer(_ waves: WaveSet, rect: CGRect, mirrored: Bool, accent: CGPoint? = nil) -> some View {
+    /// текстурой размером `rect` плюс поле под свечение с каждой стороны и обрезается формой
+    /// острова (`maskBanner`: формой баннера, пока остров свернут).
+    private func waveLayer(
+        _ waves: WaveSet, rect: CGRect, mirrored: Bool, maskBanner: Bool, accent: CGPoint? = nil
+    ) -> some View {
         let radius = CGFloat(appearance.glowRadius)
         let margin = Self.glowMargin * max(radius, 1)
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
@@ -191,7 +230,7 @@ struct IslandWavesView: View {
         }
         .frame(width: rect.width + 2 * margin, height: rect.height + 2 * margin, alignment: .topLeading)
         .mask(alignment: .topLeading) {
-            IslandOutline(geometry: geometry, state: state)
+            IslandOutline(geometry: geometry, state: state, banner: maskBanner)
                 .offset(x: -origin.x, y: -origin.y)
         }
         .drawingGroup()
@@ -217,7 +256,7 @@ struct IslandWavesView: View {
 
 /// Мягкое свечение цвета `color`, поднятого до светлого и насыщенного, под нижним краем
 /// острова. Яркость по свечению доли `glow` с пиком 0.45 на темной строке меню и 0.25 на
-/// светлой при яркости по умолчанию, у раскрытой панели втрое слабее. Размытие и высота
+/// светлой при яркости по умолчанию, у раскрытой панели и баннера втрое слабее. Размытие и высота
 /// эллипса растут с «Радиусом свечения». Рисуется поверх строки меню само, вне текстур волн;
 /// когда его почти не видно (`isVisible`), его не строят.
 struct BeatGlowView: View {
@@ -246,6 +285,8 @@ struct BeatGlowView: View {
     /// «Радиус свечения» из настроек, множитель.
     let radius: Double
     let color: PaletteColor
+    /// Свернутый остров показывает баннер нового трека.
+    var banner = false
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -254,11 +295,12 @@ struct BeatGlowView: View {
     }
 
     var body: some View {
-        let rect = geometry.island(for: state)
+        let rect = geometry.island(for: state, banner: banner)
         let anchorY = geometry.notch.minY
         let peak = colorScheme == .dark ? Self.peakDark : Self.peakLight
         let relative = intensity / AppSettings.Default.glowIntensity
-        let expanded = state == .expanded ? Self.expandedFactor : 1
+        let panelLike = state == .expanded || (banner && state == .collapsed)
+        let expanded = panelLike ? Self.expandedFactor : 1
         let opacity = min(Double(glow) * peak * relative * expanded, 1)
         let width = rect.width * Self.widthFraction
         let height = Self.height * CGFloat(radius)

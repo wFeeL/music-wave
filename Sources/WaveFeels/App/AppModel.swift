@@ -19,6 +19,9 @@ typealias PaletteColor = WaveCore.RGBColor
 /// считается неработающим («тишина адаптера», `AdapterSilenceMonitor`). Сон останавливает захват
 /// и адаптер, пробуждение через 1 с запускает их заново (`systemWillSleep`, `systemDidWake`,
 /// подписки в `AppDelegate`).
+/// Баннер нового трека (`TrackBanner`) обновляется на каждом тике, при смене записи Now Playing
+/// и в срок `TrackBanner.deadline`; запуск и пробуждение начинают его заново, раскрытие острова
+/// его отменяет.
 /// Подписок и задач в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
 @Observable
@@ -117,8 +120,31 @@ final class AppModel {
     /// Обновление острова в срок `pointerDeadline`, чтобы раскрытие и сворачивание не ждали тика.
     @ObservationIgnored private var pointerTask: Task<Void, Never>?
     @ObservationIgnored private var pointerTaskDeadline: Double?
-    /// Вызывается, когда меняется `islandState`: окно у выреза пересчитывает клики и опрос курсора.
+    /// Вызывается, когда меняется `islandState` или `bannerVisible`: окно у выреза пересчитывает
+    /// зону наведения, клики и опрос курсора.
     @ObservationIgnored var onIslandStateChange: (@MainActor () -> Void)?
+    /// Фаза баннера нового трека.
+    private(set) var bannerPhase: TrackBannerPhase = .hidden
+    /// Трек источника, ключ которого показывает баннер: обложка, название, исполнитель. После
+    /// скрытия остается, пока баннер закрывается.
+    private(set) var bannerTrack: NowPlayingInfo?
+    /// Обложка `bannerTrack`, уже разобранная для панели (`artwork`), пока она относится к нему.
+    /// Без обложки баннер показывает значок источника.
+    private(set) var bannerArtwork: PanelArtwork?
+    /// Когда последний раз сменилось `bannerVisible`, секунды хоста (`CACurrentMediaTime()`):
+    /// волны крыльев и баннера сменяют друг друга, оба слоя считаются только в переходе.
+    @ObservationIgnored private(set) var bannerVisibleChangedAt = -Double.infinity
+    @ObservationIgnored private var bannerWasVisible = false
+    @ObservationIgnored private var banner = TrackBanner()
+    /// Обновление баннера в срок `TrackBanner.deadline`.
+    @ObservationIgnored private var bannerTask: Task<Void, Never>?
+    @ObservationIgnored private var bannerTaskDeadline: Double?
+    /// Последняя запись источника, переданная в `updateBanner`: из нее берется `bannerTrack`.
+    @ObservationIgnored private var bannerCandidate: NowPlayingInfo?
+    /// Номер подписки на запись Now Playing; `stop()` его меняет, старая подписка не продлевается.
+    @ObservationIgnored private var nowPlayingGeneration = 0
+    /// Тесты: запись Now Playing вместо `adapter.info` (адаптер в тестах не запущен).
+    @ObservationIgnored var nowPlayingStub: NowPlayingInfo?
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     @ObservationIgnored private var workspaceObservers: [any NSObjectProtocol] = []
     @ObservationIgnored private var appObservers: [any NSObjectProtocol] = []
@@ -216,6 +242,8 @@ final class AppModel {
         }
         startSources()
         checkAudioPermission()
+        // Первый трек после запуска становится базовым без баннера.
+        banner.reset()
 
         loopTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -224,6 +252,7 @@ final class AppModel {
                 try? await Task.sleep(for: Self.tickInterval)
             }
         }
+        observeNowPlaying(generation: nowPlayingGeneration)
     }
 
     /// Останавливает цикл, подписки, захват и процессы адаптера.
@@ -246,6 +275,10 @@ final class AppModel {
         pointerTask = nil
         pointerTaskDeadline = nil
         islandInputs = nil
+        nowPlayingGeneration += 1
+        bannerTask?.cancel()
+        bannerTask = nil
+        bannerTaskDeadline = nil
         scanTask?.cancel()
         scanTask = nil
         stopSources()
@@ -323,6 +356,10 @@ final class AppModel {
         sourceTrackSeen = false
         adapterSilence.reset()
         defaultSourceStale = true
+        // Первый трек после пробуждения становится базовым без баннера.
+        banner.reset()
+        applyBannerPhase(.hidden)
+        scheduleBannerDeadline(now: ProcessInfo.processInfo.systemUptime)
         applySettings()
         refreshSourceAppRunning()
         pipeline.restartAfterSleep()
@@ -571,7 +608,7 @@ final class AppModel {
         applySettings()
 
         let source = effectiveSource
-        let info = adapter.info
+        let info = nowPlayingStub ?? adapter.info
         let sourceInfo = info.flatMap { Self.belongs($0, to: source) ? $0 : nil }
         let sourcePlaying = sourceInfo?.isPlaying ?? false
         if sourceInfo != nil {
@@ -607,6 +644,7 @@ final class AppModel {
             userPaused: settings.paused || screenLocked
         )
         updateIsland(inputs, now: now)
+        updateBanner(now: now, sourceInfo: sourceInfo)
         updatePermissionHint()
         // Подсказка показана, а окна, которые опрашивают доступ каждую секунду, закрыты:
         // пользователь мог выдать доступ в Системных настройках, не возвращаясь в приложение.
@@ -640,8 +678,17 @@ final class AppModel {
             log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
             islandState = state
             islandStateChangedAt = CACurrentMediaTime()
+            if state == .expanded {
+                // Панель вместо баннера: сначала входы с открытой панелью (трек становится
+                // базовым, момент скрытия текущий), затем отмена.
+                updateBanner(now: now, sourceInfo: currentSourceInfo)
+                banner.cancel()
+                applyBannerPhase(.hidden)
+                scheduleBannerDeadline(now: now)
+            }
             onIslandStateChange?()
         }
+        refreshBannerVisibility()
         updateAnalysisRate()
         schedulePointerDeadline(now: now)
     }
@@ -668,6 +715,146 @@ final class AppModel {
             guard self.loopTask != nil, let inputs = self.islandInputs else { return }
             self.updateIsland(inputs, now: ProcessInfo.processInfo.systemUptime)
         }
+    }
+
+    // MARK: - Баннер нового трека
+
+    /// Идет показ баннера: `bannerPhase` `.showing`.
+    var bannerShown: Bool {
+        if case .showing = bannerPhase { return true }
+        return false
+    }
+
+    /// Баннер на экране: идет показ, а остров свернут (у скрытого и раскрытого острова баннера
+    /// нет). Остров рисуется баннером, и курсор над баннером раскрывает панель.
+    var bannerVisible: Bool {
+        bannerShown && islandState == .collapsed
+    }
+
+    /// Ключ трека для баннера: название, исполнитель и приложение.
+    nonisolated static func bannerKey(_ info: NowPlayingInfo) -> TrackKey {
+        TrackKey(title: info.title, artist: info.artist ?? "", source: info.bundleIdentifier)
+    }
+
+    /// Текущая запись Now Playing выбранного источника.
+    private var currentSourceInfo: NowPlayingInfo? {
+        let info = nowPlayingStub ?? adapter.info
+        return info.flatMap { Self.belongs($0, to: effectiveSource) ? $0 : nil }
+    }
+
+    /// Правила баннера на момент `now` (секунды `systemUptime`) с записью источника
+    /// `sourceInfo`; затем срок следующего обновления. Подавлен баннер там же, где остров
+    /// (пауза, блокировка, полноэкранное окно), а еще пока экраны или система спят.
+    func updateBanner(now: Double, sourceInfo: NowPlayingInfo?) {
+        let inputs = TrackBannerInputs(
+            enabled: settings.showTrackBanner,
+            track: sourceInfo.map(Self.bannerKey),
+            isPlaying: sourceInfo?.isPlaying ?? false,
+            panelOpen: islandState == .expanded,
+            suppressed: islandSuppressed || screensAsleep || asleep
+        )
+        if let sourceInfo {
+            bannerCandidate = sourceInfo
+        }
+        applyBannerPhase(banner.update(inputs, now: now))
+        scheduleBannerDeadline(now: now)
+    }
+
+    /// Новая фаза баннера и трек к ней. Трек берется из последней записи источника с тем же
+    /// ключом (так подтягиваются обложка и прочее, пришедшие позже названия); если такой нет,
+    /// остается прежний, а без него собирается из ключа.
+    private func applyBannerPhase(_ phase: TrackBannerPhase) {
+        if case .showing(let key, _) = phase {
+            let previousKey = bannerTrack.map(Self.bannerKey)
+            if let candidate = bannerCandidate, Self.bannerKey(candidate) == key {
+                if candidate != bannerTrack {
+                    bannerTrack = candidate
+                }
+            } else if previousKey != key {
+                bannerTrack = NowPlayingInfo(
+                    bundleIdentifier: key.source, title: key.title,
+                    artist: key.artist.isEmpty ? nil : key.artist, isPlaying: true
+                )
+            }
+            refreshBannerArtwork(keyChanged: previousKey != key)
+        }
+        if phase != bannerPhase {
+            if bannerPhase == .hidden || phase == .hidden {
+                log(phase == .hidden ? "баннер нового трека скрыт" : "баннер нового трека показан")
+            }
+            bannerPhase = phase
+        }
+        refreshBannerVisibility()
+    }
+
+    /// Обложка баннера: картинка панели, когда она получена из обложки `bannerTrack`. Пока
+    /// картинка от другого трека (смена ждет выдержки, обложка еще разбирается), остается
+    /// прежняя; у нового трека без готовой картинки обложки нет, виден значок источника.
+    private func refreshBannerArtwork(keyChanged: Bool) {
+        guard let bannerTrack else { return }
+        let data = Self.artworkSource(track: bannerTrack, nowPlayingAvailable: nowPlayingAvailable)
+        if data == shownArtworkData {
+            if bannerArtwork?.id != artwork?.id {
+                bannerArtwork = artwork
+            }
+        } else if keyChanged, bannerArtwork != nil {
+            bannerArtwork = nil
+        }
+    }
+
+    /// `bannerVisible` сменилось: запоминается момент для слоев волн, окно у выреза
+    /// пересчитывает зону наведения.
+    private func refreshBannerVisibility() {
+        let visible = bannerVisible
+        guard visible != bannerWasVisible else { return }
+        bannerWasVisible = visible
+        bannerVisibleChangedAt = CACurrentMediaTime()
+        onIslandStateChange?()
+    }
+
+    /// Ставит обновление баннера на срок `TrackBanner.deadline`, если он есть и еще не
+    /// поставлен. Своего таймера у баннера нет: одна задача на ближайшее событие.
+    private func scheduleBannerDeadline(now: Double) {
+        let deadline = banner.deadline
+        guard deadline != bannerTaskDeadline else { return }
+        bannerTask?.cancel()
+        bannerTask = nil
+        bannerTaskDeadline = deadline
+        guard let deadline, loopTask != nil else { return }
+        let wait = max(0, deadline - now)
+        bannerTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(wait))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.bannerTask = nil
+            self.bannerTaskDeadline = nil
+            guard self.loopTask != nil else { return }
+            self.updateBanner(now: ProcessInfo.processInfo.systemUptime, sourceInfo: self.currentSourceInfo)
+        }
+    }
+
+    /// Следит за записью Now Playing: смена трека или паузы доходит до баннера сразу, а не на
+    /// следующем тике. `onChange` приходит до записи нового значения, поэтому баннер
+    /// обновляется в следующем шаге главного актора; там же подписка продлевается.
+    private func observeNowPlaying(generation: Int) {
+        guard loopTask != nil, generation == nowPlayingGeneration else { return }
+        let adapter = self.adapter
+        withObservationTracking {
+            _ = adapter.info
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.nowPlayingChanged(generation: generation)
+            }
+        }
+    }
+
+    private func nowPlayingChanged(generation: Int) {
+        guard loopTask != nil, generation == nowPlayingGeneration else { return }
+        updateBanner(now: ProcessInfo.processInfo.systemUptime, sourceInfo: currentSourceInfo)
+        observeNowPlaying(generation: generation)
     }
 
     /// Настройки пользователя в `AudioPipeline`. Свойства конвейера сами отбрасывают
@@ -914,6 +1101,9 @@ final class AppModel {
         if let analysis, analysis.image == nil {
             log("обложка не прочиталась, палитра стандартная")
         }
+        if bannerShown {
+            refreshBannerArtwork(keyChanged: false)
+        }
     }
 
     // MARK: - Источник в панели
@@ -1074,7 +1264,8 @@ final class AppModel {
     /// Часы анимации встают на `time`, хранилище кадров держит `frame` в любой момент, пружины
     /// уровней стоят на его значениях, свечение доли `glow` и «вздох» `pulse` возвращаются как
     /// есть, поэтому кадр рисуется без шага анимации, без сглаживания и без перехода палитры
-    /// (`previewing`). Остров считается давно пришедшим в `state`.
+    /// (`previewing`). Остров считается давно пришедшим в `state`. `showsBanner`: баннер нового
+    /// трека с `track`, давно открытый, текст виден.
     /// Обложка трека разбирается здесь же, синхронно, тем же путем, что в работе; палитра
     /// берется из нее же или задается явно (`palette`).
     func showPreview(
@@ -1086,13 +1277,23 @@ final class AppModel {
         glow: Float,
         pulse: Float,
         time: Double,
-        nowPlayingAvailable: Bool = true
+        nowPlayingAvailable: Bool = true,
+        showsBanner: Bool = false
     ) {
         islandState = state
         islandStateChangedAt = -Double.infinity
         lastTrack = track
         previewNowPlaying = nowPlayingAvailable
         updateArtwork(immediately: true)
+        bannerCandidate = track
+        bannerTrack = nil
+        bannerArtwork = nil
+        if showsBanner, let track {
+            applyBannerPhase(.showing(Self.bannerKey(track), textVisible: true))
+        } else {
+            applyBannerPhase(.hidden)
+        }
+        bannerVisibleChangedAt = -Double.infinity
         if let palette {
             self.palette = palette
         }

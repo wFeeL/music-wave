@@ -56,6 +56,7 @@ struct AppSettingsTests {
             #expect(settings.beatPulse == true)
             #expect(settings.hideDelay == 5)
             #expect(settings.hideInFullscreen == true)
+            #expect(settings.showTrackBanner == true)
             #expect(settings.paused == false)
         }
     }
@@ -78,6 +79,7 @@ struct AppSettingsTests {
             written.beatPulse = false
             written.hideDelay = 12
             written.hideInFullscreen = false
+            written.showTrackBanner = false
             written.paused = true
 
             let read = AppSettings(defaults: defaults)
@@ -91,6 +93,7 @@ struct AppSettingsTests {
             #expect(read.beatPulse == false)
             #expect(read.hideDelay == 12)
             #expect(read.hideInFullscreen == false)
+            #expect(read.showTrackBanner == false)
             #expect(read.paused == true)
 
             read.source = .systemWide
@@ -114,12 +117,13 @@ struct AppSettingsTests {
             settings.followSystemVolume = false
             settings.beatPulse = false
             settings.hideInFullscreen = false
+            settings.showTrackBanner = false
             settings.paused = true
 
             for key in [
                 "wf.source", "wf.sensitivity", "wf.levelMode", "wf.followSystemVolume",
                 "wf.latencyMode", "wf.wingWidth", "wf.glowIntensity", "wf.beatPulse",
-                "wf.hideDelay", "wf.hideInFullscreen", "wf.paused",
+                "wf.hideDelay", "wf.hideInFullscreen", "wf.showTrackBanner", "wf.paused",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
             }

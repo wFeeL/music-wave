@@ -29,11 +29,27 @@ import WaveCore
 /// сцена клики пропускает). Оно обрезано той же формой острова, что и волны: пока панель
 /// раскрывается, содержимое открывается краем формы и проявляется с небольшой задержкой.
 ///
+/// Баннер нового трека (`AppModel.bannerVisible`): свернутый остров перетекает в укороченную
+/// панель 400×84 pt (`IslandGeometry.banner`) с обложкой и текстом (`TrackBannerView`, тоже вне
+/// сцены и под маской формы) и волнами справа от выреза; крылья гаснут, «вздоха» нет.
+/// Открывается пружиной 0.42 / 0.82, закрывается 0.45 / 1.0. Наведение на баннер раскрывает
+/// полную панель (`NotchWindowController`), ее пружина главнее.
+///
 /// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее, содержимое
-/// панели появляется и уходит одной прозрачностью.
+/// панели появляется и уходит одной прозрачностью. Баннер не перетекает из свернутого острова:
+/// тела, волны и содержимое меняются одной прозрачностью за 0.2 с.
 struct IslandView: View {
     static let expandAnimation = Animation.spring(response: 0.42, dampingFraction: 0.78)
     static let collapseAnimation = Animation.spring(response: 0.35, dampingFraction: 0.9)
+    static let bannerOpenAnimation = Animation.spring(response: 0.42, dampingFraction: 0.82)
+    static let bannerCloseAnimation = Animation.spring(response: 0.45, dampingFraction: 1.0)
+    static let bannerReducedAnimation = Animation.easeInOut(duration: 0.2)
+
+    /// Анимация смены `bannerVisible`.
+    static func bannerAnimation(visible: Bool, reduceMotion: Bool) -> Animation {
+        if reduceMotion { return bannerReducedAnimation }
+        return visible ? bannerOpenAnimation : bannerCloseAnimation
+    }
     /// «Вздох»: насколько остров увеличивается на полном ударе.
     static let breathDepth: CGFloat = 0.03
     /// Содержимое панели: появляется чуть позже формы, слегка вырастая от верха, исчезает быстро.
@@ -54,6 +70,7 @@ struct IslandView: View {
 
     var body: some View {
         let state = model.islandState
+        let bannerVisible = model.bannerVisible
         let panel = layout.panelFrame
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         ZStack(alignment: .topLeading) {
@@ -73,15 +90,52 @@ struct IslandView: View {
                 }
             }
             .allowsHitTesting(false)
+            bannerContent(state: state, geometry: geometry, visible: bannerVisible)
             panelContent(state: state, geometry: geometry)
         }
         .frame(width: panel.width, height: panel.height, alignment: .topLeading)
         .ignoresSafeArea()
         // Окно уже встало на новую рамку: сдвиг координат внутри нее не анимируется, иначе
-        // остров съехал бы и вернулся. Ближний к виду модификатор главнее внешних.
+        // остров съехал бы и вернулся. Ближний к виду модификатор главнее внешних: когда
+        // наведение превращает баннер в панель, работает пружина раскрытия.
         .animation(nil, value: panel)
         .animation(state == .expanded ? Self.expandAnimation : Self.collapseAnimation, value: state)
+        .animation(Self.bannerAnimation(visible: bannerVisible, reduceMotion: reduceMotion), value: bannerVisible)
         .animation(Self.collapseAnimation, value: layout.wingWidth)
+    }
+
+    // MARK: - Баннер
+
+    /// `TrackBannerView` на видимом теле баннера, под маской формы острова. Без «Уменьшения
+    /// движения» маска перетекает вместе с формой, с ним стоит формой баннера.
+    private func bannerContent(state: IslandState, geometry: IslandGeometry, visible: Bool) -> some View {
+        let rect = geometry.bannerBody
+        return ZStack(alignment: .topLeading) {
+            TrackBannerView(content: visible ? currentBanner() : nil, layout: geometry.bannerLayout)
+                .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+                .offset(x: rect.minX, y: rect.minY)
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+        .mask(alignment: .topLeading) {
+            IslandOutline(geometry: geometry, state: state, banner: reduceMotion || visible)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Что показывает баннер сейчас: трек `AppModel.bannerTrack` (без него ключ из фазы),
+    /// обложка или значок источника, виден ли текст.
+    private func currentBanner() -> TrackBannerContent? {
+        guard case .showing(let key, let textVisible) = model.bannerPhase else { return nil }
+        let track = model.bannerTrack
+        let artist = track?.artist ?? (key.artist.isEmpty ? nil : key.artist)
+        let artwork = model.bannerArtwork
+        return TrackBannerContent(
+            title: track?.title ?? key.title,
+            artist: artist.flatMap { $0.isEmpty ? nil : $0 },
+            artwork: artwork,
+            icon: artwork == nil ? model.sourceIcon() : nil,
+            textVisible: textVisible
+        )
     }
 
     // MARK: - Содержимое панели
@@ -117,7 +171,10 @@ struct IslandView: View {
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.
         let glow = reduceMotion ? 0 : model.settings.glowIntensity
         let appearance = model.settings.appearance
-        let breathes = state == .collapsed && model.settings.beatPulse && !reduceMotion
+        let bannerVisible = model.bannerVisible
+        // Баннер открылся или закрылся меньше `overlap` назад: живы и крылья, и волны баннера.
+        let bannerMoving = now - model.bannerVisibleChangedAt < IslandTransition.overlap
+        let breathes = state == .collapsed && !bannerVisible && model.settings.beatPulse && !reduceMotion
         let scale = breathes ? 1 + Self.breathDepth * CGFloat(visuals.pulse) : 1
         let anchor = geometry.anchor
         let layers = IslandTransition.waveLayers(state: state, sinceStateChange: now - model.islandStateChangedAt)
@@ -128,15 +185,30 @@ struct IslandView: View {
             if BeatGlowView.isVisible(glow: visuals.glow, intensity: glow) {
                 BeatGlowView(
                     geometry: geometry, state: state, scale: scale, glow: visuals.glow, intensity: glow,
-                    radius: appearance.glowRadius, color: visuals.palette.first ?? PaletteExtractor.fallback[0]
+                    radius: appearance.glowRadius, color: visuals.palette.first ?? PaletteExtractor.fallback[0],
+                    banner: bannerVisible
                 )
             }
             ZStack(alignment: .topLeading) {
-                IslandBodyView(geometry: geometry, state: state)
-                    .equatable()
+                if reduceMotion {
+                    // Без перетекания: тело баннера проявляется поверх свернутого и гаснет.
+                    IslandBodyView(geometry: geometry, state: state)
+                        .equatable()
+                        .opacity(bannerVisible ? 0 : 1)
+                    if bannerVisible || bannerMoving {
+                        IslandBodyView(geometry: geometry, state: state, banner: true)
+                            .equatable()
+                            .opacity(bannerVisible ? 1 : 0)
+                    }
+                } else {
+                    IslandBodyView(geometry: geometry, state: state, banner: bannerVisible)
+                        .equatable()
+                }
                 IslandWavesView(
                     visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow,
-                    appearance: appearance, paused: paused
+                    appearance: appearance, paused: paused, banner: bannerVisible,
+                    bannerLayer: bannerVisible || bannerMoving, wingLayer: !bannerVisible || bannerMoving,
+                    reduceMotion: reduceMotion
                 )
             }
             .scaleEffect(scale, anchor: UnitPoint(x: anchor.x / geometry.size.width, y: anchor.y / geometry.size.height))
@@ -176,6 +248,13 @@ struct IslandGeometry: Equatable, Sendable {
     let expanded: CGRect
     /// От верха раскрытого острова до содержимого (`NotchLayout.expandedContentTop`).
     let contentTop: CGFloat
+    /// Рамка формы баннера нового трека (`NotchLayout.bannerFrame`, у выреза с плечами).
+    let banner: CGRect
+    /// Видимое тело баннера 400 pt (`NotchLayout.bannerIsland`): от него отсчитывается
+    /// `bannerLayout`.
+    let bannerBody: CGRect
+    /// Обложка, текст и волны баннера в координатах `bannerBody`.
+    let bannerLayout: BannerLayout
 
     init(layout: NotchLayout, wingWidth: CGFloat) {
         let panel = layout.panelFrame
@@ -188,15 +267,27 @@ struct IslandGeometry: Equatable, Sendable {
         collapsed = local(layout.collapsedIsland(wingWidth: wingWidth))
         expanded = local(layout.expandedIsland)
         contentTop = layout.expandedContentTop
+        banner = local(layout.bannerFrame)
+        bannerBody = local(layout.bannerIsland)
+        bannerLayout = layout.bannerContent
     }
 
-    /// Остров в состоянии `state`; скрытый совпадает с вырезом.
-    func island(for state: IslandState) -> CGRect {
+    /// Остров в состоянии `state`; скрытый совпадает с вырезом. `banner`: свернутый остров
+    /// показывает баннер нового трека.
+    func island(for state: IslandState, banner: Bool = false) -> CGRect {
         switch state {
         case .hidden: notch
-        case .collapsed: collapsed
+        case .collapsed: banner ? self.banner : collapsed
         case .expanded: expanded
         }
+    }
+
+    /// Волны баннера справа от выреза.
+    var bannerWaves: CGRect {
+        let waves = bannerLayout.waves
+        return CGRect(
+            x: bannerBody.minX + waves.minX, y: bannerBody.minY + waves.minY, width: waves.width, height: waves.height
+        )
     }
 
     /// Точка у верхнего края выреза посередине: отсюда остров «вздыхает».

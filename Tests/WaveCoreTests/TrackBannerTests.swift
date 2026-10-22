@@ -222,9 +222,9 @@ struct TrackBannerTests {
         #expect(banner.update(inputs(other), now: 10.31) == .showing(other, textVisible: true))
     }
 
-    @Test func suppressionOrPauseHidesAtOnce() {
+    @Test func blockingHidesAtOnce() {
+        // Пауза скрывает не сразу: `pauseHidesVisibleBannerAfterDebounce`.
         let hiders: [TrackBannerInputs] = [
-            inputs(Self.b, playing: false),
             inputs(Self.b, suppressed: true),
             inputs(Self.b, panelOpen: true),
             inputs(Self.b, enabled: false),
@@ -259,11 +259,162 @@ struct TrackBannerTests {
         #expect(try #require(banner.deadline) == end + TrackBanner.minimumGap)
     }
 
+    @Test func blockedChangeWhilePausedBecomesBaseline() {
+        // Панель открыта, остров подавлен или настройка выключена: смена на паузе тоже молча
+        // становится базовой, и когда воспроизведение пойдет, баннера нет.
+        let blockers: [(Bool, Bool, Bool)] = [(true, false, true), (false, true, true), (false, false, false)]
+        for (panelOpen, suppressed, enabled) in blockers {
+            var banner = withBaseline()
+            let paused = inputs(Self.b, playing: false, enabled: enabled, panelOpen: panelOpen, suppressed: suppressed)
+            #expect(banner.update(paused, now: 10) == .hidden)
+            #expect(banner.update(paused, now: 11) == .hidden)
+            #expect(banner.deadline == nil)
+            var now = 12.0
+            while now <= 18 {
+                #expect(banner.update(inputs(Self.b), now: now) == .hidden, "\(paused) t \(now)")
+                now += 0.25
+            }
+        }
+    }
+
+    @Test func titleOfWhitespaceAndNewlinesIsEmpty() {
+        var banner = withBaseline()
+        let blank = TrackKey(title: " \n\t\r\n ", artist: "Другой", source: "com.apple.Music")
+        var now = 10.0
+        while now < 15 {
+            #expect(banner.update(inputs(blank), now: now) == .hidden, "t \(now)")
+            now += 0.25
+        }
+        // Пустое название не стало базовым: возврат к A без баннера.
+        #expect(banner.update(inputs(Self.a), now: 16) == .hidden)
+        #expect(banner.update(inputs(Self.a), now: 18) == .hidden)
+        // И не может стать первым базовым.
+        var fresh = TrackBanner()
+        #expect(fresh.update(inputs(blank), now: 0) == .hidden)
+        #expect(fresh.update(inputs(Self.a), now: 0.5) == .hidden)
+        #expect(fresh.update(inputs(Self.a), now: 5) == .hidden)
+    }
+
+    @Test func shortPauseKeepsVisibleBanner() {
+        // Переключение трека иногда приходит с короткой паузой: баннер не мигает.
+        var banner = withBaseline()
+        _ = banner.update(inputs(Self.b), now: 10)
+        #expect(isShowing(banner.update(inputs(Self.b), now: 10.31)))
+        #expect(banner.update(inputs(Self.b, playing: false), now: 11) == .showing(Self.b, textVisible: true))
+        #expect(banner.update(inputs(Self.b, playing: false), now: 11.29) == .showing(Self.b, textVisible: true))
+        #expect(banner.update(inputs(Self.b), now: 11.29) == .showing(Self.b, textVisible: true))
+        #expect(banner.update(inputs(Self.b), now: 12) == .showing(Self.b, textVisible: true))
+        // Конец показа прежний.
+        #expect(banner.update(inputs(Self.b), now: 13.79) == .showing(Self.b, textVisible: false))
+        #expect(banner.update(inputs(Self.b), now: 13.81) == .hidden)
+    }
+
+    @Test func pauseHidesVisibleBannerAfterDebounce() throws {
+        var banner = withBaseline()
+        _ = banner.update(inputs(Self.b), now: 10)
+        #expect(isShowing(banner.update(inputs(Self.b), now: 10.31)))
+        #expect(banner.update(inputs(Self.b, playing: false), now: 11) == .showing(Self.b, textVisible: true))
+        #expect(try #require(banner.deadline) == 11 + TrackBanner.pauseDebounce)
+        // Скрытие в 11.3, даже если следующий вызов позже.
+        #expect(banner.update(inputs(Self.b, playing: false), now: 11.5) == .hidden)
+        #expect(banner.deadline == nil)
+        // Воспроизведение снова: тот же трек уже показан, а новый ждет промежутка от 11.3.
+        #expect(banner.update(inputs(Self.b), now: 11.6) == .hidden)
+        _ = banner.update(inputs(Self.c), now: 11.7)
+        #expect(banner.update(inputs(Self.c), now: 12.29) == .hidden)
+        #expect(banner.update(inputs(Self.c), now: 12.31) == .showing(Self.c, textVisible: true))
+    }
+
+    @Test func pauseDebounceStartsAtPause() {
+        var banner = withBaseline()
+        _ = banner.update(inputs(Self.b), now: 10)
+        #expect(isShowing(banner.update(inputs(Self.b), now: 10.31)))
+        #expect(isShowing(banner.update(inputs(Self.b, playing: false), now: 11)))
+        #expect(isShowing(banner.update(inputs(Self.b, playing: false), now: 11.2)))
+        #expect(banner.update(inputs(Self.b, playing: false), now: 11.31) == .hidden)
+    }
+
+    @Test func blockingDuringSettleDropsChangeForGood() {
+        let blockers: [TrackBannerInputs] = [
+            inputs(Self.b, panelOpen: true),
+            inputs(Self.b, suppressed: true),
+            inputs(Self.b, enabled: false),
+        ]
+        for blocker in blockers {
+            var banner = withBaseline()
+            _ = banner.update(inputs(Self.b), now: 10)
+            #expect(banner.update(blocker, now: 10.1) == .hidden, "\(blocker)")
+            #expect(banner.deadline == nil, "\(blocker)")
+            // Причина ушла до конца выдержки: B уже базовый, баннера нет.
+            var now = 10.2
+            while now <= 16 {
+                #expect(banner.update(inputs(Self.b), now: now) == .hidden, "\(blocker) t \(now)")
+                now += 0.05
+            }
+        }
+    }
+
+    @Test func cancelDropsPendingChange() {
+        var banner = withBaseline()
+        _ = banner.update(inputs(Self.b), now: 10)
+        banner.cancel()
+        #expect(banner.deadline == nil)
+        // Прежняя выдержка не срабатывает: та же смена ждет заново с первого вызова после отмены.
+        #expect(banner.update(inputs(Self.b), now: 10.31) == .hidden)
+        #expect(banner.update(inputs(Self.b), now: 10.6) == .hidden)
+        #expect(isShowing(banner.update(inputs(Self.b), now: 10.62)))
+        // Так модель и вызывает: отмена при раскрытии, следующий вызов с открытой панелью.
+        var expanded = withBaseline()
+        _ = expanded.update(inputs(Self.c), now: 20)
+        _ = expanded.update(inputs(Self.c, panelOpen: true), now: 20.1)
+        expanded.cancel()
+        #expect(expanded.update(inputs(Self.c, panelOpen: true), now: 20.2) == .hidden)
+        var now = 21.0
+        while now <= 26 {
+            #expect(expanded.update(inputs(Self.c), now: now) == .hidden, "t \(now)")
+            now += 0.25
+        }
+    }
+
+    @Test func changeInLastMomentsHidesThenShowsAfterGap() {
+        var banner = withBaseline()
+        _ = banner.update(inputs(Self.b), now: 10)
+        #expect(isShowing(banner.update(inputs(Self.b), now: 10.31)))
+        // Показ кончается в 13.8; C в 13.7 выдержку кончает уже после него.
+        #expect(banner.update(inputs(Self.c), now: 13.7) == .showing(Self.b, textVisible: false))
+        #expect(banner.update(inputs(Self.c), now: 13.79) == .showing(Self.b, textVisible: false))
+        #expect(banner.update(inputs(Self.c), now: 13.85) == .hidden)
+        #expect(banner.update(inputs(Self.c), now: 14.79) == .hidden)
+        #expect(banner.update(inputs(Self.c), now: 14.81) == .showing(Self.c, textVisible: true))
+    }
+
+    @Test func pendingChangeReplacedDuringGap() {
+        var banner = withBaseline()
+        _ = banner.update(inputs(Self.b), now: 10)
+        #expect(isShowing(banner.update(inputs(Self.b), now: 10.31)))
+        #expect(banner.update(inputs(Self.b), now: 13.81) == .hidden)
+        _ = banner.update(inputs(Self.c), now: 14.0)
+        // D сменил C, пока C ждал промежутка: выдержка D кончается в 14.9, после промежутка.
+        #expect(banner.update(inputs(Self.d), now: 14.6) == .hidden)
+        #expect(banner.update(inputs(Self.d), now: 14.81) == .hidden)
+        #expect(banner.update(inputs(Self.d), now: 14.89) == .hidden)
+        #expect(banner.update(inputs(Self.d), now: 14.91) == .showing(Self.d, textVisible: true))
+        // Смена до конца промежутка показывается ровно в его конец.
+        var early = withBaseline()
+        _ = early.update(inputs(Self.b), now: 10)
+        _ = early.update(inputs(Self.b), now: 10.31)
+        _ = early.update(inputs(Self.c), now: 14.0)
+        _ = early.update(inputs(Self.d), now: 14.2)
+        #expect(early.update(inputs(Self.d), now: 14.79) == .hidden)
+        #expect(early.update(inputs(Self.d), now: 14.81) == .showing(Self.d, textVisible: true))
+    }
+
     @Test func constantsMatchSpec() {
         #expect(TrackBanner.settleDelay == 0.3)
         #expect(TrackBanner.minimumGap == 1.0)
         #expect(TrackBanner.openDuration == 0.5)
         #expect(TrackBanner.visibleDuration == 3.0)
         #expect(TrackBanner.textLead == 0.12)
+        #expect(TrackBanner.pauseDebounce == 0.3)
     }
 }

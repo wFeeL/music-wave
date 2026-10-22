@@ -13,7 +13,8 @@ struct SnapshotRendererTests {
         "13-settings", "13-settings-dark", "13-settings-tall", "13-settings-appearance", "13-settings-appearance-dark",
         "14-wings-wide", "15-preset-aurora", "15-preset-sunset", "15-preset-ocean", "15-preset-neon",
         "15-preset-fire", "15-preset-mono", "16-custom-color", "17-fill-thick-tall", "17-fill-normal", "18-one-line",
-        "18-six-lines", "19-glow-radius-3x",
+        "18-six-lines", "19-glow-radius-3x", "21-banner", "21-banner-light", "21-banner-long-title",
+        "21-banner-pill", "21-banner-no-artwork", "21-banner-wide-wings",
     ]
 
     /// Вкладка «Вид» снимается светлой и темной, прежние снимки «Основных» на месте.
@@ -98,6 +99,18 @@ struct SnapshotRendererTests {
         // Без Now Playing кнопок управления нет (кнопка «Открыть» правее, на месте «пауза/играть»).
         let noAdapter = try Bitmap(url: directory.appendingPathComponent("11-expanded-no-adapter.png"))
         #expect(noAdapter.brightPixels(in: transport.backward, scale: SnapshotRenderer.scale) == 0)
+
+        await Task.yield()
+        // Баннер: белое название под вырезом на своем месте, на капсуле тоже.
+        for (name, pill) in [
+            ("21-banner", false), ("21-banner-light", false), ("21-banner-long-title", false),
+            ("21-banner-no-artwork", false), ("21-banner-wide-wings", false), ("21-banner-pill", true),
+        ] {
+            let banner = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
+            let text = SnapshotRenderer.bannerTextSampleRect(pill: pill)
+            let bright = banner.brightPixels(in: text, scale: SnapshotRenderer.scale)
+            #expect(bright > 100, "\(name): светлых пикселей в названии \(bright)")
+        }
 
         await Task.yield()
         // Окно настроек отрисовано целиком, а не пустым фоном: в светлом оформлении есть темный

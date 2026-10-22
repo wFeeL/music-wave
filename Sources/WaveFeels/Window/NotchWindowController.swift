@@ -21,7 +21,9 @@ import WaveCore
 /// (`AppModel.onIslandStateChange`) сразу пересчитывает клики и опрос: остров раскрывается
 /// по таймеру модели, когда курсор уже стоит на месте. Панель лежит частью на строке меню,
 /// поэтому клики она принимает только над раскрытым островом, свернутый остров всегда их
-/// пропускает.
+/// пропускает. Пока виден баннер нового трека, зона наведения: баннер до верха экрана, и
+/// наведение на него раскрывает полную панель. Если курсор уже стоял там, когда баннер
+/// появился, панель раскрывается, только когда он сдвинется или войдет заново.
 ///
 /// Подписок и таймеров в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
@@ -79,13 +81,13 @@ final class NotchWindowController {
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.updatePointer()
+                self?.updatePointer(moved: true)
             }
         }
         // Курсор над окнами настроек и диагностики глобальный монитор не видит.
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
             MainActor.assumeIsolated {
-                self?.updatePointer()
+                self?.updatePointer(moved: true)
             }
             return event
         }
@@ -219,18 +221,27 @@ final class NotchWindowController {
     // MARK: - Курсор
 
     /// Положение курсора в модель, пропуск кликов в панель, включение и выключение опроса.
-    private func updatePointer() {
+    /// `moved`: вызов от движения мыши или опроса. Без движения (смена состояния острова или
+    /// баннера, экранов, настроек) курсор, оказавшийся в зоне только потому, что под ним
+    /// появился баннер, в зону не засчитывается.
+    private func updatePointer(moved: Bool = false) {
         guard isShown, let layout, let panel else {
             stopPolling()
             panel?.ignoresMouseEvents = true
             model.setPointerInHoverZone(false)
             return
         }
+        let banner = model.bannerVisible
         let pointer = layout.pointer(
             at: NSEvent.mouseLocation,
             state: model.islandState,
-            suppressed: model.islandSuppressed
+            suppressed: model.islandSuppressed,
+            banner: banner
         )
+        var inside = pointer.inHoverZone
+        if !moved, banner, inside, !model.pointerInHoverZone {
+            inside = false
+        }
         if panel.ignoresMouseEvents == pointer.acceptsClicks {
             panel.ignoresMouseEvents = !pointer.acceptsClicks
         }
@@ -241,14 +252,14 @@ final class NotchWindowController {
         }
         // Последним: если остров от этого сменит состояние, вложенный вызов через
         // `onIslandStateChange` пересчитает клики и опрос уже для нового состояния.
-        model.setPointerInHoverZone(pointer.inHoverZone)
+        model.setPointerInHoverZone(inside)
     }
 
     private func startPolling() {
         guard pollTimer == nil else { return }
         let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.updatePointer()
+                self?.updatePointer(moved: true)
             }
         }
         timer.tolerance = Self.pollInterval / 4

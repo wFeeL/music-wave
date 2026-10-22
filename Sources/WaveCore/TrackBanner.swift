@@ -49,13 +49,15 @@ public enum TrackBannerPhase: Sendable, Equatable {
 ///
 /// Базовый трек: последний принятый во время воспроизведения. После `init` и `reset` первый
 /// увиденный трек становится базовым без баннера. Другой трек при воспроизведении, с непустым
-/// названием, включенной настройке, закрытой панели и без подавления ждет `settleDelay`
-/// (новая смена начинает ожидание заново), затем показывается, но не раньше `minimumGap`
-/// после скрытия прошлого баннера. Показ длится `openDuration + visibleDuration`, текст уходит
-/// за `textLead` до конца. Смена во время показа обновляет содержимое после своей выдержки
-/// и начинает показ заново. Смена при открытой панели, подавлении или выключенной настройке
-/// молча становится базовой, смена на паузе базовый трек не трогает. Пауза, подавление,
-/// открытая панель или выключение настройки скрывают баннер сразу.
+/// названием (пробелы и переводы строк не в счет), включенной настройке, закрытой панели и без
+/// подавления ждет `settleDelay` (новая смена начинает ожидание заново), затем показывается,
+/// но не раньше `minimumGap` после скрытия прошлого баннера. Показ длится
+/// `openDuration + visibleDuration`, текст уходит за `textLead` до конца. Смена во время показа
+/// обновляет содержимое после своей выдержки и начинает показ заново. Смена при открытой панели,
+/// подавлении или выключенной настройке молча становится базовой, даже на паузе; смена на паузе
+/// без этого базовый трек не трогает. Подавление, открытая панель или выключение настройки
+/// скрывают баннер сразу, пауза только если длится `pauseDebounce`: при переключении трека
+/// Now Playing иногда на миг присылает паузу, и баннер не должен мигать.
 public struct TrackBanner: Sendable {
     /// Ожидание, пока название, исполнитель и обложка устоятся, с.
     public static let settleDelay = 0.3
@@ -67,6 +69,8 @@ public struct TrackBanner: Sendable {
     public static let visibleDuration = 3.0
     /// За сколько до закрытия уходит текст, с.
     public static let textLead = 0.12
+    /// Сколько должна длиться пауза, чтобы скрыть видимый баннер, с.
+    public static let pauseDebounce = 0.3
 
     private struct Pending: Sendable {
         var key: TrackKey
@@ -85,6 +89,8 @@ public struct TrackBanner: Sendable {
     private var baseline: TrackKey?
     private var pending: Pending?
     private var shown: Shown?
+    /// С какого момента видимый баннер стоит на паузе.
+    private var pausedSince: Double?
     private var lastHide = -Double.infinity
     private var lastNow = -Double.infinity
 
@@ -100,20 +106,22 @@ public struct TrackBanner: Sendable {
     public mutating func cancel() {
         pending = nil
         if shown != nil {
-            shown = nil
-            lastHide = lastNow
+            hide(at: lastNow)
         }
     }
 
     /// Следующий момент, когда фаза изменится сама при тех же входах: конец выдержки,
-    /// уход текста или скрытие. `nil`, если ничего не ждет.
+    /// уход текста, скрытие после паузы или конец показа. `nil`, если ничего не ждет.
     public var deadline: Double? {
         var next: Double?
         if let pending {
             next = showTime(for: pending)
         }
         if let shown {
-            let event = lastNow < shown.textEnd ? shown.textEnd : shown.end
+            var event = lastNow < shown.textEnd ? shown.textEnd : shown.end
+            if let pausedSince {
+                event = min(event, pausedSince + Self.pauseDebounce)
+            }
             next = min(next ?? event, event)
         }
         return next
@@ -124,7 +132,9 @@ public struct TrackBanner: Sendable {
         advance(to: now)
         lastNow = max(lastNow, now)
 
-        let track = inputs.track.flatMap { $0.title.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        let track = inputs.track.flatMap {
+            $0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
         if awaitingBaseline {
             if let track {
                 baseline = track
@@ -134,24 +144,35 @@ public struct TrackBanner: Sendable {
         }
 
         let blocked = !inputs.enabled || inputs.panelOpen || inputs.suppressed
-        if shown != nil, blocked || !inputs.isPlaying {
-            shown = nil
-            lastHide = now
+        if shown != nil, blocked {
+            hide(at: now)
         }
 
-        if let track, track != baseline, inputs.isPlaying {
-            if blocked {
-                baseline = track
-                pending = nil
-            } else if pending?.key != track {
+        if let track, track != baseline, blocked {
+            baseline = track
+            pending = nil
+        } else if let track, track != baseline, inputs.isPlaying {
+            if pending?.key != track {
                 pending = Pending(key: track, since: now)
             }
         } else {
             pending = nil
         }
 
+        if shown != nil, !inputs.isPlaying {
+            pausedSince = pausedSince ?? now
+        } else {
+            pausedSince = nil
+        }
+
         advance(to: now)
         return phase(at: now)
+    }
+
+    private mutating func hide(at time: Double) {
+        shown = nil
+        pausedSince = nil
+        lastHide = time
     }
 
     /// Когда ожидающая смена покажется: после выдержки, а если баннера нет, то и не раньше
@@ -161,10 +182,14 @@ public struct TrackBanner: Sendable {
         return shown == nil ? max(settled, lastHide + Self.minimumGap) : settled
     }
 
-    /// Применяет по порядку события до `now`: показ ожидающей смены и конец показа.
+    /// Применяет по порядку события до `now`: показ ожидающей смены и скрытие (конец показа
+    /// или пауза дольше `pauseDebounce`).
     private mutating func advance(to now: Double) {
         while true {
-            let end = shown?.end ?? .infinity
+            var end = shown?.end ?? .infinity
+            if let pausedSince {
+                end = min(end, pausedSince + Self.pauseDebounce)
+            }
             if let next = pending {
                 let start = showTime(for: next)
                 if start <= now, start < end {
@@ -175,8 +200,7 @@ public struct TrackBanner: Sendable {
                 }
             }
             guard shown != nil, end <= now else { return }
-            shown = nil
-            lastHide = end
+            hide(at: end)
         }
     }
 

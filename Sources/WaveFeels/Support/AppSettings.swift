@@ -23,6 +23,7 @@ final class AppSettings {
         static let beatPulse = "wf.beatPulse"
         static let hideDelay = "wf.hideDelay"
         static let hideInFullscreen = "wf.hideInFullscreen"
+        static let showTrackBanner = "wf.showTrackBanner"
         static let paused = "wf.paused"
         static let colorMode = "wf.colorMode"
         static let glowRadius = "wf.glowRadius"
@@ -52,6 +53,7 @@ final class AppSettings {
         static let beatPulse = true
         static let hideDelay = 5.0
         static let hideInFullscreen = true
+        static let showTrackBanner = true
         static let paused = false
         static let colorMode = WaveAppearance.standard.colorMode
         static let glowRadius = WaveAppearance.standard.glowRadius
@@ -74,6 +76,7 @@ final class AppSettings {
     @ObservationIgnored private var storedBeatPulse: Bool
     @ObservationIgnored private var storedHideDelay: Double
     @ObservationIgnored private var storedHideInFullscreen: Bool
+    @ObservationIgnored private var storedShowTrackBanner: Bool
     @ObservationIgnored private var storedPaused: Bool
     @ObservationIgnored private var storedColorMode: WaveColorMode
     @ObservationIgnored private var storedGlowRadius: Double
@@ -111,6 +114,7 @@ final class AppSettings {
             fallback: Default.hideDelay
         )
         storedHideInFullscreen = Self.readBool(defaults, Key.hideInFullscreen) ?? Default.hideInFullscreen
+        storedShowTrackBanner = Self.readBool(defaults, Key.showTrackBanner) ?? Default.showTrackBanner
         storedPaused = Self.readBool(defaults, Key.paused) ?? Default.paused
         storedColorMode = Self.sanitized(
             Self.readJSON(WaveColorMode.self, defaults, Key.colorMode) ?? Default.colorMode
@@ -289,6 +293,19 @@ final class AppSettings {
             guard newValue != storedHideInFullscreen else { return }
             withMutation(keyPath: \.hideInFullscreen) { storedHideInFullscreen = newValue }
             defaults.set(newValue, forKey: Key.hideInFullscreen)
+        }
+    }
+
+    /// «Показывать новый трек»: при смене трека остров ненадолго раскрывается в баннер.
+    var showTrackBanner: Bool {
+        get {
+            access(keyPath: \.showTrackBanner)
+            return storedShowTrackBanner
+        }
+        set {
+            guard newValue != storedShowTrackBanner else { return }
+            withMutation(keyPath: \.showTrackBanner) { storedShowTrackBanner = newValue }
+            defaults.set(newValue, forKey: Key.showTrackBanner)
         }
     }
 
