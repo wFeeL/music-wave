@@ -180,11 +180,19 @@ public final class StreamAnalyzer {
     }
 
     /// Анализирует окно, которое заканчивается сэмплом потока `endSample` (не включая его).
+    /// `dt`: на сколько секунд сдвигаются автоуровень, сглаживание полос и огибающая удара; по
+    /// умолчанию длина шага. Простой острова берет один шаг на пробуждение и передает время с
+    /// прошлого пробуждения, чтобы уровни не отставали. Выбор пиков онсетов всегда идет по шагам.
     /// - Precondition: `window.count == config.fftSize`.
-    public func processHop(window: UnsafeBufferPointer<Float>, endSample: Int, settings: LevelSettings) -> HopResult {
+    public func processHop(
+        window: UnsafeBufferPointer<Float>,
+        endSample: Int,
+        settings: LevelSettings,
+        dt: Double? = nil
+    ) -> HopResult {
         precondition(window.count == config.fftSize, "window.count must equal config.fftSize")
         let rate = config.sampleRate
-        let dt = config.hopDuration
+        let dt = dt.map { $0.isFinite ? max($0, 0) : 0 } ?? config.hopDuration
 
         spectrum.withUnsafeMutableBufferPointer { fft.amplitudeSpectrum(window, into: $0) }
         spectrum.withUnsafeBufferPointer { spectrum in
@@ -220,7 +228,7 @@ public final class StreamAnalyzer {
         let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB)
             .map { OnsetEvent(time: onsetTime, strength: $0) }
 
-        // Уровни волн: нормировка, сглаживание, смесь слоев как у `Analyzer`.
+        // Уровни волн: нормировка, сглаживание, слой это половина пика и половина среднего его полос.
         levelsDB.withUnsafeBufferPointer { levelsDB in
             normalized.withUnsafeMutableBufferPointer {
                 levelProcessor.normalize(levelsDB, dt: dt, settings: settings, into: $0)
@@ -293,5 +301,24 @@ public final class StreamAnalyzer {
             lags: mapper.centers.map { $0 < broadbandLagSplitHz ? 1 : 2 },
             weights: mapper.centers.map { $0 >= broadbandHighHz ? broadbandHighWeight : 1 }
         )
+    }
+}
+
+/// Огибающая удара: 1 в момент удара, затем экспоненциальный спад.
+/// Порядок в каждом кадре: сначала `step`, потом `trigger`.
+public struct BeatEnvelope: Sendable {
+    public let decay: Double
+    public private(set) var value: Float = 0
+
+    public init(decay: Double = 0.06) {
+        self.decay = decay
+    }
+
+    public mutating func trigger() {
+        value = 1
+    }
+
+    public mutating func step(dt: Double) {
+        value *= Float(exp(-dt / decay))
     }
 }

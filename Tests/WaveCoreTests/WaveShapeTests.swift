@@ -369,7 +369,7 @@ struct WaveShapeTests {
 
     // MARK: - BeatPulse
 
-    /// Удар как у `Analyzer`: огибающая взводится на кадре `triggerFrame` и спадает.
+    /// Удар как у `StreamAnalyzer`: огибающая взводится на кадре `triggerFrame` и спадает.
     private func pulseResponse(fps: Double, seconds: Double, triggerFrame: Int = 1) -> [Float] {
         let dt = 1 / fps
         var envelope = BeatEnvelope()

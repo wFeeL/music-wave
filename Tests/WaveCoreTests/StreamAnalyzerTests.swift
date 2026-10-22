@@ -57,6 +57,28 @@ struct StreamAnalyzerTests {
         #expect(hop.endTime == 1.0)
     }
 
+    /// Простой острова: один шаг на пробуждение, уровни и сглаживание идут на время с прошлого
+    /// пробуждения (`dt`). Явный шаг, равный длине шага, дает тот же кадр, что и без него.
+    @Test func levelStepOverride() {
+        let tone = TestSignals.sine(frequency: 80, amplitude: 0.5, sampleRate: Self.rate, count: 1024)
+        let plain = StreamAnalyzer(sampleRate: Self.rate)
+        let same = StreamAnalyzer(sampleRate: Self.rate)
+        let slow = StreamAnalyzer(sampleRate: Self.rate)
+        let settings = LevelSettings()
+        tone.withUnsafeBufferPointer { window in
+            for step in 1...3 {
+                let end = 1024 * step
+                let a = plain.processHop(window: window, endSample: end, settings: settings)
+                let b = same.processHop(window: window, endSample: end, settings: settings, dt: plain.config.hopDuration)
+                let c = slow.processHop(window: window, endSample: end, settings: settings, dt: 1.0 / 15)
+                #expect(a.frame == b.frame)
+                // За 67 мс атака 10 мс доходит до цели, за 5.3 мс нет.
+                #expect(c.frame.layers[WaveLayer.bass.rawValue] > a.frame.layers[WaveLayer.bass.rawValue] + 0.05)
+                #expect(c.endTime == a.endTime)
+            }
+        }
+    }
+
     @Test func noNaNOnZerosAndDenormals() {
         let analyzer = StreamAnalyzer(sampleRate: Self.rate)
         let denormal = Float(sign: .plus, exponentBitPattern: 0, significandBitPattern: 1_000)

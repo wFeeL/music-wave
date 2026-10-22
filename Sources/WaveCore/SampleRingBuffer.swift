@@ -15,7 +15,7 @@ public struct RingStamp: Sendable, Equatable {
 /// Кольцевой буфер сэмплов для одного писателя и одного читателя (SPSC).
 ///
 /// Писатель (аудио-колбэк) вызывает `write` без блокировок и выделений памяти.
-/// Читатель (таймер анализа) вызывает `copyWindow` или `copyLatest` по схеме seqlock: копирует
+/// Читатель (очередь анализа) вызывает `copyWindow` по схеме seqlock: копирует
 /// окно и проверяет, что писатель не успел его перезаписать. Метку последнего блока
 /// (`latestStamp()`) писатель публикует через отдельный seqlock из атомиков, поэтому номер
 /// сэмпла и время читаются согласованной парой.
@@ -140,36 +140,16 @@ public final class SampleRingBuffer: @unchecked Sendable {
         return c - start <= _capacity
     }
 
-    /// Копирует `destination.count` сэмплов, заканчивающихся на `totalWritten - delay`.
-    /// Возвращает `false`, если данных еще мало или окно уже перезаписано.
-    public func copyLatest(into destination: UnsafeMutableBufferPointer<Float>, delay: Int) -> Bool {
-        let count = destination.count
-        guard delay >= 0 else { return false }
-        let need = delay + count
-        guard need <= _capacity else { return false }
-        guard count > 0, let out = destination.baseAddress else { return true }
-
-        let w1 = written.load(ordering: .acquiring)
-        guard w1 >= need else { return false }
-        let start = w1 - need
-
-        let startPos = start & mask
-        let firstPart = min(count, _capacity - startPos)
-        out.update(from: storage + startPos, count: firstPart)
-        if count > firstPart {
-            (out + firstPart).update(from: storage, count: count - firstPart)
-        }
-
-        atomicMemoryFence(ordering: .acquiring)
-        let c = claimed.load(ordering: .relaxed)
-        return c - start <= _capacity
-    }
-
     /// Обнуляет историю и метку. Вызывать, когда писатель и читатель не работают.
+    /// Номер seqlock метки растет атомарным сложением: `reset()` зовут не из потока писателя.
     public func reset() {
         claimed.store(0, ordering: .relaxed)
         written.store(0, ordering: .releasing)
-        publishStamp(index: -1, ticks: 0)
+        stampSequence.wrappingAdd(1, ordering: .relaxed)
+        atomicMemoryFence(ordering: .releasing)
+        stampIndex.store(-1, ordering: .relaxed)
+        stampTicks.store(0, ordering: .relaxed)
+        stampSequence.wrappingAdd(1, ordering: .releasing)
     }
 
     // MARK: - Учет писателей

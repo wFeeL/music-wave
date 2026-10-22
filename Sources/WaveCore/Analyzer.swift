@@ -54,112 +54,6 @@ public struct WaveFrame: Sendable, Equatable {
     }
 }
 
-/// Конвейер анализа: БПФ, полосы, детектор ударов, нормировка, сглаживание, слои.
-///
-/// Вызывается с очереди анализа 60 Гц, не из аудио-колбэка: на каждый вызов выделяется память.
-/// Не потокобезопасен, все вызовы с одной очереди.
-public final class Analyzer {
-    public static let fftSize = 2048
-
-    /// Пауза между вызовами, после которой история считается устаревшей.
-    private static let staleGap = 0.5
-    /// Верхняя граница центра полосы, которая идет в детектор ударов.
-    private static let beatMaxHz = 150.0
-
-    public private(set) var sampleRate: Double
-
-    private let fft = RealFFT(size: Analyzer.fftSize)
-    private var mapper: BandMapper
-    private var levelProcessor: LevelProcessor
-    private var lowBands: [Int]
-    private var smoothers: [AttackRelease]
-    private var detector = BeatDetector()
-    private var envelope = BeatEnvelope()
-    private var lastTime: Double?
-
-    public init(sampleRate: Double) {
-        self.sampleRate = sampleRate
-        let mapper = BandMapper(fftSize: Self.fftSize, sampleRate: sampleRate)
-        self.mapper = mapper
-        self.levelProcessor = Self.makeLevelProcessor(for: mapper)
-        self.lowBands = Self.makeLowBands(for: mapper)
-        self.smoothers = Self.makeSmoothers()
-    }
-
-    /// Пересоздает таблицы полос под новую частоту и сбрасывает детектор и сглаживание.
-    public func reconfigure(sampleRate: Double) {
-        self.sampleRate = sampleRate
-        let mapper = BandMapper(fftSize: Self.fftSize, sampleRate: sampleRate)
-        self.mapper = mapper
-        lowBands = Self.makeLowBands(for: mapper)
-        resetDynamics()
-    }
-
-    /// - Parameters:
-    ///   - samples: последнее окно, ровно `fftSize` сэмплов.
-    ///   - time: время конца окна в секундах.
-    ///   - dt: время с прошлого кадра в секундах.
-    public func process(samples: [Float], time: Double, dt: Double, settings: LevelSettings) -> WaveFrame {
-        precondition(samples.count == Self.fftSize, "samples.count must equal fftSize")
-
-        // Пауза или перемотка времени: история детектора, сглаживание и пики автоуровня устарели.
-        if let lastTime, time - lastTime > Self.staleGap || time < lastTime {
-            resetDynamics()
-        }
-        lastTime = time
-
-        let spectrum = fft.amplitudeSpectrum(samples)
-        let levelsDB = mapper.bandLevels(spectrum).map { $0.isNaN ? -120 : $0 }
-
-        let lowAmplitudes = lowBands.map { Float(pow(10.0, Double(levelsDB[$0]) / 20)) }
-        let isBeat = detector.process(lowBandAmplitudes: lowAmplitudes, time: time)
-
-        let normalized = levelProcessor.normalize(levelsDB, dt: dt, settings: settings)
-        let bands = normalized.indices.map { smoothers[$0].step(toward: normalized[$0], dt: dt) }
-
-        let layers = WaveLayer.allCases.map { layer -> Float in
-            let range = mapper.bands(for: layer)
-            guard !range.isEmpty else { return 0 }
-            let values = bands[range]
-            let mean = values.reduce(0, +) / Float(values.count)
-            return 0.5 * (values.max() ?? 0) + 0.5 * mean
-        }
-
-        envelope.step(dt: dt)
-        if isBeat { envelope.trigger() }
-
-        return WaveFrame(
-            bands: bands,
-            layers: layers,
-            beat: envelope.value,
-            level: layers.max() ?? 0,
-            rawLevelDB: levelsDB.max() ?? -120
-        )
-    }
-
-    /// Пауза, перемотка или смена частоты: детектор, сглаживание и пики автоуровня начинают
-    /// заново, иначе пик громкого припева до паузы держал бы волны тихого трека маленькими.
-    private func resetDynamics() {
-        detector.reset()
-        levelProcessor = Self.makeLevelProcessor(for: mapper)
-        envelope = BeatEnvelope()
-        smoothers = Self.makeSmoothers()
-        lastTime = nil
-    }
-
-    private static func makeLevelProcessor(for mapper: BandMapper) -> LevelProcessor {
-        LevelProcessor(layerBands: WaveLayer.allCases.map { mapper.bands(for: $0) })
-    }
-
-    private static func makeLowBands(for mapper: BandMapper) -> [Int] {
-        mapper.centers.indices.filter { mapper.centers[$0] <= beatMaxHz }
-    }
-
-    private static func makeSmoothers() -> [AttackRelease] {
-        [AttackRelease](repeating: AttackRelease(), count: BandMapper.bandCount)
-    }
-}
-
 /// История кадров анализа с метками времени хоста, безопасно читается с любого потока.
 ///
 /// Анализ публикует кадр с моментом, к которому он относится (секунды хоста, те же часы, что
@@ -213,11 +107,13 @@ public final class FrameStore: Sendable {
             entries[(start + entries.count - 1) % entries.count] = item
         }
 
-        func frame(at time: Double) -> WaveFrame {
-            guard let newest else { return held }
-            guard time.isFinite, time < newest.time else { return newest.frame }
+        /// Два соседних кадра вокруг `time` и доля второго. Смешение идет вне блокировки, под
+        /// ней только копии кадров (счетчики ссылок массивов).
+        func neighbours(at time: Double) -> (before: WaveFrame, after: WaveFrame, fraction: Float) {
+            guard let newest else { return (held, held, 0) }
+            guard time.isFinite, time < newest.time else { return (newest.frame, newest.frame, 0) }
             let oldest = entry(0)
-            guard time > oldest.time else { return oldest.frame }
+            guard time > oldest.time else { return (oldest.frame, oldest.frame, 0) }
             // Первый кадр не раньше `time`: он есть, потому что `time < newest.time`.
             var low = 1
             var high = count - 1
@@ -232,10 +128,8 @@ public final class FrameStore: Sendable {
             let after = entry(low)
             let before = entry(low - 1)
             let span = after.time - before.time
-            guard span > 0 else { return after.frame }
-            return WaveFrame.interpolated(
-                from: before.frame, to: after.frame, fraction: Float((time - before.time) / span)
-            )
+            guard span > 0 else { return (after.frame, after.frame, 0) }
+            return (before.frame, after.frame, Float((time - before.time) / span))
         }
     }
 
@@ -306,6 +200,7 @@ public final class FrameStore: Sendable {
     /// Кадр на момент `time`: линейно между двумя соседними кадрами истории, до самого старого
     /// кадра это самый старый, после самого нового самый новый.
     public func frame(at time: Double) -> WaveFrame {
-        state.withLock { $0.frame(at: time) }
+        let (before, after, fraction) = state.withLock { $0.neighbours(at: time) }
+        return fraction == 0 ? before : WaveFrame.interpolated(from: before, to: after, fraction: fraction)
     }
 }

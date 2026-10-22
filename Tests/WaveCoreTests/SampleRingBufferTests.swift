@@ -7,106 +7,8 @@ import Testing
     #expect(SampleRingBuffer(capacity: 1000).capacity == 1024)
 }
 
-@Test func copyLatestReturnsMostRecentWindow() {
-    let rb = SampleRingBuffer(capacity: 16)
-    let input = (0..<20).map(Float.init)
-    input.withUnsafeBufferPointer { rb.write($0) }
-    var out = [Float](repeating: -1, count: 4)
-    let ok = out.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
-    #expect(ok && out == [16, 17, 18, 19])
-}
-
-@Test func copyLatestHonorsDelay() {
-    let rb = SampleRingBuffer(capacity: 16)
-    let input = (0..<20).map(Float.init)
-    input.withUnsafeBufferPointer { rb.write($0) }
-    var out = [Float](repeating: -1, count: 4)
-    let ok = out.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 3) }
-    #expect(ok && out == [13, 14, 15, 16])
-}
-
-@Test func copyLatestFailsWhenNotEnoughData() {
-    let rb = SampleRingBuffer(capacity: 16)
-    let input: [Float] = [1, 2, 3]
-    input.withUnsafeBufferPointer { rb.write($0) }
-    var out = [Float](repeating: -1, count: 4)
-    let ok = out.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
-    #expect(!ok)
-}
-
-@Test func copyLatestFailsWhenWindowOverwritten() {
-    let rb = SampleRingBuffer(capacity: 16)
-    let input = (0..<40).map(Float.init)
-    input.withUnsafeBufferPointer { rb.write($0) }
-    var out = [Float](repeating: -1, count: 4)
-    let ok = out.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 14) }
-    #expect(!ok)
-}
-
-@Test func writeLargerThanCapacityKeepsTail() {
-    let rb = SampleRingBuffer(capacity: 16)
-    let input = (0..<100).map(Float.init)
-    input.withUnsafeBufferPointer { rb.write($0) }
-    #expect(rb.totalWritten == 100)
-    var out = [Float](repeating: -1, count: 16)
-    let ok = out.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
-    #expect(ok && out == (84..<100).map(Float.init))
-}
-
-@Test func resetClearsHistory() {
-    let rb = SampleRingBuffer(capacity: 16)
-    let input = (0..<8).map(Float.init)
-    input.withUnsafeBufferPointer { rb.write($0) }
-    rb.reset()
-    #expect(rb.totalWritten == 0)
-    var out = [Float](repeating: -1, count: 4)
-    let ok = out.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
-    #expect(!ok)
-}
-
 private final class DoneFlag: Sendable {
     let value = Atomic<Bool>(false)
-}
-
-@Test func concurrentWriterReaderNeverTearsMonotonicRamp() async {
-    let rb = SampleRingBuffer(capacity: 4096)
-    let done = DoneFlag()
-    let blockSize = 512
-    let blocks = 20_000
-
-    let writer = Task.detached {
-        var block = [Float](repeating: 0, count: blockSize)
-        var next = 0
-        for _ in 0..<blocks {
-            for i in 0..<blockSize { block[i] = Float(next + i) }
-            block.withUnsafeBufferPointer { rb.write($0) }
-            next += blockSize
-        }
-        done.value.store(true, ordering: .releasing)
-    }
-
-    let reader = Task.detached { () -> (successes: Int, torn: Int) in
-        var window = [Float](repeating: 0, count: 256)
-        var successes = 0
-        var torn = 0
-        var finished = false
-        while !finished {
-            finished = done.value.load(ordering: .acquiring)
-            let ok = window.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
-            guard ok else { continue }
-            successes += 1
-            for i in 1..<window.count where window[i] != window[i - 1] + 1 {
-                torn += 1
-                break
-            }
-        }
-        return (successes, torn)
-    }
-
-    await writer.value
-    let result = await reader.value
-    #expect(result.successes > 0)
-    #expect(result.torn == 0)
 }
 
 @Test func writerCountTracksAttachAndPeak() {
@@ -128,35 +30,6 @@ private final class DoneFlag: Sendable {
 }
 
 // MARK: - SampleFeedMonitor
-
-/// Писатель перестал писать (tap или демо встали): через 250 мс без новых сэмплов кольцо
-/// считается остановившимся, хотя `copyLatest` по-прежнему отдает последнее окно.
-@Test func feedMonitorNoticesWriterThatStopped() {
-    let rb = SampleRingBuffer(capacity: 4096)
-    var monitor = SampleFeedMonitor()
-    let block = [Float](repeating: 0.5, count: 480)
-    var stalled: [Bool] = []
-    // 10 мс на блок, как IOProc: кольцо пополняется, остановки нет.
-    for step in 0..<20 {
-        block.withUnsafeBufferPointer { rb.write($0) }
-        stalled.append(monitor.update(totalWritten: rb.totalWritten, now: Double(step) * 0.01))
-    }
-    #expect(!stalled.contains(true))
-
-    // Писатель встал на последнем блоке (0,19 с); окно все еще копируется.
-    var window = [Float](repeating: 0, count: 1024)
-    let copied = window.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
-    #expect(copied && window.allSatisfy { $0 == 0.5 })
-    let early = monitor.update(totalWritten: rb.totalWritten, now: 0.43)
-    #expect(!early)
-    let late = monitor.update(totalWritten: rb.totalWritten, now: 0.45)
-    #expect(late)
-
-    // Писатель снова пишет: остановки нет сразу.
-    block.withUnsafeBufferPointer { rb.write($0) }
-    let resumed = monitor.update(totalWritten: rb.totalWritten, now: 0.46)
-    #expect(!resumed)
-}
 
 /// Первый вызов (и вызов после `reset`) только запоминает счетчик, даже если кольцо пустое.
 @Test func feedMonitorStartsFresh() {
@@ -241,6 +114,7 @@ private func runOnOwnQueue<T: Sendable>(_ work: @escaping @Sendable () -> T) asy
 
     var reads = 0
     var torn = 0
+    var early = 0
     var backwards = 0
     var previous = -1
     var finished = false
@@ -250,6 +124,8 @@ private func runOnOwnQueue<T: Sendable>(_ work: @escaping @Sendable () -> T) asy
             guard let stamp = rb.latestStamp() else { continue }
             reads += 1
             if stamp.hostTicks != UInt64(stamp.sampleIndex) * 7 { torn += 1 }
+            // Метка публикуется после сэмплов своего блока.
+            if rb.totalWritten < stamp.sampleIndex + blockSize { early += 1 }
             if stamp.sampleIndex < previous { backwards += 1 }
             previous = stamp.sampleIndex
         }
@@ -259,6 +135,7 @@ private func runOnOwnQueue<T: Sendable>(_ work: @escaping @Sendable () -> T) asy
     #expect(blocks > 0)
     #expect(reads > 0)
     #expect(torn == 0)
+    #expect(early == 0)
     #expect(backwards == 0)
     #expect(rb.latestStamp() == RingStamp(sampleIndex: (blocks - 1) * blockSize, hostTicks: UInt64((blocks - 1) * blockSize) * 7))
 }
@@ -309,8 +186,8 @@ private func ramp(_ range: Range<Int>) -> [Float] {
     #expect(!empty.withUnsafeMutableBufferPointer { rb.copyWindow(endingAt: 41, into: $0) })
 }
 
-/// Те же случаи, что у `copyLatest`, через номер последнего сэмпла.
-@Test func copyWindowPortsOfCopyLatestCases() {
+/// Самое новое окно, окно раньше, мало данных, перезапись, блок больше емкости и `reset`.
+@Test func copyWindowCoversBasicCases() {
     // Самое новое окно.
     let rb = SampleRingBuffer(capacity: 16)
     ramp(0..<20).withUnsafeBufferPointer { rb.write($0) }
@@ -414,7 +291,8 @@ private func ramp(_ range: Range<Int>) -> [Float] {
     #expect(torn == 0)
 }
 
-/// Как `feedMonitorNoticesWriterThatStopped`, но окно берется по номеру сэмпла.
+/// Писатель перестал писать (tap или демо встали): через 250 мс без новых сэмплов кольцо
+/// считается остановившимся, хотя `copyWindow` по-прежнему отдает последнее окно.
 @Test func feedMonitorNoticesWriterThatStoppedWithCopyWindow() {
     let rb = SampleRingBuffer(capacity: 4096)
     var monitor = SampleFeedMonitor()
