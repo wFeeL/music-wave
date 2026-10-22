@@ -14,7 +14,8 @@ enum PipelineStatus: Equatable, Sendable {
     case rebuilding(attempt: Int)
     /// Tap не создался, повтор номер `attempt` из `AudioPipeline.startRetryPauses.count` после паузы.
     case retrying(attempt: Int, message: String)
-    /// Долгая тишина: IOProc и анализ остановлены, подписки работают.
+    /// Долгая тишина: IOProc и анализ остановлены, подписки работают, конвейер следит, не начал
+    /// ли источник выводить звук.
     case suspended
     /// «Приостановить визуализацию»: IOProc, демо и анализ остановлены, подписки работают.
     case paused
@@ -45,6 +46,8 @@ final class AudioPipeline {
     static let watchdogPauses: [Double] = [1, 2, 4]
     /// Паузы перед повторами, если tap не создался.
     static let startRetryPauses: [Double] = [1, 2, 4]
+    /// Как часто в приостановке для всего звука системы перечитывать, какие процессы выводят звук.
+    static let systemWideOutputPollInterval: Duration = .seconds(1)
 
     private(set) var status: PipelineStatus = .stopped
     private(set) var matchedProcesses: [AudioProcessInfo] = []
@@ -72,6 +75,11 @@ final class AudioPipeline {
         didSet {
             guard source != oldValue else { return }
             watchdogRebuilds = 0
+            if mode == .suspended {
+                // Приостановка держалась на Now Playing прежнего источника.
+                resume(reason: "смена источника")
+                return
+            }
             processesChanged()
             rebuild(reason: "смена источника")
         }
@@ -122,6 +130,13 @@ final class AudioPipeline {
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
     /// Растет при каждом запуске и остановке tap: результат устаревшего запуска не применяется.
     @ObservationIgnored private var startGeneration = 0
+    /// В приостановке: подписки на `kAudioProcessPropertyIsRunningOutput` процессов источника.
+    @ObservationIgnored private var outputWatchTokens: [CAListenerToken] = []
+    /// Процессы, на которые сейчас подписан `outputWatchTokens`.
+    @ObservationIgnored private var outputWatchIDs: [AudioObjectID] = []
+    /// В приостановке для всего звука системы: опрос процессов раз в секунду.
+    @ObservationIgnored private var outputWatchTask: Task<Void, Never>?
+    @ObservationIgnored private var outputStart = OutputStartDetector(outputting: [])
 
     init(store: FrameStore, processes: AudioProcessList, output: OutputDeviceMonitor) {
         self.processes = processes
@@ -168,6 +183,7 @@ final class AudioPipeline {
         mode = .stopped
         modeBeforeSleep = nil
         cancelTasks()
+        stopOutputWatch()
         stopCaptureInBackground()
         stopDemo()
         engine.stop()
@@ -249,7 +265,11 @@ final class AudioPipeline {
         }
     }
 
-    /// Долгая тишина: IOProc и анализ останавливаются, подписки остаются.
+    /// Долгая тишина: IOProc и анализ останавливаются, подписки остаются. Пока захват стоит,
+    /// конвейер следит за выводом звука: для приложения подписка на
+    /// `kAudioProcessPropertyIsRunningOutput` его процессов, для всего звука системы опрос списка
+    /// процессов раз в секунду. Как только процесс начал выводить звук, захват возобновляется
+    /// сам, не дожидаясь Now Playing.
     func suspendIdle() {
         guard mode == .live, !paused else { return }
         mode = .suspended
@@ -258,13 +278,15 @@ final class AudioPipeline {
         stopCaptureInBackground()
         engine.stop()
         status = .suspended
-        log("захват приостановлен в тишине")
+        startOutputWatch()
+        log("захват приостановлен в тишине, жду вывода звука")
     }
 
-    func resume() {
+    func resume(reason: String = "возобновление") {
         guard mode == .suspended, !paused else { return }
+        stopOutputWatch()
         mode = .live
-        performRebuild(reason: "возобновление")
+        performRebuild(reason: reason)
     }
 
     /// Сторож нулей снова получает все попытки (например, после выдачи доступа к звуку).
@@ -295,6 +317,7 @@ final class AudioPipeline {
         case .live, .suspended:
             rebuildTask?.cancel()
             rebuildTask = nil
+            stopOutputWatch()
             stopCaptureInBackground()
             engine.stop()
             // После паузы сразу захват: тишину AppModel отсчитает заново.
@@ -429,6 +452,77 @@ final class AudioPipeline {
            ProcessMatcher.needsRebuild(source: source, current: appliedProcessIDs, processes: snapshot) {
             rebuild(reason: "список процессов")
         }
+        if mode == .suspended {
+            // Новый помощник источника тоже может начать выводить звук.
+            if source != .systemWide, matchedProcesses.map(\.objectID) != outputWatchIDs {
+                watchOutput()
+            }
+            checkOutputStart()
+        }
+    }
+
+    // MARK: - Вывод звука в приостановке
+
+    /// Запоминает, какие процессы выводят звук сейчас (они не будят), и начинает следить.
+    private func startOutputWatch() {
+        outputStart = OutputStartDetector(outputting: outputtingProcessIDs())
+        watchOutput()
+    }
+
+    /// Подписки на процессы источника или опрос всего звука системы, заново.
+    private func watchOutput() {
+        stopOutputWatch()
+        if source == .systemWide {
+            outputWatchTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.systemWideOutputPollInterval)
+                    guard !Task.isCancelled, let self else { return }
+                    self.checkOutputStart()
+                }
+            }
+            return
+        }
+        outputWatchIDs = matchedProcesses.map(\.objectID)
+        outputWatchTokens = matchedProcesses.map { process in
+            CAProperty.listen(process.objectID, kAudioProcessPropertyIsRunningOutput, queue: .main) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.checkOutputStart()
+                }
+            }
+        }
+    }
+
+    private func stopOutputWatch() {
+        for token in outputWatchTokens {
+            token.cancel()
+        }
+        outputWatchTokens = []
+        outputWatchIDs = []
+        outputWatchTask?.cancel()
+        outputWatchTask = nil
+    }
+
+    private func checkOutputStart() {
+        guard mode == .suspended, !paused else { return }
+        guard outputStart.update(outputting: outputtingProcessIDs()) else { return }
+        log("в приостановке процесс начал выводить звук")
+        resume(reason: "источник начал выводить звук")
+    }
+
+    /// Процессы, которые сейчас выводят звук: для всего звука системы все, кроме этого
+    /// приложения, для приложения только его совпавшие процессы.
+    private func outputtingProcessIDs() -> Set<AudioObjectID> {
+        if source == .systemWide {
+            return processes.outputtingProcessIDs()
+        }
+        var result = Set<AudioObjectID>()
+        for process in matchedProcesses {
+            let running: UInt32 = CAProperty.read(process.objectID, kAudioProcessPropertyIsRunningOutput, default: 0)
+            if running != 0 {
+                result.insert(process.objectID)
+            }
+        }
+        return result
     }
 
     private func volumeChanged() {
