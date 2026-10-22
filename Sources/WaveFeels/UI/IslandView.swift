@@ -113,6 +113,7 @@ struct IslandView: View {
         let visuals = model.islandVisuals(now: now, timelineTime: timelineTime, reduceMotion: reduceMotion)
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.
         let glow = reduceMotion ? 0 : model.settings.glowIntensity
+        let appearance = model.settings.appearance
         let breathes = state == .collapsed && model.settings.beatPulse && !reduceMotion
         let scale = breathes ? 1 + Self.breathDepth * CGFloat(visuals.pulse) : 1
         let anchor = geometry.anchor
@@ -124,14 +125,15 @@ struct IslandView: View {
             if BeatGlowView.isVisible(glow: visuals.glow, intensity: glow) {
                 BeatGlowView(
                     geometry: geometry, state: state, scale: scale, glow: visuals.glow, intensity: glow,
-                    color: visuals.palette.first ?? PaletteExtractor.fallback[0]
+                    radius: appearance.glowRadius, color: visuals.palette.first ?? PaletteExtractor.fallback[0]
                 )
             }
             ZStack(alignment: .topLeading) {
                 IslandBodyView(geometry: geometry, state: state)
                     .equatable()
                 IslandWavesView(
-                    visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow, paused: paused
+                    visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow,
+                    appearance: appearance, paused: paused
                 )
             }
             .scaleEffect(scale, anchor: UnitPoint(x: anchor.x / geometry.size.width, y: anchor.y / geometry.size.height))

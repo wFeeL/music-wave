@@ -82,12 +82,13 @@ struct IslandBodyView: View, Equatable {
 /// в дереве и сменяют друг друга прозрачностью под пружиной раскрытия: уходящий слой продолжает
 /// двигаться, пока гаснет. Точки слоя считаются, только пока `layers` (`IslandTransition`)
 /// говорит, что он жив; иначе его холсты пустые. Каждый прямоугольник волн рисуется своей
-/// текстурой (`drawingGroup`) с полем `glowMargin` под размытую копию линий; линии
-/// складываются в ней `.plusLighter` и ложатся на черное тело.
+/// текстурой (`drawingGroup`) с полем `glowMargin` × «Радиус свечения» (не меньше 1×) под
+/// размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
+/// Число линий, заливка, толщина, размах и радиус свечения линий берутся из `appearance`.
 ///
 /// На паузе полоса панели сначала затихает в линию (около секунды), затем гаснет до 15 %.
 struct IslandWavesView: View {
-    /// Свечение линий: размытая копия волн.
+    /// Свечение линий: размытая копия основных волн, радиус размытия × «Радиус свечения».
     static let glowBlur: CGFloat = 2
     static let glowOpacity = 0.25
     /// Поле текстуры вокруг прямоугольника волн: под размытую копию линий и точку удара.
@@ -107,6 +108,8 @@ struct IslandWavesView: View {
     let layers: (wing: Bool, panel: Bool)
     /// Яркость свечения из настроек, 0 при «Уменьшении движения».
     let glow: Double
+    /// Вид волн из настроек.
+    let appearance: WaveAppearance
     /// Источник на паузе: полоса панели гаснет.
     let paused: Bool
 
@@ -135,7 +138,10 @@ struct IslandWavesView: View {
     }
 
     private func makeSet(_ style: WaveStyle) -> WaveSet {
-        WaveSet(frame: visuals.frame, palette: visuals.palette, motion: visuals.motion, time: visuals.time, style: style)
+        WaveSet(
+            frame: visuals.frame, palette: visuals.palette, motion: visuals.motion, time: visuals.time, style: style,
+            appearance: appearance
+        )
     }
 
     /// Волны свернутого острова: два крыла с точками удара у выреза или одна линия капсулы. В
@@ -161,15 +167,16 @@ struct IslandWavesView: View {
 
     /// Волны в `rect` и их свечение (размытая копия толстых линий под ними), обе в режиме
     /// `.plusLighter`, плюс точка удара в `accent` (координаты панели). Все рисуется одной
-    /// текстурой размером `rect` плюс `glowMargin` с каждой стороны и обрезается формой острова.
+    /// текстурой размером `rect` плюс поле под свечение с каждой стороны и обрезается формой острова.
     private func waveLayer(_ waves: WaveSet, rect: CGRect, mirrored: Bool, accent: CGPoint? = nil) -> some View {
-        let margin = Self.glowMargin
+        let radius = CGFloat(appearance.glowRadius)
+        let margin = Self.glowMargin * max(radius, 1)
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
         return ZStack(alignment: .topLeading) {
             ZStack {
                 if glow > 0 {
                     WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
-                        .blur(radius: Self.glowBlur)
+                        .blur(radius: Self.glowBlur * radius)
                         .opacity(Self.glowOpacity * glow)
                         .blendMode(.plusLighter)
                 }
@@ -210,9 +217,11 @@ struct IslandWavesView: View {
 
 /// Мягкое свечение цвета `color`, поднятого до светлого и насыщенного, под нижним краем
 /// острова. Яркость по свечению доли `glow` с пиком 0.45 на темной строке меню и 0.25 на
-/// светлой при яркости по умолчанию, у раскрытой панели втрое слабее. Рисуется поверх строки
-/// меню само, вне текстур волн; когда его почти не видно (`isVisible`), его не строят.
+/// светлой при яркости по умолчанию, у раскрытой панели втрое слабее. Размытие и высота
+/// эллипса растут с «Радиусом свечения». Рисуется поверх строки меню само, вне текстур волн;
+/// когда его почти не видно (`isVisible`), его не строят.
 struct BeatGlowView: View {
+    /// Размытие и высота эллипса при радиусе 1×.
     static let blur: CGFloat = 14
     static let widthFraction: CGFloat = 0.7
     static let height: CGFloat = 16
@@ -234,6 +243,8 @@ struct BeatGlowView: View {
     let glow: Float
     /// Яркость свечения из настроек.
     let intensity: Double
+    /// «Радиус свечения» из настроек, множитель.
+    let radius: Double
     let color: PaletteColor
 
     @Environment(\.colorScheme) private var colorScheme
@@ -250,12 +261,13 @@ struct BeatGlowView: View {
         let expanded = state == .expanded ? Self.expandedFactor : 1
         let opacity = min(Double(glow) * peak * relative * expanded, 1)
         let width = rect.width * Self.widthFraction
+        let height = Self.height * CGFloat(radius)
         let bottom = anchorY + (rect.maxY - anchorY) * scale
         Ellipse()
             .fill(Color(palette: WavePaint.glowColor(color)))
-            .frame(width: width, height: Self.height)
-            .blur(radius: Self.blur)
+            .frame(width: width, height: height)
+            .blur(radius: Self.blur * CGFloat(radius))
             .opacity(opacity)
-            .offset(x: rect.midX - width / 2, y: bottom - Self.lift - Self.height / 2)
+            .offset(x: rect.midX - width / 2, y: bottom - Self.lift - height / 2)
     }
 }

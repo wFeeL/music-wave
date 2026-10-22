@@ -25,10 +25,12 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// `BeatTracker` вне реального времени до нужного момента, с шагом 1/60 с вместе с ним двигаются
 /// фазы волн, свечение доли и «вздох».
 /// Тишина получается так же: после 6 с звук обнуляется, и волны затихают 2 с.
+/// Снимки 14-19 показывают вид волн из вкладки «Вид»: широкие крылья, готовые палитры, свой
+/// цвет, заливку с толщиной и размахом, одну и шесть волн, свечение радиусом 3×.
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
-    /// Размер экрана снимка, pt.
-    static let screenSize = CGSize(width: 760, height: 236)
+    /// Размер экрана снимка, pt: панель целиком, с запасом под свечение радиусом 3×.
+    static let screenSize = CGSize(width: 760, height: 300)
     static let notchSize = CGSize(width: 185, height: 32)
     /// Строка меню внешнего монитора без выреза.
     static let externalMenuBarHeight: CGFloat = 24
@@ -215,7 +217,49 @@ enum SnapshotRenderer {
         let fromModel: [PaletteColor]? = nil
         var noArtwork = track
         noArtwork.artworkData = nil
-        let scenes = [
+        func look(_ change: (inout WaveAppearance) -> Void) -> WaveAppearance {
+            var appearance = WaveAppearance.standard
+            change(&appearance)
+            return appearance
+        }
+        let presetScenes = WavePreset.allCases.map { preset in
+            SnapshotScene(
+                name: "15-preset-\(preset.rawValue)", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.colorMode = .preset(preset) }
+            )
+        }
+        let appearanceScenes: [SnapshotScene] = [
+            SnapshotScene(
+                name: "14-wings-wide", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.wingWidth = 200 }
+            ),
+        ] + presetScenes + [
+            SnapshotScene(
+                name: "16-custom-color", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.colorMode = .custom(PaletteColor(hex: 0x7A5CFF)) }
+            ),
+            SnapshotScene(
+                name: "17-fill-thick-tall", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look {
+                    $0.fill = 1
+                    $0.thickness = 2
+                    $0.amplitude = 2
+                }
+            ),
+            SnapshotScene(
+                name: "18-one-line", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.lineCount = 1 }
+            ),
+            SnapshotScene(
+                name: "18-six-lines", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.lineCount = 6 }
+            ),
+            SnapshotScene(
+                name: "19-glow-radius-3x", state: .collapsed, moment: loudBeat, palette: fallback,
+                appearance: look { $0.glowRadius = 3 }
+            ),
+        ]
+        let scenes: [SnapshotScene] = [
             SnapshotScene(name: "01-silent", state: .collapsed, moment: silent, palette: fallback),
             SnapshotScene(name: "02-loud-beat", state: .collapsed, moment: loudBeat, palette: fallback),
             SnapshotScene(name: "02-loud-beat-light", state: .collapsed, moment: loudBeat, palette: fallback, backdrop: .light),
@@ -233,7 +277,7 @@ enum SnapshotRenderer {
                 nowPlaying: false
             ),
             SnapshotScene(name: "12-pill-expanded", state: .expanded, moment: loudBeat, palette: fromModel, pill: true),
-        ]
+        ] + appearanceScenes
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let names = scenes.map(\.name) + settingsScenes.map(\.name)
@@ -249,6 +293,7 @@ enum SnapshotRenderer {
             written.append(url)
             await Task.yield()
         }
+        apply(.standard, to: model.settings)
         for scene in settingsScenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
             try renderSettings(name: scene.name, dark: scene.dark, tall: scene.tall, model: model, to: url)
@@ -272,9 +317,23 @@ enum SnapshotRenderer {
         return defaults
     }
 
+    /// Вид волн сцены в настройки модели: остров читает его оттуда, как в работе. Палитра
+    /// по режиму цвета берется в `showPreview` уже без перехода.
+    @MainActor
+    private static func apply(_ appearance: WaveAppearance, to settings: AppSettings) {
+        settings.wingWidth = appearance.wingWidth
+        settings.colorMode = appearance.colorMode
+        settings.glowRadius = appearance.glowRadius
+        settings.lineCount = appearance.lineCount
+        settings.fill = appearance.fill
+        settings.lineThickness = appearance.thickness
+        settings.waveAmplitude = appearance.amplitude
+    }
+
     @MainActor
     private static func render(_ scene: SnapshotScene, model: AppModel, to url: URL) throws {
         let moment = scene.moment
+        apply(scene.appearance, to: model.settings)
         model.showPreview(
             state: scene.state,
             track: scene.track,
@@ -401,11 +460,14 @@ private struct SnapshotScene {
     let track: NowPlayingInfo?
     /// Now Playing работает: в панели кнопки и прогресс.
     let nowPlaying: Bool
+    /// Вид волн («Вид» в настройках).
+    let appearance: WaveAppearance
 
     init(
         name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor]?,
         backdrop: SnapshotBackdropAppearance = .dark, pill: Bool = false,
-        track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true
+        track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true,
+        appearance: WaveAppearance = .standard
     ) {
         self.name = name
         self.state = state
@@ -415,6 +477,7 @@ private struct SnapshotScene {
         self.pill = pill
         self.track = track
         self.nowPlaying = nowPlaying
+        self.appearance = appearance
     }
 }
 

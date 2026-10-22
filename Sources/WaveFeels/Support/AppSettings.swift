@@ -24,13 +24,19 @@ final class AppSettings {
         static let hideDelay = "wf.hideDelay"
         static let hideInFullscreen = "wf.hideInFullscreen"
         static let paused = "wf.paused"
+        static let colorMode = "wf.colorMode"
+        static let glowRadius = "wf.glowRadius"
+        static let lineCount = "wf.lineCount"
+        static let fill = "wf.fill"
+        static let lineThickness = "wf.lineThickness"
+        static let waveAmplitude = "wf.waveAmplitude"
     }
 
     enum Limits {
         static let sensitivity: ClosedRange<Float> = 0.25...3
         static let manualLatency: ClosedRange<Int> = 0...LatencyCalculator.maxMilliseconds
         static let syncOffset: ClosedRange<Int> = -100...100
-        static let wingWidth: ClosedRange<Double> = 40...120
+        static let wingWidth = WaveAppearance.Limits.wingWidth
         static let glowIntensity: ClosedRange<Double> = 0...1
         static let hideDelay: ClosedRange<Double> = 1...30
     }
@@ -47,6 +53,12 @@ final class AppSettings {
         static let hideDelay = 5.0
         static let hideInFullscreen = true
         static let paused = false
+        static let colorMode = WaveAppearance.standard.colorMode
+        static let glowRadius = WaveAppearance.standard.glowRadius
+        static let lineCount = WaveAppearance.standard.lineCount
+        static let fill = WaveAppearance.standard.fill
+        static let lineThickness = WaveAppearance.standard.thickness
+        static let waveAmplitude = WaveAppearance.standard.amplitude
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -63,6 +75,12 @@ final class AppSettings {
     @ObservationIgnored private var storedHideDelay: Double
     @ObservationIgnored private var storedHideInFullscreen: Bool
     @ObservationIgnored private var storedPaused: Bool
+    @ObservationIgnored private var storedColorMode: WaveColorMode
+    @ObservationIgnored private var storedGlowRadius: Double
+    @ObservationIgnored private var storedLineCount: Int
+    @ObservationIgnored private var storedFill: Double
+    @ObservationIgnored private var storedLineThickness: Double
+    @ObservationIgnored private var storedWaveAmplitude: Double
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -94,6 +112,30 @@ final class AppSettings {
         )
         storedHideInFullscreen = Self.readBool(defaults, Key.hideInFullscreen) ?? Default.hideInFullscreen
         storedPaused = Self.readBool(defaults, Key.paused) ?? Default.paused
+        storedColorMode = Self.sanitized(
+            Self.readJSON(WaveColorMode.self, defaults, Key.colorMode) ?? Default.colorMode
+        )
+        storedGlowRadius = Self.clamp(
+            Self.readDouble(defaults, Key.glowRadius) ?? Default.glowRadius,
+            WaveAppearance.Limits.glowRadius,
+            fallback: Default.glowRadius
+        )
+        storedLineCount = Self.clampLineCount(Self.readInt(defaults, Key.lineCount) ?? Default.lineCount)
+        storedFill = Self.clamp(
+            Self.readDouble(defaults, Key.fill) ?? Default.fill,
+            WaveAppearance.Limits.fill,
+            fallback: Default.fill
+        )
+        storedLineThickness = Self.clamp(
+            Self.readDouble(defaults, Key.lineThickness) ?? Default.lineThickness,
+            WaveAppearance.Limits.thickness,
+            fallback: Default.lineThickness
+        )
+        storedWaveAmplitude = Self.clamp(
+            Self.readDouble(defaults, Key.waveAmplitude) ?? Default.waveAmplitude,
+            WaveAppearance.Limits.amplitude,
+            fallback: Default.waveAmplitude
+        )
     }
 
     // MARK: - Свойства
@@ -182,7 +224,8 @@ final class AppSettings {
         }
     }
 
-    /// Ширина каждого крыла в pt, 40...120.
+    /// Ширина каждого крыла в pt, 40...200. На экране с вырезом остров еще ограничивает ее
+    /// свободной областью строки меню (`NotchLayout.wingLimit`), настройка при этом не меняется.
     var wingWidth: Double {
         get {
             access(keyPath: \.wingWidth)
@@ -262,6 +305,102 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Вид волн
+
+    /// Вид волн целиком из сохраненных значений (вкладка «Вид»). Только читает.
+    var appearance: WaveAppearance {
+        WaveAppearance(
+            wingWidth: wingWidth, colorMode: colorMode, glowRadius: glowRadius, lineCount: lineCount,
+            fill: fill, thickness: lineThickness, amplitude: waveAmplitude
+        )
+    }
+
+    /// «Цвет волн»: из обложки, готовая палитра или «Свой цвет». Красит и свечение, и волну
+    /// панели. Хранится как JSON; нечитаемое значение (в том числе палитра из будущей версии)
+    /// дает «Из обложки».
+    var colorMode: WaveColorMode {
+        get {
+            access(keyPath: \.colorMode)
+            return storedColorMode
+        }
+        set {
+            let value = Self.sanitized(newValue)
+            guard value != storedColorMode else { return }
+            withMutation(keyPath: \.colorMode) { storedColorMode = value }
+            writeJSON(value, Key.colorMode)
+        }
+    }
+
+    /// «Радиус свечения», множитель 0.5...3.
+    var glowRadius: Double {
+        get {
+            access(keyPath: \.glowRadius)
+            return storedGlowRadius
+        }
+        set {
+            let value = Self.clamp(newValue, WaveAppearance.Limits.glowRadius, fallback: Default.glowRadius)
+            guard value != storedGlowRadius else { return }
+            withMutation(keyPath: \.glowRadius) { storedGlowRadius = value }
+            defaults.set(value, forKey: Key.glowRadius)
+        }
+    }
+
+    /// «Количество волн», 1...6.
+    var lineCount: Int {
+        get {
+            access(keyPath: \.lineCount)
+            return storedLineCount
+        }
+        set {
+            let value = Self.clampLineCount(newValue)
+            guard value != storedLineCount else { return }
+            withMutation(keyPath: \.lineCount) { storedLineCount = value }
+            defaults.set(value, forKey: Key.lineCount)
+        }
+    }
+
+    /// «Заливка», доля 0...1.
+    var fill: Double {
+        get {
+            access(keyPath: \.fill)
+            return storedFill
+        }
+        set {
+            let value = Self.clamp(newValue, WaveAppearance.Limits.fill, fallback: Default.fill)
+            guard value != storedFill else { return }
+            withMutation(keyPath: \.fill) { storedFill = value }
+            defaults.set(value, forKey: Key.fill)
+        }
+    }
+
+    /// «Толщина линий», множитель 0.5...2.
+    var lineThickness: Double {
+        get {
+            access(keyPath: \.lineThickness)
+            return storedLineThickness
+        }
+        set {
+            let value = Self.clamp(newValue, WaveAppearance.Limits.thickness, fallback: Default.lineThickness)
+            guard value != storedLineThickness else { return }
+            withMutation(keyPath: \.lineThickness) { storedLineThickness = value }
+            defaults.set(value, forKey: Key.lineThickness)
+        }
+    }
+
+    /// «Размах», множитель 0.5...2: только геометрия волн, чувствительность отдельно.
+    var waveAmplitude: Double {
+        get {
+            access(keyPath: \.waveAmplitude)
+            return storedWaveAmplitude
+        }
+        set {
+            let value = Self.clamp(newValue, WaveAppearance.Limits.amplitude, fallback: Default.waveAmplitude)
+            guard value != storedWaveAmplitude else { return }
+            withMutation(keyPath: \.waveAmplitude) { storedWaveAmplitude = value }
+            defaults.set(value, forKey: Key.waveAmplitude)
+        }
+    }
+
     // MARK: - Ограничения
 
     private static func clampSensitivity(_ value: Float) -> Float {
@@ -284,6 +423,22 @@ final class AppSettings {
         let range = Limits.syncOffset
         let clamped = min(max(milliseconds, range.lowerBound), range.upperBound)
         return Int((Double(clamped) / 5).rounded()) * 5
+    }
+
+    private static func clampLineCount(_ count: Int) -> Int {
+        let range = WaveAppearance.Limits.lineCount
+        return min(max(count, range.lowerBound), range.upperBound)
+    }
+
+    /// «Свой цвет» с каналами в 0...1; цвет с NaN или бесконечностью заменяется первым цветом
+    /// стандартной палитры. Иначе `JSONEncoder` не запишет его, а волна станет черной.
+    private static func sanitized(_ mode: WaveColorMode) -> WaveColorMode {
+        guard case .custom(let color) = mode else { return mode }
+        guard color.r.isFinite, color.g.isFinite, color.b.isFinite else {
+            return .custom(PaletteExtractor.fallback[0])
+        }
+        func unit(_ channel: Float) -> Float { min(max(channel, 0), 1) }
+        return .custom(PaletteColor(r: unit(color.r), g: unit(color.g), b: unit(color.b)))
     }
 
     private static func clamp(_ value: Double, _ range: ClosedRange<Double>, fallback: Double) -> Double {

@@ -16,20 +16,25 @@ enum WaveStyle: Sendable {
     }
 }
 
-/// Проход отрисовки: сами линии или их размытая копия для свечения.
+/// Проход отрисовки: сами линии (с заливкой под ними) или их размытая копия для свечения.
 enum WavePass: Sendable {
     case lines
-    /// Толстые линии баса и середины (верх без свечения, он должен быть четким), только
-    /// слои с уровнем от `WaveSet.glowLevel`.
+    /// Толстые основные линии баса и середины (верх без свечения, он должен быть четким, эхо
+    /// тоже), только линии с уровнем от `WaveSet.glowLevel`.
     case glow
 }
 
 /// Волны одного кадра: точки и цвета считаются один раз и общие для всех холстов кадра
 /// (два крыла, линии и свечение).
 nonisolated struct WaveSet: Sendable {
+    /// Одна линия (`WaveLine`).
     struct Layer: Sendable {
-        let layer: WaveLayer
+        /// Форма линии: по ней толщина и цвет.
+        let shape: WaveLayer
+        /// Уровень, с которым нарисована линия: уровень источника × `amplitudeScale`.
         let level: Float
+        /// Есть ли у линии свечение: основная линия баса или середины с уровнем от `glowLevel`.
+        let glows: Bool
         /// y в -1...1: в крыле от выреза к краю, в панели от левого края к правому.
         let samples: [Float]
         let stops: [WavePaint.Stop]
@@ -47,40 +52,72 @@ nonisolated struct WaveSet: Sendable {
 
     let style: WaveStyle
     let layers: [Layer]
+    /// «Толщина линий», множитель.
+    let thickness: CGFloat
+    /// «Заливка» 0...1; 0 без заливки.
+    let fill: Double
 
     /// Пустой набор: холст ничего не рисует. Так стоит слой волн, которого сейчас не видно.
     init(empty style: WaveStyle) {
         self.style = style
         layers = []
+        thickness = 1
+        fill = 0
     }
 
-    init(frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle) {
+    /// По линии на каждую `appearance.lines`: размах от уровня источника (общий уровень у
+    /// одной волны) × `amplitudeScale` и «Размаха», фаза формы со сдвигом `phaseOffset`. Цвет
+    /// идет от уровня источника, прозрачность × `opacity`: эхо делит точки градиента со своей
+    /// основной линией и отличается от нее только прозрачностью.
+    init(
+        frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle,
+        appearance: WaveAppearance
+    ) {
         let points = style == .wing ? Self.wingPoints : Self.panelPoints
         let locations = style == .wing ? Self.wingLocations : Self.panelLocations
         self.style = style
-        layers = WaveLayer.allCases.map { layer in
-            let level = layer.rawValue < frame.layers.count ? frame.layers[layer.rawValue] : 0
-            return Layer(
-                layer: layer,
-                level: level,
-                samples: WaveShape.samples(
-                    layer: layer, amplitude: level, phase: motion.phase(layer, profile: style.profile), count: points,
+        thickness = CGFloat(appearance.thickness)
+        fill = appearance.fill
+        var computed: [(source: WaveLine.Source, shape: WaveLayer, stops: [WavePaint.Stop])] = []
+        layers = appearance.lines.map { line in
+            let sourceLevel: Float = switch line.source {
+            case .overall: frame.level
+            case .layer(let layer): layer.rawValue < frame.layers.count ? frame.layers[layer.rawValue] : 0
+            }
+            let level = sourceLevel * line.amplitudeScale
+            let stops: [WavePaint.Stop]
+            if let shared = computed.first(where: { $0.source == line.source && $0.shape == line.shape }) {
+                stops = shared.stops
+            } else {
+                stops = WavePaint.stops(
+                    palette: palette, layer: line.shape, level: sourceLevel, time: time, locations: locations,
                     profile: style.profile
-                ),
-                stops: WavePaint.stops(
-                    palette: palette, layer: layer, level: level, time: time, locations: locations, profile: style.profile
                 )
+                computed.append((line.source, line.shape, stops))
+            }
+            let phase = motion.phase(line.shape, profile: style.profile).shifted(by: line.phaseOffset)
+            return Layer(
+                shape: line.shape,
+                level: level,
+                glows: line.phaseOffset == 0 && line.shape != .high && level >= Self.glowLevel,
+                samples: WaveShape.samples(
+                    layer: line.shape, amplitude: level, phase: phase, count: points, profile: style.profile,
+                    gain: appearance.amplitude
+                ),
+                stops: line.opacity == 1 ? stops : stops.map { stop in
+                    WavePaint.Stop(location: stop.location, color: stop.color, opacity: stop.opacity * line.opacity)
+                }
             )
         }
     }
 }
 
-/// Три волны (бас, середина, верх) в своей области.
+/// Линии волн (`WaveSet`, по умолчанию бас, середина, верх) в своей области.
 ///
 /// Путь сглажен квадратичными кривыми через середины соседних точек, линии с круглыми концами:
-/// в крыле 1.75 / 1.5 / 1.25 pt, в панели 2 / 1.75 / 1.5 pt (бас, середина, верх). Размах
-/// `(высота / 2 - поле) * уровень`, поле 6 pt в крыле и 3 pt в панели. Цвет из `WavePaint`.
-/// Волны складываются в режиме `.plusLighter`.
+/// в крыле 1.75 / 1.5 / 1.25 pt, в панели 2 / 1.75 / 1.5 pt (по форме: бас, середина, верх),
+/// × «Толщина линий». Размах `(высота / 2 - поле) * y`, поле 6 pt в крыле и 3 pt в панели.
+/// Цвет из `WavePaint`. Волны складываются в режиме `.plusLighter`, заливка под ними.
 struct WaveCanvas: View {
     let waves: WaveSet
     let mirrored: Bool
@@ -93,8 +130,14 @@ struct WaveCanvas: View {
     }
 
     /// Волны одного холста из кадра анализа; острову удобнее общий `WaveSet` на кадр.
-    init(frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, mirrored: Bool, style: WaveStyle) {
-        self.init(waves: WaveSet(frame: frame, palette: palette, motion: motion, time: time, style: style), mirrored: mirrored)
+    init(
+        frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, mirrored: Bool, style: WaveStyle,
+        appearance: WaveAppearance = .standard
+    ) {
+        self.init(
+            waves: WaveSet(frame: frame, palette: palette, motion: motion, time: time, style: style, appearance: appearance),
+            mirrored: mirrored
+        )
     }
 
     var body: some View {
@@ -129,28 +172,57 @@ nonisolated struct WaveDrawing: Sendable {
         let start: CGFloat = isWing && mirrored ? size.width : 0
         let end: CGFloat = isWing && mirrored ? 0 : size.width
 
-        for layer in waves.layers {
-            if pass == .glow, layer.layer == .high || layer.level < WaveSet.glowLevel {
-                continue
-            }
+        let lines: [(layer: WaveSet.Layer, path: Path)] = waves.layers.compactMap { layer in
             let count = layer.samples.count
-            guard count > 1 else { continue }
+            guard count > 1, pass == .lines || layer.glows else { return nil }
             let step = (end - start) / CGFloat(count - 1)
             let points = layer.samples.enumerated().map { i, y in
                 CGPoint(x: start + step * CGFloat(i), y: middle - swing * CGFloat(y))
             }
-            let gradient = Gradient(stops: layer.stops.map { stop in
-                Gradient.Stop(color: Color(palette: stop.color, opacity: Double(stop.opacity)), location: CGFloat(stop.location))
+            return (layer: layer, path: Self.smoothPath(through: points))
+        }
+        func shading(_ stops: [WavePaint.Stop], opacity: (Float) -> Double) -> GraphicsContext.Shading {
+            let gradient = Gradient(stops: stops.map { stop in
+                Gradient.Stop(color: Color(palette: stop.color, opacity: opacity(stop.opacity)), location: CGFloat(stop.location))
             })
-            let shading = GraphicsContext.Shading.linearGradient(
-                gradient,
-                startPoint: CGPoint(x: start, y: middle),
-                endPoint: CGPoint(x: end, y: middle)
-            )
-            let width = widths[layer.layer.rawValue] * (pass == .glow ? Self.glowLineScale : 1)
+            return .linearGradient(gradient, startPoint: CGPoint(x: start, y: middle), endPoint: CGPoint(x: end, y: middle))
+        }
+
+        if pass == .lines, waves.fill > 0, !lines.isEmpty {
+            // Заливка всех линий в одном слое, затем одна вертикальная маска: у ±swing
+            // `fillTopOpacity × fill`, у оси ноль. Маска симметрична, поэтому верхняя и нижняя
+            // половины спадают к оси каждая сама по себе.
+            let top = Double(WavePaint.fillTopOpacity) * waves.fill / Double(WavePaint.fullOpacity)
+            context.drawLayer { fills in
+                fills.blendMode = .plusLighter
+                for line in lines {
+                    var area = line.path
+                    area.addLine(to: CGPoint(x: end, y: middle))
+                    area.addLine(to: CGPoint(x: start, y: middle))
+                    area.closeSubpath()
+                    fills.fill(area, with: shading(line.layer.stops) { min(top * Double($0), 1) })
+                }
+                fills.blendMode = .destinationIn
+                fills.fill(
+                    Path(CGRect(origin: .zero, size: size)),
+                    with: .linearGradient(
+                        Gradient(stops: [
+                            Gradient.Stop(color: .white, location: 0),
+                            Gradient.Stop(color: Color(.sRGB, white: 1, opacity: 0), location: 0.5),
+                            Gradient.Stop(color: .white, location: 1),
+                        ]),
+                        startPoint: CGPoint(x: 0, y: middle - swing),
+                        endPoint: CGPoint(x: 0, y: middle + swing)
+                    )
+                )
+            }
+        }
+
+        for line in lines {
+            let width = widths[line.layer.shape.rawValue] * waves.thickness * (pass == .glow ? Self.glowLineScale : 1)
             context.stroke(
-                Self.smoothPath(through: points),
-                with: shading,
+                line.path,
+                with: shading(line.layer.stops) { Double($0) },
                 style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
             )
         }

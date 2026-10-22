@@ -63,8 +63,8 @@ final class AppModel {
     private(set) var islandState: IslandState = .hidden
     /// Последний трек выбранного источника, держится и на паузе.
     private(set) var lastTrack: NowPlayingInfo?
-    /// Палитра волн: из обложки `lastTrack`, без обложки стандартная. Остров переходит к ней
-    /// плавно (`PaletteFade`).
+    /// Палитра обложки `lastTrack`, без обложки стандартная. Волны, свечение и волна панели
+    /// берут ее в режиме «Из обложки» (`wavePalette`).
     private(set) var palette: [PaletteColor] = PaletteExtractor.fallback
     /// Обложка `lastTrack` для панели, уже уменьшенная до `ExpandedPanelView.artworkPixels`.
     private(set) var artwork: PanelArtwork?
@@ -974,7 +974,7 @@ final class AppModel {
         if previewing {
             let glow = reduceMotion ? 0 : previewGlow
             let frame = springFrame(sampled, glow: glow)
-            let shown = paletteFade.palette(target: palette, now: now)
+            let shown = paletteFade.palette(target: wavePalette, now: now)
             return IslandVisuals(
                 frame: frame, sampled: sampled, motion: motion, palette: shown,
                 glow: glow, pulse: reduceMotion ? 0 : previewPulse, time: now
@@ -1005,10 +1005,16 @@ final class AppModel {
         }
         let frame = springFrame(sampled, glow: glow)
         recordRender(now: now, timelineTime: timelineTime)
-        let shown = paletteFade.palette(target: palette, now: now)
+        let shown = paletteFade.palette(target: wavePalette, now: now)
         return IslandVisuals(
             frame: frame, sampled: sampled, motion: motion, palette: shown, glow: glow, pulse: breath, time: now
         )
+    }
+
+    /// Палитра волн, свечения и волны панели по «Цвету волн» поверх палитры обложки. Остров
+    /// переходит к ней плавно (`PaletteFade`, 0.8 с): и к новой обложке, и к новому режиму.
+    var wavePalette: [PaletteColor] {
+        settings.appearance.palette(artwork: palette)
     }
 
     /// Кадр `sampled` с уровнями слоев и общим уровнем из пружин и акцентом доли на басу.
@@ -1078,7 +1084,7 @@ final class AppModel {
         self.motion = motion
         previewGlow = glow
         previewPulse = pulse
-        paletteFade = PaletteFade(palette: self.palette)
+        paletteFade = PaletteFade(palette: wavePalette)
         lastVisualTime = time
     }
 

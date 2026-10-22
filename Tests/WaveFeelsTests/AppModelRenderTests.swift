@@ -77,6 +77,32 @@ struct AppModelRenderTests {
         #expect(lit.frame.layers[1] == frame.layers[1])
     }
 
+    /// «Цвет волн» задает палитру острова поверх обложки; смена режима перетекает за 0.8 с,
+    /// как новая обложка.
+    @Test func colorModeFadesLikeNewArtwork() throws {
+        let (model, defaults, suite) = try Self.makeModel("render-color-mode")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let artwork = PaletteExtractor.fallback
+        model.showPreview(
+            state: .collapsed, track: nil, palette: artwork, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
+            glow: 0, pulse: 0, time: 10, nowPlayingAvailable: true
+        )
+        #expect(model.islandVisuals(now: 10, timelineTime: 10, reduceMotion: false).palette == artwork)
+
+        model.settings.colorMode = .preset(.neon)
+        #expect(model.wavePalette == WavePreset.neon.colors)
+        #expect(model.palette == artwork)
+        let start = model.islandVisuals(now: 10, timelineTime: 10, reduceMotion: false).palette
+        #expect(start == artwork)
+        let middle = model.islandVisuals(now: 10.4, timelineTime: 10.4, reduceMotion: false).palette
+        #expect(middle != artwork && middle != WavePreset.neon.colors)
+        let end = model.islandVisuals(now: 10 + PaletteFade.duration, timelineTime: 10.8, reduceMotion: false).palette
+        #expect(end == WavePreset.neon.colors)
+
+        model.settings.colorMode = .custom(PaletteColor(hex: 0x7A5CFF))
+        #expect(model.wavePalette == WaveAppearance.customPalette(PaletteColor(hex: 0x7A5CFF)))
+    }
+
     @Test func diagnosticsHaveRenderSection() throws {
         let (model, defaults, suite) = try Self.makeModel("render-diagnostics")
         defer { defaults.removePersistentDomain(forName: suite) }

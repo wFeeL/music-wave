@@ -17,6 +17,17 @@ struct AppSettingsTests {
         try body(defaults)
     }
 
+    /// То же с именем домена: по нему видно, какие ключи записаны.
+    private static func withSuite(_ body: (UserDefaults, String) throws -> Void) rethrows {
+        let suite = "wf-settings-test-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            Issue.record("UserDefaults(suiteName:) вернул nil")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try body(defaults, suite)
+    }
+
     /// Источники, о которых Now Playing сообщал, переживают перезапуск; пустой bundle ID не пишется.
     @Test func nowPlayingSourceHistoryPersists() {
         Self.withDefaults { defaults in
@@ -130,7 +141,7 @@ struct AppSettingsTests {
             settings.sensitivity = 0
             #expect(settings.sensitivity == 0.25)
             settings.wingWidth = 500
-            #expect(settings.wingWidth == 120)
+            #expect(settings.wingWidth == 200)
             settings.wingWidth = 10
             #expect(settings.wingWidth == 40)
             settings.glowIntensity = 2
@@ -226,6 +237,128 @@ struct AppSettingsTests {
             #expect(settings.levelMode == .auto)
             #expect(settings.source == nil)
             #expect(settings.latencyMode == .manual(milliseconds: 500))
+        }
+    }
+}
+
+extension AppSettingsTests {
+    /// Обновление с 0.9.0: в домене только старые ключи. Значения не меняются, вид волн
+    /// стандартный с шириной крыла из настроек, ничего не дописывается.
+    @Test func upgradeFrom090KeepsValuesAndWritesNothing() throws {
+        try Self.withSuite { defaults, suite in
+            let source = AudioSource.application(
+                bundleID: "ru.yandex.desktop.music",
+                bundlePath: "/Applications/Яндекс Музыка.app",
+                displayName: "Яндекс Музыка"
+            )
+            let encoder = JSONEncoder()
+            defaults.set(120.0, forKey: "wf.wingWidth")
+            defaults.set(0.3, forKey: "wf.glowIntensity")
+            defaults.set(false, forKey: "wf.beatPulse")
+            defaults.set(try encoder.encode(LatencyMode.manual(milliseconds: 80)), forKey: "wf.latencyMode")
+            defaults.set(try encoder.encode(source), forKey: "wf.source")
+            let before = Set((defaults.persistentDomain(forName: suite) ?? [:]).keys)
+            #expect(before.count == 5)
+
+            let settings = AppSettings(defaults: defaults)
+            #expect(settings.wingWidth == 120)
+            #expect(settings.glowIntensity == 0.3)
+            #expect(settings.beatPulse == false)
+            #expect(settings.latencyMode == .manual(milliseconds: 80))
+            #expect(settings.source == source)
+            #expect(settings.syncOffsetMs == 0)
+            var expected = WaveAppearance.standard
+            expected.wingWidth = 120
+            #expect(settings.appearance == expected)
+
+            let after = Set((defaults.persistentDomain(forName: suite) ?? [:]).keys)
+            #expect(after == before)
+        }
+    }
+
+    /// Испорченный или неизвестный (палитра из будущей версии) режим цвета дает «Из обложки».
+    @Test func garbageColorModeFallsBackToArtwork() {
+        Self.withDefaults { defaults in
+            defaults.set(Data("x".utf8), forKey: "wf.colorMode")
+            #expect(AppSettings(defaults: defaults).colorMode == .artwork)
+            defaults.set(Data(#"{"preset":{"_0":"rainbow"}}"#.utf8), forKey: "wf.colorMode")
+            #expect(AppSettings(defaults: defaults).colorMode == .artwork)
+            defaults.set("не данные", forKey: "wf.colorMode")
+            #expect(AppSettings(defaults: defaults).colorMode == .artwork)
+        }
+    }
+
+    @Test func appearanceKeysPersist() throws {
+        try Self.withDefaults { defaults in
+            let written = AppSettings(defaults: defaults)
+            written.wingWidth = 180
+            written.colorMode = .custom(PaletteColor(hex: 0x7A5CFF))
+            written.glowRadius = 2.5
+            written.lineCount = 5
+            written.fill = 0.4
+            written.lineThickness = 1.5
+            written.waveAmplitude = 0.75
+
+            for key in [
+                "wf.colorMode", "wf.glowRadius", "wf.lineCount", "wf.fill", "wf.lineThickness", "wf.waveAmplitude",
+            ] {
+                #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
+            }
+            let mode = try #require(defaults.data(forKey: "wf.colorMode"))
+            #expect(try JSONDecoder().decode(WaveColorMode.self, from: mode) == .custom(PaletteColor(hex: 0x7A5CFF)))
+
+            let read = AppSettings(defaults: defaults)
+            #expect(read.wingWidth == 180)
+            #expect(read.colorMode == .custom(PaletteColor(hex: 0x7A5CFF)))
+            #expect(read.glowRadius == 2.5)
+            #expect(read.lineCount == 5)
+            #expect(read.fill == 0.4)
+            #expect(read.lineThickness == 1.5)
+            #expect(read.waveAmplitude == 0.75)
+            #expect(read.appearance == WaveAppearance(
+                wingWidth: 180, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowRadius: 2.5,
+                lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.75
+            ))
+
+            read.colorMode = .preset(.ocean)
+            #expect(AppSettings(defaults: defaults).colorMode == .preset(.ocean))
+        }
+    }
+
+    /// Новые значения держатся в диапазонах `WaveAppearance.Limits`, по умолчанию стандартные.
+    /// Не конечный «Свой цвет» не ломает запись: JSON с NaN не кодируется, цвет заменяется.
+    @Test func appearanceDefaultsAndClamps() {
+        Self.withDefaults { defaults in
+            let settings = AppSettings(defaults: defaults)
+            #expect(settings.appearance == .standard)
+            settings.glowRadius = 9
+            #expect(settings.glowRadius == 3)
+            settings.glowRadius = .nan
+            #expect(settings.glowRadius == 1)
+            settings.lineCount = 0
+            #expect(settings.lineCount == 1)
+            settings.lineCount = 40
+            #expect(settings.lineCount == 6)
+            settings.fill = 2
+            #expect(settings.fill == 1)
+            settings.lineThickness = 0.1
+            #expect(settings.lineThickness == 0.5)
+            settings.waveAmplitude = .infinity
+            #expect(settings.waveAmplitude == 1)
+
+            settings.colorMode = .custom(PaletteColor(r: .nan, g: 0.5, b: 2))
+            guard case .custom(let color) = settings.colorMode else {
+                Issue.record("режим не «Свой цвет»: \(settings.colorMode)")
+                return
+            }
+            #expect(color.r.isFinite && color.g.isFinite && color.b.isFinite)
+            #expect(defaults.data(forKey: "wf.colorMode") != nil)
+            #expect(AppSettings(defaults: defaults).colorMode == settings.colorMode)
+
+            defaults.set(1000.0, forKey: "wf.wingWidth")
+            defaults.set(7.5, forKey: "wf.lineCount")
+            #expect(AppSettings(defaults: defaults).wingWidth == 200)
+            #expect(AppSettings(defaults: defaults).lineCount == 6)
         }
     }
 }
