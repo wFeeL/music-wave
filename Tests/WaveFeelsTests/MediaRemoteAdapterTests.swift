@@ -76,7 +76,7 @@ struct MediaRemoteAdapterTests {
         defer { adapter.stop() }
         #expect(adapter.availability == .checking)
 
-        let started = await waitUntil(.seconds(5)) { adapter.info?.title == "One" }
+        let started = await waitUntil(.seconds(30)) { adapter.info?.title == "One" }
         #expect(started)
         #expect(adapter.lastTestExitCode == SIGKILL)
         #expect(adapter.availability == .available)
@@ -97,7 +97,7 @@ struct MediaRemoteAdapterTests {
         adapter.start()
         defer { adapter.stop() }
 
-        let launched = await waitUntil(.seconds(6)) { fake.streamLaunches() >= 4 }
+        let launched = await waitUntil(.seconds(30)) { fake.streamLaunches() >= 4 }
         #expect(launched)
         #expect(adapter.availability == .available)
     }
@@ -114,7 +114,7 @@ struct MediaRemoteAdapterTests {
         adapter.start()
         defer { adapter.stop() }
 
-        let gaveUp = await waitUntil(.seconds(5)) { !adapter.isAvailable && adapter.availability != .checking }
+        let gaveUp = await waitUntil(.seconds(30)) { !adapter.isAvailable && adapter.availability != .checking }
         #expect(gaveUp)
         #expect(adapter.availability == .unavailable(exitCode: 3, stderr: "boom\nboom"))
         #expect(fake.streamLaunches() == 2)
@@ -125,17 +125,25 @@ struct MediaRemoteAdapterTests {
         defer { fake.remove() }
         var timing = AdapterTiming()
         timing.restartDelays = [.milliseconds(50)]
-        timing.restartInfoHold = .seconds(3)
+        // Шаги идут по команде теста, так что длинное удержание тест не замедляет, а остановка
+        // главного актора на CI (около 10 с) не успевает его исчерпать.
+        timing.restartInfoHold = .seconds(60)
         let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, timing: timing)
         adapter.start()
         defer { adapter.stop() }
 
-        #expect(await waitUntil(.seconds(5)) { adapter.info?.title == "One" })
-        var titles: [String?] = []
-        let reachedTwo = await waitUntil(.seconds(5)) {
-            if titles.last != adapter.info?.title { titles.append(adapter.info?.title) }
-            return adapter.info?.title == "Two"
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "One" })
+        var titles: [String?] = ["One"]
+        func record() {
+            let current: String? = adapter.info?.title
+            if titles.last != .some(current) { titles.append(current) }
         }
+        fake.touch("go1")
+        // Второй поток выдал пустой снимок и ждет go2: прежний трек должен держаться.
+        #expect(await waitUntil(.seconds(30)) { record(); return fake.exists("empty2") })
+        _ = await waitUntil(.milliseconds(300)) { record(); return false }
+        fake.touch("go2")
+        let reachedTwo = await waitUntil(.seconds(30)) { record(); return adapter.info?.title == "Two" }
         #expect(reachedTwo)
         #expect(titles == ["One", "Two"])
         #expect(fake.streamLaunches() == 2)
@@ -151,17 +159,21 @@ struct MediaRemoteAdapterTests {
         adapter.start()
         defer { adapter.stop() }
 
-        #expect(await waitUntil(.seconds(5)) { adapter.info?.title == "One" })
-        #expect(await waitUntil(.seconds(5)) { fake.streamLaunches() == 2 })
-        // Второй поток молчит 1,5 с после пустого снимка: удержание (0,2 с) кончается раньше.
-        #expect(await waitUntil(.seconds(1)) { adapter.info == nil })
-        #expect(await waitUntil(.seconds(5)) { adapter.info?.title == "Two" })
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "One" })
+        fake.touch("go1")
+        #expect(await waitUntil(.seconds(30)) { fake.exists("empty2") })
+        // Второй поток молчит, пока нет go2: удержание (0,2 с) кончается и трек пропадает.
+        #expect(await waitUntil(.seconds(30)) { adapter.info == nil })
+        fake.touch("go2")
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "Two" })
     }
 
-    /// Первый поток: трек One и смерть. Второй: пустой снимок, пауза, трек Two.
+    /// Первый поток: трек One, ждет go1 и умирает. Второй: пустой снимок, метка empty2,
+    /// ждет go2, трек Two. Шаги идут по команде теста, поэтому задержки главного актора
+    /// на CI (другие тесты держат его секундами) не прячут промежуточные состояния.
     private static let restartBody = #"""
-        if ($cmd eq 'stream' && $launch == 1) { print $empty; print track('One'); pause_s(0.3); exit 1; }
-        if ($cmd eq 'stream') { print $empty; pause_s(1.5); print track('Two'); sleep 30; }
+        if ($cmd eq 'stream' && $launch == 1) { print $empty; print track('One'); wait_for('go1'); exit 1; }
+        if ($cmd eq 'stream') { print $empty; touch('empty2'); wait_for('go2'); print track('Two'); sleep 30; }
         """#
 }
 
@@ -177,8 +189,9 @@ private func waitUntil(_ timeout: Duration, _ condition: () -> Bool) async -> Bo
 }
 
 /// Временный `.app` с поддельным `mediaremote-adapter.pl`. Тело скрипта видит `$cmd`
-/// (`test`, `stream`, `send`), `$launch` (номер запуска `stream`), `$empty`, `track(title)`
-/// и `pause_s(seconds)`. По умолчанию `test` выходит с 0.
+/// (`test`, `stream`, `send`), `$launch` (номер запуска `stream`), `$empty`, `track(title)`,
+/// `pause_s(seconds)`, `touch(name)` и `wait_for(name)` (файлы-метки в каталоге `.app`, их же
+/// видят `touch(_:)` и `exists(_:)` теста). По умолчанию `test` выходит с 0.
 private struct FakeAdapter {
     let app: URL
     let bundle: Bundle
@@ -210,6 +223,7 @@ private struct FakeAdapter {
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
             .write(to: contents.appendingPathComponent("Info.plist"))
 
+        let dir = app.path(percentEncoded: false)
         let log = app.appendingPathComponent("calls.log").path(percentEncoded: false)
         let script = #"""
             #!/usr/bin/perl
@@ -218,12 +232,15 @@ private struct FakeAdapter {
             shift @ARGV;
             shift @ARGV if (($ARGV[0] // '') =~ m{/});
             my $cmd = shift @ARGV // '';
+            my $dir = '\#(dir)';
             my $log = '\#(log)';
             open(my $out, '>>', $log) or die; print $out "$cmd\n"; close $out;
             open(my $in, '<', $log) or die; my $launch = grep { /^stream$/ } <$in>; close $in;
             my $empty = qq({"type":"data","diff":false,"payload":{}}\n);
             sub track { my ($title) = @_; return qq({"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.Music","title":"$title","playing":true}}\n); }
             sub pause_s { select(undef, undef, undef, $_[0]); }
+            sub touch { open(my $f, '>', "$dir/$_[0]") or die; close $f; }
+            sub wait_for { my $n = 0; until (-e "$dir/$_[0]") { pause_s(0.02); exit 4 if ++$n > 3000; } }
 
             """# + body + "\nexit 0;\n"
         try Data(script.utf8).write(to: adapterDir.appendingPathComponent("mediaremote-adapter.pl"))
@@ -231,6 +248,14 @@ private struct FakeAdapter {
         bundle = try #require(Bundle(url: app))
         suiteName = "wf-adapter-tests-\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suiteName))
+    }
+
+    func touch(_ name: String) {
+        _ = FileManager.default.createFile(atPath: app.appendingPathComponent(name).path(percentEncoded: false), contents: nil)
+    }
+
+    func exists(_ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: app.appendingPathComponent(name).path(percentEncoded: false))
     }
 
     /// Сколько раз запускался `stream`.
