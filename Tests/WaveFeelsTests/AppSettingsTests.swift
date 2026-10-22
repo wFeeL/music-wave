@@ -184,6 +184,32 @@ struct AppSettingsTests {
         }
     }
 
+    /// «Сдвиг синхронизации»: 0 по умолчанию, -100...100 мс, шаг 5 мс, мусор в хранилище дает 0.
+    @Test func syncOffsetDefaultsAndClamps() {
+        Self.withDefaults { defaults in
+            let settings = AppSettings(defaults: defaults)
+            #expect(settings.syncOffsetMs == 0)
+            settings.syncOffsetMs = 250
+            #expect(settings.syncOffsetMs == 100)
+            settings.syncOffsetMs = -37
+            #expect(settings.syncOffsetMs == -35)
+            #expect(defaults.object(forKey: "wf.syncOffset") != nil)
+            #expect(AppSettings(defaults: defaults).syncOffsetMs == -35)
+            settings.syncOffsetMs = -500
+            #expect(settings.syncOffsetMs == -100)
+        }
+        Self.withDefaults { defaults in
+            defaults.set("не число", forKey: "wf.syncOffset")
+            #expect(AppSettings(defaults: defaults).syncOffsetMs == 0)
+            defaults.set(Data([1, 2, 3]), forKey: "wf.syncOffset")
+            #expect(AppSettings(defaults: defaults).syncOffsetMs == 0)
+            defaults.set(Double.nan, forKey: "wf.syncOffset")
+            #expect(AppSettings(defaults: defaults).syncOffsetMs == 0)
+            defaults.set(42, forKey: "wf.syncOffset")
+            #expect(AppSettings(defaults: defaults).syncOffsetMs == 40)
+        }
+    }
+
     @Test func storedGarbageIsClampedOrIgnored() {
         Self.withDefaults { defaults in
             defaults.set(10.0, forKey: "wf.sensitivity")

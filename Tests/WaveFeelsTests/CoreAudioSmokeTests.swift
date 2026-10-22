@@ -31,13 +31,13 @@ struct CoreAudioSmokeTests {
         let demo = try DemoAudioSource(ring: ring, file: Self.resource("demo.wav"))
         let engine = AnalysisEngine(ring: ring, store: store)
         let log = FrameLog()
-        engine.observeFrames { log.append($0) }
+        engine.observeFrames { frame, _ in log.append(frame) }
 
         demo.start()
         engine.start(sampleRate: demo.sampleRate)
         #expect(engine.isRunning)
-        // Удары демо идут каждые 0,5 с, детектору нужно 0,5 с истории: за 3 с ловятся удары
-        // на 1,0, 1,5, 2,0 и 2,5 с. Лишние 0,2 с дают запас в один удар (3,0 с).
+        // Удары демо идут каждые 0,5 с: за 3,2 с их шесть. Огибающая удара держится выше 0,8
+        // около трех шагов анализа (по 5,3 мс), так что четыре кадра это хотя бы два удара.
         try await Task.sleep(for: .seconds(3.2))
         engine.stop()
         demo.stop()
@@ -73,7 +73,7 @@ struct CoreAudioSmokeTests {
         let ring = SampleRingBuffer(capacity: 131_072)
         let engine = AnalysisEngine(ring: ring, store: FrameStore())
         let log = FrameLog()
-        engine.observeFrames { log.append($0) }
+        engine.observeFrames { frame, _ in log.append(frame) }
         let rate = 48_000.0
         let block = (0..<480).map { Float(0.5 * sin(2 * Double.pi * 440 * Double($0) / rate)) }
 
@@ -98,12 +98,14 @@ struct CoreAudioSmokeTests {
         #expect(last.level < 0.05, "level: \(last.level)")
     }
 
-    /// Пока остров скрыт, анализ идет с частотой 15 Гц; признак переживает остановку и запуск.
+    /// Пока остров скрыт, анализ просыпается 15 раз в секунду и берет один шаг на пробуждение;
+    /// признак переживает остановку и запуск. Кольцо пустое, поэтому кадры здесь это тихие кадры
+    /// вставшего потока (после 250 мс).
     @Test func idleEngineTicksAtFifteenHertz() async throws {
         let ring = SampleRingBuffer(capacity: 131_072)
         let engine = AnalysisEngine(ring: ring, store: FrameStore())
         let log = FrameLog()
-        engine.observeFrames { log.append($0) }
+        engine.observeFrames { frame, _ in log.append(frame) }
 
         engine.setIdle(true)
         engine.start(sampleRate: 48_000)
@@ -119,18 +121,18 @@ struct CoreAudioSmokeTests {
         let idleFrames = log.frames.count - before
         let elapsed = clock.now - started
         // Сон под нагрузкой может затянуться, поэтому проверяется частота за фактическое время:
-        // не больше 15 кадров в секунду (плюс первый сразу и запас на границы) и не меньше половины
-        // этого: таймер работает, а не стоит.
+        // не больше 15 кадров в секунду (плюс запас на границы) и не меньше половины этого после
+        // первых 250 мс: таймер работает, а не стоит.
         let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
         let expected = seconds * AnalysisEngine.idleRate
         let upper = Int(expected) + 3
-        let lower = max(1, Int(expected * 0.5))
+        let lower = max(1, Int((seconds - SampleFeedMonitor.defaultStallLimit) * AnalysisEngine.idleRate * 0.5))
         #expect(idleFrames <= upper, "кадров в простое: \(idleFrames) за \(elapsed), не больше \(upper)")
         #expect(idleFrames >= lower, "кадров в простое: \(idleFrames) за \(elapsed), не меньше \(lower)")
 
         engine.setIdle(false)
         let active = engine.tickIntervalForTesting
-        #expect(active == 1.0 / 60 || active == 1.0 / 30)
+        #expect(active == 1.0 / 120 || active == 1.0 / 30)
         engine.stop()
     }
 

@@ -14,9 +14,11 @@ import WaveCore
 /// через нее одной линией от середины, по краю свернутой капсулы тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
 ///
 /// Кадры идут от `TimelineView(.animation)`, на паузе, пока остров скрыт; в режиме
-/// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет кадр анализа на момент
-/// кадра по часам хоста (`CACurrentMediaTime()`), сглаживает уровни пружинами и двигает фазы
-/// волн, «вздох» и переход палитры (`AppModel.islandVisuals`), точки и цвета волн
+/// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет кадр анализа и свечение
+/// доли на момент показа кадра по часам хоста (`CACurrentMediaTime()` плюс два периода
+/// отрисовки), сглаживает уровни пружинами и двигает фазы волн, «вздох» и переход палитры
+/// (`AppModel.islandVisuals`); свечение под островом и точки у выреза идут от свечения доли,
+/// масштаб от «вздоха». Точки и цвета волн
 /// считаются один раз на кадр (`WaveSet`). Весь остров рисуется одной текстурой
 /// (`drawingGroup`). С `clock` остров рисуется один раз на момент `clock()`, без
 /// `TimelineView`: так его снимает `ImageRenderer`.
@@ -274,10 +276,10 @@ struct IslandView: View {
         .offset(x: rect.minX, y: rect.minY)
     }
 
-    /// Мягкая точка у края выреза, где сходятся волны крыла, вспыхивает на ударе.
+    /// Мягкая точка у края выреза, где сходятся волны крыла, вспыхивает со свечением доли.
     @ViewBuilder
     private func accent(at center: CGPoint, visuals: IslandVisuals) -> some View {
-        let opacity = Self.accentOpacity * Double(visuals.pulse)
+        let opacity = Self.accentOpacity * Double(visuals.glow)
         if opacity > 0.005 {
             let color = WavePaint.glowColor(visuals.palette.first ?? PaletteExtractor.fallback[0])
             Circle()
@@ -291,8 +293,8 @@ struct IslandView: View {
     }
 
     /// Мягкое свечение цвета `palette[0]`, поднятого до светлого и насыщенного, под нижним
-    /// краем острова. Яркость `pulse` с пиком 0.45 на темной строке меню и 0.25 на светлой при
-    /// яркости по умолчанию, у раскрытой панели втрое слабее.
+    /// краем острова. Яркость по свечению доли `glow` с пиком 0.45 на темной строке меню и 0.25 на
+    /// светлой при яркости по умолчанию, у раскрытой панели втрое слабее.
     @ViewBuilder
     private func beatGlow(
         below rect: CGRect, state: IslandState, scale: CGFloat, anchorY: CGFloat, visuals: IslandVisuals, intensity: Double
@@ -300,8 +302,8 @@ struct IslandView: View {
         let peak = colorScheme == .dark ? Self.beatGlowDark : Self.beatGlowLight
         let relative = intensity / AppSettings.Default.glowIntensity
         let expanded = state == .expanded ? Self.beatGlowExpanded : 1
-        let opacity = min(Double(visuals.pulse) * peak * relative * expanded, 1)
-        if Double(visuals.pulse) * intensity >= 0.005, opacity > 0 {
+        let opacity = min(Double(visuals.glow) * peak * relative * expanded, 1)
+        if Double(visuals.glow) * intensity >= 0.005, opacity > 0 {
             let color = WavePaint.glowColor(visuals.palette.first ?? PaletteExtractor.fallback[0])
             let width = rect.width * Self.beatGlowWidth
             let bottom = anchorY + (rect.maxY - anchorY) * scale

@@ -475,9 +475,16 @@ nonisolated final class ProcessTapCapture: TapCapturing, @unchecked Sendable {
     }
 
     /// Блок IOProc. Создается вне главного актора и ничего не захватывает, кроме `MonoMixer`.
+    /// Время входа идет в кольцо сырыми тиками хоста, только если флаг `hostTimeValid` стоит:
+    /// в аудиопотоке ни перевода времени, ни выделений, ни блокировок.
     private static func makeIOBlock(_ mixer: MonoMixer) -> AudioDeviceIOBlock {
-        { @Sendable (_, inputData, _, _, _) in
-            mixer.process(inputData)
+        { @Sendable (_, inputData, inputTime, _, _) in
+            let time = inputTime.pointee
+            if time.mFlags.contains(.hostTimeValid) {
+                mixer.process(inputData, hostTicks: time.mHostTime)
+            } else {
+                mixer.process(inputData)
+            }
         }
     }
 
@@ -520,10 +527,26 @@ nonisolated final class MonoMixer: @unchecked Sendable {
 
     /// Чередующиеся каналы (1 буфер, N каналов) и раздельные (N буферов по 1 каналу) Float32.
     /// Сводятся только буферы tap, начиная с `firstTapBuffer`; выключенные потоки приходят с `mData == nil`.
+    /// Блок пишется в кольцо без метки времени.
     func process(_ input: UnsafePointer<AudioBufferList>) {
+        let frames = mix(input)
+        guard frames > 0 else { return }
+        ring.write(UnsafeBufferPointer(start: scratch, count: frames))
+    }
+
+    /// То же, что `process(_:)`, плюс метка блока: `hostTicks` это `inInputTime.mHostTime` в тиках
+    /// хоста, как их дал IOProc, без перевода.
+    func process(_ input: UnsafePointer<AudioBufferList>, hostTicks: UInt64) {
+        let frames = mix(input)
+        guard frames > 0 else { return }
+        ring.write(UnsafeBufferPointer(start: scratch, count: frames), hostTicks: hostTicks)
+    }
+
+    /// Сводит вход в `scratch` и возвращает число кадров (0: писать нечего).
+    private func mix(_ input: UnsafePointer<AudioBufferList>) -> Int {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let first = firstTapBuffer.load(ordering: .acquiring)
-        guard first < buffers.count else { return }
+        guard first < buffers.count else { return 0 }
         var frames = Self.maxFrames
         var channels = 0
         for index in first..<buffers.count {
@@ -533,7 +556,7 @@ nonisolated final class MonoMixer: @unchecked Sendable {
             frames = min(frames, Int(buffer.mDataByteSize) / (count * MemoryLayout<Float>.size))
             channels += count
         }
-        guard channels > 0, frames > 0 else { return }
+        guard channels > 0, frames > 0 else { return 0 }
 
         let out = scratch
         out.update(repeating: 0, count: frames)
@@ -561,6 +584,6 @@ nonisolated final class MonoMixer: @unchecked Sendable {
         for frame in 0..<frames {
             out[frame] *= scale
         }
-        ring.write(UnsafeBufferPointer(start: out, count: frames))
+        return frames
     }
 }

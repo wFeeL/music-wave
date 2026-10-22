@@ -69,7 +69,7 @@ final class AudioPipeline {
         didSet { if adapterAvailable != oldValue { updateSourceOutputting() } }
     }
 
-    /// Остров скрыт: анализ идет с частотой 15 Гц вместо 60. Выставляет `AppModel`.
+    /// Остров скрыт: анализ просыпается 15 раз в секунду вместо 120. Выставляет `AppModel`.
     @ObservationIgnored var islandHidden = false {
         didSet { if islandHidden != oldValue { engine.setIdle(islandHidden) } }
     }
@@ -102,6 +102,11 @@ final class AudioPipeline {
 
     @ObservationIgnored var latencyMode: LatencyMode = .auto {
         didSet { if latencyMode != oldValue { pushSettings() } }
+    }
+
+    /// «Сдвиг синхронизации» в миллисекундах: плюс ставит кадры и свечение позже.
+    @ObservationIgnored var syncOffsetMs = 0 {
+        didSet { if syncOffsetMs != oldValue { pushSettings() } }
     }
 
     /// «Приостановить визуализацию»: захват или демо и анализ стоят, подписки работают,
@@ -561,18 +566,19 @@ final class AudioPipeline {
         }
     }
 
+    /// Уровни, задержка вывода и сдвиг синхронизации в анализ. Демо идет с задержкой вывода 0,
+    /// как в 0.9.0: файл не проходит через устройство вывода. Поэтому в демо свечение без
+    /// захвата ритма приходит примерно на 52 мс позже звука, а не на 33 (принято).
     private func pushSettings() {
         var effective = settings
         effective.systemVolume = output.effectiveVolume
-        var delayFrames = 0
-        if mode != .demo {
-            let rate = capture.sampleRate
-            let milliseconds = LatencyCalculator.delayMilliseconds(output.latency, mode: latencyMode)
-            if rate > 0 {
-                delayFrames = LatencyCalculator.delayFrames(milliseconds: milliseconds, sampleRate: rate)
-            }
-        }
-        engine.update(settings: effective, delayFrames: delayFrames)
+        let latency = mode == .demo ? 0 : LatencyCalculator.outputLatency(output.latency, mode: latencyMode)
+        engine.update(settings: effective, outputLatency: latency, syncOffset: Double(syncOffsetMs) / 1000)
+    }
+
+    /// Задержка вывода, с которой сейчас идут кадры и свечение, секунды (0 в демо).
+    var outputLatency: Double {
+        mode == .demo ? 0 : LatencyCalculator.outputLatency(output.latency, mode: latencyMode)
     }
 
     // MARK: - Сторож нулей

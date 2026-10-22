@@ -21,8 +21,9 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// настроек в размере настоящего окна: светлый, темный и самый высокий (ручная задержка и
 /// подсказка о доступе к звуку), на котором видно, если содержимое не помещается.
 ///
-/// Кадры анализа не задаются руками: `demo.wav` прогоняется через `Analyzer` вне реального
-/// времени с шагом 1/60 с до нужного момента, вместе с ним двигаются фазы волн и «вздох».
+/// Кадры анализа не задаются руками: `demo.wav` прогоняется по шагам через `StreamAnalyzer` и
+/// `BeatTracker` вне реального времени до нужного момента, с шагом 1/60 с вместе с ним двигаются
+/// фазы волн, свечение доли и «вздох».
 /// Тишина получается так же: после 6 с звук обнуляется, и волны затихают 2 с.
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
@@ -280,6 +281,7 @@ enum SnapshotRenderer {
             palette: scene.palette,
             frame: moment.frame,
             motion: moment.motion,
+            glow: moment.glow,
             pulse: moment.pulse,
             time: moment.time,
             nowPlayingAvailable: scene.nowPlaying
@@ -440,23 +442,32 @@ nonisolated private struct DemoMoment: Sendable {
     let time: Double
     let frame: WaveFrame
     let motion: WaveMotion
-    let pulse: BeatPulse
+    /// Свечение доли 0...1.
+    let glow: Float
+    /// «Вздох» 0...1.
+    let pulse: Float
 }
 
-/// Прогон демо через `Analyzer` вне реального времени, кадр каждые 1/60 с.
-/// После `mutedFrom` секунд звук обнуляется.
+/// Прогон демо по шагам через `StreamAnalyzer` и `BeatTracker` вне реального времени, момент
+/// каждые 1/60 с: последний кадр анализа, свечение доли по расписанию трекера на этот момент
+/// (ось потока, без задержек вывода и показа) и «вздох» как у острова: при захвате ритма пружина
+/// со свечением на 50 мс раньше, без захвата само свечение. После `mutedFrom` секунд звук обнуляется.
 nonisolated private struct DemoRun {
     static let frameStep = 1.0 / 60
 
     let moments: [DemoMoment]
 
     init(samples: [Float], sampleRate: Double, duration: Double, mutedFrom: Double?) {
-        let analyzer = Analyzer(sampleRate: sampleRate)
-        let size = Analyzer.fftSize
+        let analyzer = StreamAnalyzer(sampleRate: sampleRate)
+        var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
+        let size = analyzer.config.fftSize
+        let hop = analyzer.config.hopSize
         let mutedIndex = mutedFrom.map { Int($0 * sampleRate) } ?? Int.max
         var motion = WaveMotion()
         var pulse = BeatPulse()
+        var frame = WaveFrame.silent
         var window = [Float](repeating: 0, count: size)
+        var nextEnd = size
         var moments: [DemoMoment] = []
         let count = Int((duration / Self.frameStep).rounded())
         moments.reserveCapacity(count)
@@ -464,28 +475,40 @@ nonisolated private struct DemoRun {
         for step in 1...max(count, 1) {
             let time = Double(step) * Self.frameStep
             let end = Int(time * sampleRate)
-            for offset in 0..<size {
-                let index = end - size + offset
-                window[offset] = index >= 0 && index < samples.count && index < mutedIndex ? samples[index] : 0
+            while nextEnd <= end {
+                for offset in 0..<size {
+                    let index = nextEnd - size + offset
+                    window[offset] = index >= 0 && index < samples.count && index < mutedIndex ? samples[index] : 0
+                }
+                let result = window.withUnsafeBufferPointer {
+                    analyzer.processHop(window: $0, endSample: nextEnd, settings: LevelSettings())
+                }
+                tracker.process(result)
+                frame = result.frame
+                nextEnd += hop
             }
-            let frame = analyzer.process(samples: window, time: time, dt: Self.frameStep, settings: LevelSettings())
+            let schedule = tracker.schedule
+            let glow = BeatGlow.value(at: time, schedule: schedule, refreshPeriod: Self.frameStep)
+            let early = BeatGlow.value(at: time + AppModel.breathLead, schedule: schedule, refreshPeriod: Self.frameStep)
+            let spring = pulse.step(beat: early, dt: Self.frameStep)
             motion.advance(layers: frame.layers, dt: Self.frameStep)
-            pulse.step(beat: frame.beat, dt: Self.frameStep)
-            moments.append(DemoMoment(time: time, frame: frame, motion: motion, pulse: pulse))
+            moments.append(DemoMoment(
+                time: time, frame: frame, motion: motion, glow: glow, pulse: schedule.locked ? spring : glow
+            ))
         }
         self.moments = moments
     }
 
     var last: DemoMoment { moments[moments.count - 1] }
 
-    /// Пик «вздоха» в промежутке: сразу после сильной доли.
+    /// Пик свечения доли в промежутке: вспышка на сильной доле.
     func strongestBeat(in range: ClosedRange<Double>) -> DemoMoment {
-        moments.filter { range.contains($0.time) }.max { $0.pulse.value < $1.pulse.value } ?? last
+        moments.filter { range.contains($0.time) }.max { $0.glow < $1.glow } ?? last
     }
 
-    /// Самый спокойный «вздох» в промежутке: музыка играет, удара нет.
+    /// Самое слабое свечение в промежутке: музыка играет, вспышки нет.
     func calmest(in range: ClosedRange<Double>) -> DemoMoment {
-        moments.filter { range.contains($0.time) }.min { $0.pulse.value < $1.pulse.value } ?? last
+        moments.filter { range.contains($0.time) }.min { $0.glow < $1.glow } ?? last
     }
 }
 

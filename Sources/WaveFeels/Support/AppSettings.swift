@@ -17,6 +17,7 @@ final class AppSettings {
         static let levelMode = "wf.levelMode"
         static let followSystemVolume = "wf.followSystemVolume"
         static let latencyMode = "wf.latencyMode"
+        static let syncOffset = "wf.syncOffset"
         static let wingWidth = "wf.wingWidth"
         static let glowIntensity = "wf.glowIntensity"
         static let beatPulse = "wf.beatPulse"
@@ -28,6 +29,7 @@ final class AppSettings {
     enum Limits {
         static let sensitivity: ClosedRange<Float> = 0.25...3
         static let manualLatency: ClosedRange<Int> = 0...LatencyCalculator.maxMilliseconds
+        static let syncOffset: ClosedRange<Int> = -100...100
         static let wingWidth: ClosedRange<Double> = 40...120
         static let glowIntensity: ClosedRange<Double> = 0...1
         static let hideDelay: ClosedRange<Double> = 1...30
@@ -38,6 +40,7 @@ final class AppSettings {
         static let levelMode = LevelMode.auto
         static let followSystemVolume = true
         static let latencyMode = LatencyMode.auto
+        static let syncOffset = 0
         static let wingWidth = 64.0
         static let glowIntensity = 0.6
         static let beatPulse = true
@@ -53,6 +56,7 @@ final class AppSettings {
     @ObservationIgnored private var storedLevelMode: LevelMode
     @ObservationIgnored private var storedFollowSystemVolume: Bool
     @ObservationIgnored private var storedLatencyMode: LatencyMode
+    @ObservationIgnored private var storedSyncOffsetMs: Int
     @ObservationIgnored private var storedWingWidth: Double
     @ObservationIgnored private var storedGlowIntensity: Double
     @ObservationIgnored private var storedBeatPulse: Bool
@@ -71,6 +75,7 @@ final class AppSettings {
         storedLatencyMode = Self.clampLatency(
             Self.readJSON(LatencyMode.self, defaults, Key.latencyMode) ?? Default.latencyMode
         )
+        storedSyncOffsetMs = Self.clampSyncOffset(Self.readInt(defaults, Key.syncOffset) ?? Default.syncOffset)
         storedWingWidth = Self.clamp(
             Self.readDouble(defaults, Key.wingWidth) ?? Default.wingWidth,
             Limits.wingWidth,
@@ -159,6 +164,21 @@ final class AppSettings {
             guard value != storedLatencyMode else { return }
             withMutation(keyPath: \.latencyMode) { storedLatencyMode = value }
             writeJSON(value, Key.latencyMode)
+        }
+    }
+
+    /// «Сдвиг синхронизации», мс: -100...100 с шагом 5. Минус ставит свечение и волны раньше звука,
+    /// плюс позже.
+    var syncOffsetMs: Int {
+        get {
+            access(keyPath: \.syncOffsetMs)
+            return storedSyncOffsetMs
+        }
+        set {
+            let value = Self.clampSyncOffset(newValue)
+            guard value != storedSyncOffsetMs else { return }
+            withMutation(keyPath: \.syncOffsetMs) { storedSyncOffsetMs = value }
+            defaults.set(value, forKey: Key.syncOffset)
         }
     }
 
@@ -259,6 +279,13 @@ final class AppSettings {
         }
     }
 
+    /// В пределах `Limits.syncOffset`, до ближайшего кратного 5 (-37 дает -35).
+    private static func clampSyncOffset(_ milliseconds: Int) -> Int {
+        let range = Limits.syncOffset
+        let clamped = min(max(milliseconds, range.lowerBound), range.upperBound)
+        return Int((Double(clamped) / 5).rounded()) * 5
+    }
+
     private static func clamp(_ value: Double, _ range: ClosedRange<Double>, fallback: Double) -> Double {
         guard value.isFinite else { return fallback }
         return min(max(value, range.lowerBound), range.upperBound)
@@ -268,6 +295,14 @@ final class AppSettings {
 
     private static func readDouble(_ defaults: UserDefaults, _ key: String) -> Double? {
         defaults.object(forKey: key) == nil ? nil : defaults.double(forKey: key)
+    }
+
+    /// Целое из числа в хранилище; не число (строка, данные) и нечисловое значение дают `nil`.
+    private static func readInt(_ defaults: UserDefaults, _ key: String) -> Int? {
+        guard let number = defaults.object(forKey: key) as? NSNumber else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, abs(value) < 1e9 else { return nil }
+        return Int(value.rounded())
     }
 
     private static func readBool(_ defaults: UserDefaults, _ key: String) -> Bool? {

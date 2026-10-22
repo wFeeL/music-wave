@@ -66,7 +66,7 @@ struct AppModelArtworkTests {
     private func show(_ track: NowPlayingInfo, nowPlaying: Bool, in model: AppModel) {
         model.showPreview(
             state: .expanded, track: track, palette: nil, frame: .silent, motion: WaveMotion(),
-            pulse: BeatPulse(), time: 0, nowPlayingAvailable: nowPlaying
+            glow: 0, pulse: 0, time: 0, nowPlayingAvailable: nowPlaying
         )
     }
 }

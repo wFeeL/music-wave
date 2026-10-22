@@ -50,7 +50,7 @@ struct SettingsView: View {
         self.openDiagnostics = openDiagnostics
         _catalog = State(initialValue: catalog ?? SourceCatalog.current(model: model))
         _icons = State(initialValue: AppIconCache())
-        _autoLatency = State(initialValue: LatencyCalculator.delayMilliseconds(model.output.latency, mode: .auto))
+        _autoLatency = State(initialValue: Self.autoLatencyMilliseconds(model))
         _loginStatus = State(initialValue: LaunchAtLogin.status)
     }
 
@@ -269,6 +269,16 @@ struct SettingsView: View {
                 text: "\(milliseconds) мс"
             )
         }
+        sliderRow(
+            "Сдвиг синхронизации",
+            subtitle: "Меньше: свечение раньше звука, больше: позже",
+            value: Binding(
+                get: { Double(settings.syncOffsetMs) },
+                set: { settings.syncOffsetMs = Int(($0 / 5).rounded()) * 5 }
+            ),
+            in: Double(AppSettings.Limits.syncOffset.lowerBound)...Double(AppSettings.Limits.syncOffset.upperBound),
+            text: AppModel.syncOffsetText(settings.syncOffsetMs)
+        )
     }
 
     private var latencyKind: Binding<LatencyKind> {
@@ -369,14 +379,15 @@ struct SettingsView: View {
 
     // MARK: - Строки
 
-    /// Подпись слева, ползунок и его значение справа.
+    /// Подпись (и пояснение под ней) слева, ползунок и его значение справа.
     private func sliderRow(
         _ title: String,
+        subtitle: String? = nil,
         value: Binding<Double>,
         in range: ClosedRange<Double>,
         text: String
     ) -> some View {
-        LabeledContent(title) {
+        LabeledContent {
             HStack(spacing: 10) {
                 Slider(value: value, in: range)
                     .labelsHidden()
@@ -385,6 +396,11 @@ struct SettingsView: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: Self.valueWidth, alignment: .trailing)
+            }
+        } label: {
+            Text(title)
+            if let subtitle {
+                Text(subtitle)
             }
         }
     }
@@ -403,8 +419,13 @@ struct SettingsView: View {
         if fresh != catalog { catalog = fresh }
     }
 
+    /// Задержка вывода по устройству («Авто»), миллисекунды.
+    private static func autoLatencyMilliseconds(_ model: AppModel) -> Int {
+        AppModel.milliseconds(LatencyCalculator.outputLatency(model.output.latency, mode: .auto))
+    }
+
     private func refreshStatus() {
-        let latency = LatencyCalculator.delayMilliseconds(model.output.latency, mode: .auto)
+        let latency = Self.autoLatencyMilliseconds(model)
         if latency != autoLatency { autoLatency = latency }
         let status = LaunchAtLogin.status
         if status != loginStatus {

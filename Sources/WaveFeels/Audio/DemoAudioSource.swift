@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreAudio
 import Foundation
+import QuartzCore
 import WaveCore
 
 enum DemoAudioError: Error, CustomStringConvertible {
@@ -15,7 +17,9 @@ enum DemoAudioError: Error, CustomStringConvertible {
 }
 
 /// Звук из файла вместо tap: файл целиком в памяти (моно), таймер раз в 10 мс пишет в кольцо
-/// столько сэмплов, сколько прошло по часам, по кругу. Никогда не работает одновременно с tap.
+/// столько сэмплов, сколько прошло по часам, по кругу. Каждый кусок идет с меткой: тики хоста
+/// момента, когда «звучит» его первый сэмпл (`сейчас - еще не записано / частота`), как метка
+/// IOProc. Никогда не работает одновременно с tap.
 nonisolated final class DemoAudioSource: @unchecked Sendable {
     let sampleRate: Double
 
@@ -105,10 +109,13 @@ nonisolated final class DemoAudioSource: @unchecked Sendable {
             framesWritten = target - maxBurst
             pending = maxBurst
         }
+        let now = CACurrentMediaTime()
         samples.withUnsafeBufferPointer { all in
             while pending > 0 {
                 let chunk = min(pending, all.count - position)
-                ring.write(UnsafeBufferPointer(rebasing: all[position..<(position + chunk)]))
+                let start = max(now - Double(pending) / sampleRate, 0)
+                let ticks = AudioConvertNanosToHostTime(UInt64(start * 1_000_000_000))
+                ring.write(UnsafeBufferPointer(rebasing: all[position..<(position + chunk)]), hostTicks: ticks)
                 position = (position + chunk) % all.count
                 pending -= chunk
                 framesWritten += chunk
