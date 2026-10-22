@@ -347,6 +347,12 @@ enum Drums {
     }
 }
 
+/// Сцены, общие для нескольких проверок трекера и цепочки: каждая собирается один раз за прогон.
+enum SharedScenes {
+    static let steady120 = Drums.fourOnFloor(bpm: 120, hats: .eighths)
+    static let breakdown = Drums.breakdown(at: 10, length: 8)
+}
+
 extension TestRNG {
     /// Нормальная случайная величина (Бокс-Мюллер).
     mutating func nextGaussian() -> Double {

@@ -1,0 +1,238 @@
+import Foundation
+import Testing
+@testable import WaveCore
+
+/// Части трекера без сцен: идут на всех платформах.
+struct BeatTrackerPartsTests {
+    @Test func selectFindsTheRank() {
+        var rng = TestRNG(seed: 7)
+        for count in [1, 2, 3, 10, 281] {
+            let values = (0..<count).map { _ in Float(Int(rng.nextUnit() * 20)) }
+            let sorted = values.sorted()
+            for rank in [0, count / 2, count - 1] {
+                var copy = values
+                let picked = copy.withUnsafeMutableBufferPointer { BeatTracker.select($0, rank: rank) }
+                #expect(picked == sorted[rank], "count \(count) rank \(rank)")
+            }
+        }
+    }
+
+    @Test func circularDifferenceWrapsIntoHalfPeriod() {
+        #expect(abs(BeatTracker.circularDifference(0.26, period: 0.5) - -0.24) < 1e-12)
+        #expect(abs(BeatTracker.circularDifference(-0.26, period: 0.5) - 0.24) < 1e-12)
+        #expect(abs(BeatTracker.circularDifference(1.1, period: 0.5) - 0.1) < 1e-12)
+        #expect(BeatTracker.circularDifference(0.25, period: 0.5) == 0.25)
+        #expect(BeatTracker.circularDifference(-0.25, period: 0.5) == 0.25)
+    }
+}
+
+/// Трекер на готовых шагах анализа: синтетические барабаны (только Linux, как остальные сцены) и
+/// искусственные шаги с онсетами точно на долях.
+@Suite(.enabled(if: TestPlatform.isLinux))
+struct BeatTrackerTests {
+    /// Шаги анализа сцены, считаются один раз за прогон.
+    private enum Hops {
+        static let steady = StreamAnalyzer(sampleRate: 48_000).processSignal(SharedScenes.steady120.samples)
+        static let breakdown = StreamAnalyzer(sampleRate: 48_000).processSignal(SharedScenes.breakdown.samples)
+    }
+
+    private static let fps = AnalysisConfig(sampleRate: 48_000).framesPerSecond
+
+    @Test func locksOnSteadyBeat() async {
+        let hops = await runOffCooperativePool { Hops.steady }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var lockTime: Double?
+        var worstError = 0.0
+        for hop in hops {
+            tracker.process(hop)
+            if lockTime == nil, tracker.locked { lockTime = hop.endTime }
+            if tracker.locked, let next = tracker.nextBeat {
+                worstError = max(worstError, abs(BeatTracker.circularDifference(next, period: 0.5)))
+            }
+        }
+        #expect(lockTime.map { $0 <= 8 } == true, "lock at \(String(describing: lockTime))")
+        #expect(tracker.confidence >= 0.6)
+        #expect(worstError <= 0.01, "worst distance of the next beat from the grid \(worstError)")
+    }
+
+    @Test func unlocksWhenBeatStops() async {
+        let hops = await runOffCooperativePool { Hops.breakdown }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var wasLocked = false
+        for hop in hops {
+            tracker.process(hop)
+            if hop.endTime < 10 { wasLocked = wasLocked || tracker.locked }
+            guard hop.endTime >= 14, hop.endTime < 18 else { continue }
+            let predicted = tracker.schedule.events.filter { $0.predicted && $0.time > hop.endTime }
+            let quiet = predicted.allSatisfy { $0.amplitude < 0.2 }
+            #expect(tracker.confidence < 0.35 || quiet, "t \(hop.endTime): confidence \(tracker.confidence)")
+        }
+        #expect(wasLocked)
+    }
+
+    @Test func gateHoldsBetweenKicks() async {
+        let hops = await runOffCooperativePool { Hops.steady }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var checked = 0
+        for hop in hops {
+            // Ворот на момент предсказанной доли: состояние после последнего шага перед ней.
+            if tracker.locked, let next = tracker.nextBeat, next > hop.endTime - 1 / Self.fps, next <= hop.endTime {
+                #expect(tracker.energyGate >= 0.9, "beat \(next): gate \(tracker.energyGate)")
+                checked += 1
+            }
+            tracker.process(hop)
+        }
+        #expect(checked >= 30)
+    }
+
+    @Test func gateClosesInBreakdown() async {
+        let hops = await runOffCooperativePool { Hops.breakdown }
+        let lastKick = SharedScenes.breakdown.kicks.last { $0 < 10 } ?? 0
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var worst: Float = 0
+        for hop in hops {
+            tracker.process(hop)
+            if hop.endTime >= lastKick + 2 * 0.5, hop.endTime < 18 {
+                worst = max(worst, tracker.energyGate)
+            }
+        }
+        #expect(worst <= 0.2, "gate in the breakdown up to \(worst)")
+    }
+
+    @Test func predictedBeatKeepsIdWhenNudged() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let beat = try #require(tracker.nextBeat)
+        // Шаги без онсетов до момента сразу после доли, окно совпадения еще открыто.
+        hops.feedSilence(&tracker, until: beat + 0.03)
+        let before = try #require(tracker.schedule.events.first { $0.predicted && abs($0.time - beat) < 0.001 })
+        let after = tracker.schedule.events.first { $0.predicted && $0.time > beat + 0.25 }
+        // Онсет на 20 мс позже доли: поправка фазы 0.25 × 20 = 5 мс.
+        hops.feedSilence(&tracker, until: beat + 0.04, broadband: OnsetEvent(time: beat + 0.020, strength: 1))
+        let nudged = try #require(tracker.schedule.events.first { $0.id == before.id })
+        #expect(abs(nudged.time - before.time - 0.005) < 1e-9)
+        #expect(tracker.schedule.events.first { $0.id == after?.id } != nil)
+    }
+
+    @Test func kickOnsetsDoNotFeedThePLL() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let beat = try #require(tracker.nextBeat)
+        hops.feedSilence(&tracker, until: beat + 0.03)
+        // Один и тот же шаг трем копиям: без онсетов, с онсетом бочки и с широкополосным онсетом.
+        let onset = OnsetEvent(time: beat + 0.020, strength: 1)
+        let end = hops.endTime + hops.hop
+        var plain = tracker
+        var kick = tracker
+        var broadband = tracker
+        plain.process(SyntheticBeats.hop(endTime: end, broadband: nil, kick: nil))
+        kick.process(SyntheticBeats.hop(endTime: end, broadband: nil, kick: onset))
+        broadband.process(SyntheticBeats.hop(endTime: end, broadband: onset, kick: nil))
+        #expect(kick.nextBeat == plain.nextBeat)
+        #expect(kick.period == plain.period)
+        #expect(broadband.nextBeat != plain.nextBeat)
+        // Бочка у предсказанной доли при захвате отдельно не светится.
+        #expect(!kick.schedule.events.contains { !$0.predicted && $0.time == onset.time })
+    }
+
+    /// `BeatGlow` помнит id 2 с: ни сброс, ни смена темпа не дают id другого события.
+    @Test func idsNeverRepeatAcrossResetAndTempoSwitch() {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var times: [UInt64: Double] = [:]
+        var reused: [UInt64] = []
+        func record(_ tracker: BeatTracker) {
+            for event in tracker.schedule.events {
+                #expect(event.predicted == (event.id & BeatTracker.onsetIDFlag == 0))
+                if let time = times[event.id] {
+                    if abs(time - event.time) > 0.1 { reused.append(event.id) }
+                } else {
+                    times[event.id] = event.time
+                }
+            }
+        }
+
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 8) { record($0) }
+        let predictedBeforeReset = times.keys.filter { $0 & BeatTracker.onsetIDFlag == 0 }
+        let onsetsBeforeReset = times.keys.filter { $0 & BeatTracker.onsetIDFlag != 0 }
+        tracker.reset()
+        // Новый поток с нуля, затем смена темпа 120 -> 100.
+        hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 8) { tracker in
+            record(tracker)
+            for event in tracker.schedule.events {
+                let before = event.predicted ? predictedBeforeReset : onsetsBeforeReset
+                #expect(event.id > before.max() ?? 0)
+            }
+        }
+        hops.bpm = 100
+        var switches = 0
+        var lastPeriod = tracker.period
+        hops.feed(&tracker, until: 20) { tracker in
+            record(tracker)
+            if let period = tracker.period, let last = lastPeriod, abs(period / last - 1) > 0.1 { switches += 1 }
+            lastPeriod = tracker.period
+        }
+        #expect(!predictedBeforeReset.isEmpty && !onsetsBeforeReset.isEmpty)
+        #expect(switches >= 1)
+        #expect(tracker.period.map { abs($0 - 0.6) < 0.01 } == true)
+        #expect(reused.isEmpty, "ids reused for another event: \(reused)")
+    }
+}
+
+/// Искусственные шаги анализа: на шаге, в который попала доля, функции онсетов 50, широкополосный онсет
+/// и онсет бочки точно на доле, уровень бочки -6 dBFS; между долями функции 0 и уровень -40 dBFS.
+/// Шаг с одним онсетом бочки тоже несет широкополосную функцию 50, иначе бочка не подтверждена.
+struct SyntheticBeats {
+    var bpm: Double
+    var endTime = 0.0
+    var nextBeatTime = 0.25
+    let hop = 256.0 / 48_000
+
+    init(bpm: Double) {
+        self.bpm = bpm
+    }
+
+    mutating func feed(_ tracker: inout BeatTracker, until end: Double, each: (BeatTracker) -> Void = { _ in }) {
+        while endTime + hop <= end {
+            endTime += hop
+            var onset: OnsetEvent?
+            if nextBeatTime <= endTime {
+                onset = OnsetEvent(time: nextBeatTime, strength: 1)
+                nextBeatTime += 60 / bpm
+            }
+            tracker.process(Self.hop(endTime: endTime, broadband: onset, kick: onset))
+            each(tracker)
+        }
+    }
+
+    /// Шаги без долей (функции онсетов 0), на последнем из них заданные онсеты.
+    mutating func feedSilence(
+        _ tracker: inout BeatTracker, until end: Double, broadband: OnsetEvent? = nil, kick: OnsetEvent? = nil
+    ) {
+        while endTime + hop <= end {
+            endTime += hop
+            let last = endTime + hop > end
+            tracker.process(Self.hop(endTime: endTime, broadband: last ? broadband : nil, kick: last ? kick : nil))
+        }
+        nextBeatTime = max(nextBeatTime, endTime)
+    }
+
+    static func hop(endTime: Double, broadband: OnsetEvent?, kick: OnsetEvent?) -> HopResult {
+        let beat = broadband != nil || kick != nil
+        return HopResult(
+            frame: WaveFrame(bands: [], layers: [], beat: 0, level: 0, rawLevelDB: -120),
+            frameTime: endTime - 512.0 / 48_000,
+            endTime: endTime,
+            kickOnset: kick,
+            broadbandOnset: broadband,
+            broadbandODF: beat ? 50 : 0,
+            kickODF: kick != nil ? 50 : 0,
+            kickLevelDB: beat ? -6 : -40
+        )
+    }
+}
