@@ -63,12 +63,20 @@ struct AppModelPauseTests {
     }
 }
 
-/// Значок в строке меню: без доступа к звуку предупреждение видно и при закрытых окнах.
+/// Значок в строке меню: без доступа к звуку или без звука при доступе предупреждение видно
+/// и при закрытых окнах.
 struct MenuBarIconTests {
-    @Test func permissionProblemWinsOverPause() {
-        #expect(AppModelHolder.iconName(paused: false, permissionHint: false) == "waveform")
-        #expect(AppModelHolder.iconName(paused: true, permissionHint: false) == "waveform.slash")
-        #expect(AppModelHolder.iconName(paused: false, permissionHint: true) == "waveform.badge.exclamationmark")
-        #expect(AppModelHolder.iconName(paused: true, permissionHint: true) == "waveform.badge.exclamationmark")
+    @Test func soundProblemWinsOverPause() {
+        #expect(AppModelHolder.iconName(paused: false, alert: false) == "waveform")
+        #expect(AppModelHolder.iconName(paused: true, alert: false) == "waveform.slash")
+        #expect(AppModelHolder.iconName(paused: false, alert: true) == "waveform.badge.exclamationmark")
+        #expect(AppModelHolder.iconName(paused: true, alert: true) == "waveform.badge.exclamationmark")
+    }
+
+    @Test func iconNamesCoverEveryState() {
+        let used = Set([false, true].flatMap { paused in
+            [false, true].map { AppModelHolder.iconName(paused: paused, alert: $0) }
+        })
+        #expect(used == Set(AppModelHolder.iconNames))
     }
 }

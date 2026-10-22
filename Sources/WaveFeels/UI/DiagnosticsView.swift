@@ -23,6 +23,10 @@ struct DiagnosticsView: View {
                 )
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
+            } else if model.captureStallHint {
+                Label(AppModel.captureStallText, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
             ScrollView {

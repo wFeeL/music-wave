@@ -35,10 +35,19 @@ final class AppModelHolder {
         model?.permissionHint ?? false
     }
 
-    /// Значок в строке меню: волна, на паузе перечеркнутая, без доступа к звуку с восклицательным
-    /// знаком. Доступ важнее паузы: без него визуализация не заработает и после паузы.
-    nonisolated static func iconName(paused: Bool, permissionHint: Bool) -> String {
-        if permissionHint { return "waveform.badge.exclamationmark" }
+    /// Доступ есть, а звук не приходит (`AppModel.captureStallHint`).
+    var captureStallHint: Bool {
+        model?.captureStallHint ?? false
+    }
+
+    /// Все имена значков в строке меню (их наличие в системе проверяет тест).
+    nonisolated static let iconNames = ["waveform", "waveform.slash", "waveform.badge.exclamationmark"]
+
+    /// Значок в строке меню: волна, на паузе перечеркнутая, при проблеме со звуком (нет доступа
+    /// или звук не приходит, хотя доступ есть) с восклицательным знаком. Проблема важнее паузы:
+    /// без звука визуализация не заработает и после паузы.
+    nonisolated static func iconName(paused: Bool, alert: Bool) -> String {
+        if alert { return "waveform.badge.exclamationmark" }
         return paused ? "waveform.slash" : "waveform"
     }
 }
@@ -48,8 +57,17 @@ private struct MenuBarIcon: View {
     let holder: AppModelHolder
 
     var body: some View {
-        Image(systemName: AppModelHolder.iconName(paused: holder.paused, permissionHint: holder.permissionHint))
-            .accessibilityLabel(holder.permissionHint ? "WaveFeels, нет доступа к звуку" : "WaveFeels")
+        Image(systemName: AppModelHolder.iconName(
+            paused: holder.paused,
+            alert: holder.permissionHint || holder.captureStallHint
+        ))
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        if holder.permissionHint { return "WaveFeels, нет доступа к звуку" }
+        if holder.captureStallHint { return "WaveFeels, звук не приходит" }
+        return "WaveFeels"
     }
 }
 
@@ -61,6 +79,11 @@ private struct MenuBarMenu: View {
         if holder.permissionHint {
             // Без окон подсказку иначе не увидеть: пункт ведет в диагностику с кнопками доступа.
             Button("Нет доступа к звуку…") {
+                delegate.showDiagnostics()
+            }
+            Divider()
+        } else if holder.captureStallHint {
+            Button("Звук не приходит…") {
                 delegate.showDiagnostics()
             }
             Divider()

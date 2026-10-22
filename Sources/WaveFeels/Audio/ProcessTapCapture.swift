@@ -18,13 +18,30 @@ struct TapError: Error, CustomStringConvertible, Sendable {
     static let superseded = TapError(message: "запуск пропущен: есть более новый")
 }
 
+/// То, что `AudioPipeline` берет у захвата. Работает `ProcessTapCapture`, тесты подставляют
+/// свой захват (например, всегда с ошибкой или всегда с нулями).
+protocol TapCapturing: AnyObject, Sendable {
+    var status: TapStatus { get }
+    var sampleRate: Double { get }
+    func start(
+        processObjectIDs: [AudioObjectID],
+        systemWide: Bool,
+        outputDeviceUID: String,
+        completion: @escaping @Sendable (Result<Double, TapError>, String?) -> Void
+    )
+    @discardableResult
+    func stop() -> String?
+    func stopInBackground(completion: @escaping @Sendable (String?) -> Void)
+    func waitUntilIdle(timeout: Double) -> Bool
+}
+
 /// Захват звука процессов через Core Audio process tap и приватное агрегатное устройство.
 ///
 /// Создание и удаление tap и агрегата идет на своей последовательной очереди (это IPC с coreaudiod,
 /// первое создание может идти сотни миллисекунд): `start` и `stopInBackground` ставят работу
 /// в очередь и не ждут, `stop()` ждет. Порядок вызовов сохраняется, поэтому прежний tap всегда
 /// удаляется раньше, чем создается следующий. IOProc работает на очереди `tap-io` и пишет моно в кольцо.
-nonisolated final class ProcessTapCapture: @unchecked Sendable {
+nonisolated final class ProcessTapCapture: TapCapturing, @unchecked Sendable {
     private struct Published: Sendable {
         var status: TapStatus
         var sampleRate: Double

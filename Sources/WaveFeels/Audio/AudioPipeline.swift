@@ -34,25 +34,30 @@ struct CaptureErrorNote: Equatable, Sendable {
 /// после перезапуска coreaudiod (через `OutputDeviceMonitor`) и по явному `rebuild(reason:)`.
 /// Пересборки не чаще раза в 250 мс. Tap создается вне главного потока (`ProcessTapCapture`),
 /// результат применяется здесь, если после него не было новой пересборки или остановки
-/// (`startGeneration`). Если создать tap не вышло, повторы через 1, 2 и 4 с, затем статус
-/// `failed` до следующего события.
+/// (`startGeneration`). Повторы и сторож нулей идут по `CaptureRecovery`: если создать tap не
+/// вышло, повторы через 1, 2 и 4 с, затем статус `failed` и повтор раз в 30 с; сторож нулей
+/// после 5 быстрых пересборок пересобирает tap раз в 30 с, пока звук не вернется.
 @MainActor
 @Observable
 final class AudioPipeline {
     static let ringCapacity = 131_072
     static let minRebuildInterval = 0.25
-    static let zeroRunLimit = 2.5
-    static let maxWatchdogRebuilds = 5
-    static let watchdogPauses: [Double] = [1, 2, 4]
     /// Паузы перед повторами, если tap не создался.
-    static let startRetryPauses: [Double] = [1, 2, 4]
+    static let startRetryPauses = CaptureRecovery.Timing.standard.startRetryPauses
+    static let slowRetryInterval = CaptureRecovery.Timing.standard.slowRetryInterval
 
     private(set) var status: PipelineStatus = .stopped
     private(set) var matchedProcesses: [AudioProcessInfo] = []
     private(set) var sourceOutputting = false
-    /// Сколько пересборок подряд сделал сторож нулей; сбрасывается, когда пошел ненулевой звук.
-    private(set) var watchdogRebuilds = 0
     private(set) var lastCaptureError: CaptureErrorNote?
+
+    /// Сколько быстрых пересборок подряд сделал сторож нулей; сбрасывается, когда пошел
+    /// ненулевой звук.
+    var watchdogRebuilds: Int { recovery.watchdogRebuilds }
+
+    /// Быстрые попытки сторожа нулей или создания tap кончились, захват повторяется раз в
+    /// `slowRetryInterval`.
+    var recoveryExhausted: Bool { recovery.exhausted }
 
     /// Источник по Now Playing «играет». Выставляет `AppModel`.
     @ObservationIgnored var adapterSaysPlaying = false {
@@ -72,7 +77,7 @@ final class AudioPipeline {
     @ObservationIgnored var source: AudioSource = .systemWide {
         didSet {
             guard source != oldValue else { return }
-            watchdogRebuilds = 0
+            recovery.reset()
             if mode == .suspended {
                 // Приостановка держалась на Now Playing прежнего источника.
                 resume(reason: "смена источника")
@@ -80,8 +85,7 @@ final class AudioPipeline {
             }
             // Ждущий повтор или пауза сторожа относились к прежнему источнику: новый собирается
             // сразу, а не после них (до 4 с).
-            rebuildTask?.cancel()
-            rebuildTask = nil
+            cancelRebuildTasks()
             processesChanged()
             rebuild(reason: "смена источника")
         }
@@ -117,8 +121,10 @@ final class AudioPipeline {
     private let processes: AudioProcessList
     private let output: OutputDeviceMonitor
     private let ring: SampleRingBuffer
-    private let capture: ProcessTapCapture
+    private let capture: any TapCapturing
     private let engine: AnalysisEngine
+    let recoveryTiming: CaptureRecovery.Timing
+    @ObservationIgnored private var recovery: CaptureRecovery
 
     @ObservationIgnored private var demo: DemoAudioSource?
     /// Файл последнего демо: после сна демо запускается с него же.
@@ -129,6 +135,9 @@ final class AudioPipeline {
     @ObservationIgnored private var appliedProcessIDs: [AudioObjectID] = []
     @ObservationIgnored private var lastRebuildAt = -Double.infinity
     @ObservationIgnored private var rebuildTask: Task<Void, Never>?
+    /// Медленный повтор создания tap после быстрых. Отдельно от `rebuildTask`: пока он ждет,
+    /// пересборки по событиям (`rebuild(reason:)`) идут как обычно.
+    @ObservationIgnored private var slowRetryTask: Task<Void, Never>?
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
     /// Растет при каждом запуске и остановке tap: результат устаревшего запуска не применяется.
     @ObservationIgnored private var startGeneration = 0
@@ -138,13 +147,27 @@ final class AudioPipeline {
     @ObservationIgnored private var outputWatchIDs: [AudioObjectID] = []
     @ObservationIgnored private var outputStart = OutputStartDetector(outputting: [])
 
-    init(store: FrameStore, processes: AudioProcessList, output: OutputDeviceMonitor) {
+    /// `timing` и `makeCapture` подставляют тесты: короткие сроки и свой захват вместо
+    /// `ProcessTapCapture`.
+    init(
+        store: FrameStore,
+        processes: AudioProcessList,
+        output: OutputDeviceMonitor,
+        timing: CaptureRecovery.Timing = .standard,
+        makeCapture: ((SampleRingBuffer) -> any TapCapturing)? = nil
+    ) {
         self.processes = processes
         self.output = output
         let ring = SampleRingBuffer(capacity: Self.ringCapacity)
         self.ring = ring
-        self.capture = ProcessTapCapture(ring: ring)
+        if let makeCapture {
+            capture = makeCapture(ring)
+        } else {
+            capture = ProcessTapCapture(ring: ring)
+        }
         self.engine = AnalysisEngine(ring: ring, store: store)
+        recoveryTiming = timing
+        recovery = CaptureRecovery(timing: timing)
 
         processes.onChange = { [weak self] in
             self?.processesChanged()
@@ -168,7 +191,7 @@ final class AudioPipeline {
         if mode == .live || mode == .suspended { return }
         stopDemo()
         mode = .live
-        watchdogRebuilds = 0
+        recovery.reset()
         processes.start()
         output.start()
         volumeChanged()
@@ -272,8 +295,7 @@ final class AudioPipeline {
     func suspendIdle() {
         guard mode == .live, !paused, source != .systemWide else { return }
         mode = .suspended
-        rebuildTask?.cancel()
-        rebuildTask = nil
+        cancelRebuildTasks()
         stopCaptureInBackground()
         engine.stop()
         status = .suspended
@@ -288,9 +310,10 @@ final class AudioPipeline {
         performRebuild(reason: reason)
     }
 
-    /// Сторож нулей снова получает все попытки (например, после выдачи доступа к звуку).
+    /// Сторож нулей и повторы создания tap снова получают все быстрые попытки (например,
+    /// после выдачи доступа к звуку).
     func resetWatchdog() {
-        if watchdogRebuilds != 0 { watchdogRebuilds = 0 }
+        recovery.reset()
     }
 
     /// Пересборка не чаще раза в 250 мс; запросы во время ожидания объединяются.
@@ -314,8 +337,7 @@ final class AudioPipeline {
         case .stopped:
             return
         case .live, .suspended:
-            rebuildTask?.cancel()
-            rebuildTask = nil
+            cancelRebuildTasks()
             stopOutputWatch()
             stopCaptureInBackground()
             engine.stop()
@@ -354,8 +376,7 @@ final class AudioPipeline {
             status = .paused
             return
         }
-        rebuildTask?.cancel()
-        rebuildTask = nil
+        cancelRebuildTasks()
         lastRebuildAt = Self.now()
 
         // Читатель кольца стоит, пока tap пересоздается: кольцо обнуляется на очереди управления.
@@ -405,27 +426,34 @@ final class AudioPipeline {
         guard generation == startGeneration, mode == .live, !paused else { return }
         switch result {
         case .success(let rate):
+            recovery.startSucceeded()
             engine.start(sampleRate: rate)
             pushSettings()
             status = .capturing(capture.status)
             log("пересборка (\(reason)): \(summary)")
         case .failure(let error):
             noteCaptureError(error.message)
-            let retries = Self.startRetryPauses.count
-            guard attempt < retries else {
+            let retries = recoveryTiming.startRetryPauses.count
+            switch recovery.startFailed(attempt: attempt) {
+            case .retry(let next, let pause):
+                status = .retrying(attempt: next, message: error.message)
+                log("пересборка (\(reason)) не удалась: \(error.message); повтор \(next) из \(retries) через \(Self.seconds(pause)) с")
+                rebuildTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(pause))
+                    guard !Task.isCancelled, let self else { return }
+                    self.rebuildTask = nil
+                    self.performRebuild(reason: "повтор создания tap \(next)", attempt: next)
+                }
+            case .slowRetry(let pause):
                 status = .capturing(.failed(error.message))
-                log("пересборка (\(reason)) не удалась: \(error.message); повторов было \(retries), жду следующего события")
-                return
-            }
-            let pause = Self.startRetryPauses[attempt]
-            let next = attempt + 1
-            status = .retrying(attempt: next, message: error.message)
-            log("пересборка (\(reason)) не удалась: \(error.message); повтор \(next) из \(retries) через \(Int(pause)) с")
-            rebuildTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(pause))
-                guard !Task.isCancelled, let self else { return }
-                self.rebuildTask = nil
-                self.performRebuild(reason: "повтор создания tap \(next)", attempt: next)
+                log("пересборка (\(reason)) не удалась: \(error.message); быстрых повторов было \(retries), следующий через \(Self.seconds(pause)) с")
+                let slowAttempt = recovery.slowRetryAttempt
+                slowRetryTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(pause))
+                    guard !Task.isCancelled, let self else { return }
+                    self.slowRetryTask = nil
+                    self.performRebuild(reason: "медленный повтор создания tap", attempt: slowAttempt)
+                }
             }
         }
     }
@@ -542,9 +570,10 @@ final class AudioPipeline {
 
     private func startWatchdog() {
         watchdogTask?.cancel()
+        let interval = recoveryTiming.watchdogInterval
         watchdogTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .seconds(interval))
                 guard let self else { return }
                 self.watchdogTick()
             }
@@ -556,26 +585,31 @@ final class AudioPipeline {
         let zeroRun = engine.zeroRunDuration
         refreshOutputting()
 
-        // Ненулевой звук после пересборки: счетчик попыток сбрасывается.
-        if zeroRun == 0, Self.now() - lastRebuildAt > 1 {
-            watchdogRebuilds = 0
+        let action = recovery.watchdog(
+            zeroRun: zeroRun,
+            sourceOutputting: sourceOutputting,
+            sinceRebuild: Self.now() - lastRebuildAt,
+            rebuildPending: rebuildTask != nil || slowRetryTask != nil
+        )
+        let zeros = String(format: "%.1f", zeroRun)
+        switch action {
+        case .none:
             return
-        }
-        guard sourceOutputting, zeroRun > Self.zeroRunLimit,
-              watchdogRebuilds < Self.maxWatchdogRebuilds, rebuildTask == nil else { return }
-
-        watchdogRebuilds += 1
-        let attempt = watchdogRebuilds
-        let pause = Self.watchdogPauses[min(attempt - 1, Self.watchdogPauses.count - 1)]
-        log("сторож нулей: \(String(format: "%.1f", zeroRun)) с нулей при звучащем источнике, попытка \(attempt), пауза \(Int(pause)) с")
-        engine.stop()
-        stopCaptureInBackground()
-        status = .rebuilding(attempt: attempt)
-        rebuildTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(pause))
-            guard !Task.isCancelled, let self else { return }
-            self.rebuildTask = nil
-            self.performRebuild(reason: "сторож нулей, попытка \(attempt)")
+        case .rebuild(let attempt, let pause):
+            log("сторож нулей: \(zeros) с нулей при звучащем источнике, попытка \(attempt), пауза \(Self.seconds(pause)) с")
+            engine.stop()
+            stopCaptureInBackground()
+            status = .rebuilding(attempt: attempt)
+            rebuildTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(pause))
+                guard !Task.isCancelled, let self else { return }
+                self.rebuildTask = nil
+                self.performRebuild(reason: "сторож нулей, попытка \(attempt)")
+            }
+        case .slowRetry:
+            log("сторож нулей: \(zeros) с нулей при звучащем источнике, быстрые попытки кончились, "
+                + "пересборка раз в \(Self.seconds(recoveryTiming.slowRetryInterval)) с")
+            performRebuild(reason: "сторож нулей, медленный повтор")
         }
     }
 
@@ -644,10 +678,22 @@ final class AudioPipeline {
     }
 
     private func cancelTasks() {
-        rebuildTask?.cancel()
-        rebuildTask = nil
+        cancelRebuildTasks()
         watchdogTask?.cancel()
         watchdogTask = nil
+    }
+
+    /// Отменяет ждущие пересборки: повтор, паузу сторожа и медленный повтор.
+    private func cancelRebuildTasks() {
+        rebuildTask?.cancel()
+        rebuildTask = nil
+        slowRetryTask?.cancel()
+        slowRetryTask = nil
+    }
+
+    /// «4», «0.5»: секунды для лога.
+    private static func seconds(_ value: Double) -> String {
+        value.rounded() == value ? String(Int(value)) : String(format: "%.2g", value)
     }
 
     private func log(_ message: String) {

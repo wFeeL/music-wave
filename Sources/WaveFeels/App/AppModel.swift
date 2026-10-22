@@ -60,6 +60,11 @@ final class AppModel {
     private(set) var artwork: PanelArtwork?
     /// Показать подсказку о доступе к звуку.
     private(set) var permissionHint = false
+    /// Доступ к звуку разрешен, но быстрые попытки восстановить захват не помогли (сторож нулей
+    /// или создание tap): звук не приходит, конвейер повторяет попытки раз в 30 с. Значок в
+    /// строке меню с восклицательным знаком, в диагностике пояснение. Снимается, когда звук
+    /// вернулся или сменился источник.
+    private(set) var captureStallHint = false
     /// Последний результат `AudioCapturePermission.preflight()`.
     private(set) var permissionStatus: AudioCapturePermission.Status = .unknown
     /// Источник, когда пользователь его не выбрал (`settings.source == nil`). Определяется при
@@ -105,7 +110,7 @@ final class AppModel {
     @ObservationIgnored private var adapterSilence = AdapterSilenceMonitor()
     /// Приложения, о которых Now Playing хоть раз сообщал, за все запуски.
     let nowPlayingSources: NowPlayingSourceHistory
-    @ObservationIgnored private var watchdogExhausted = false
+    @ObservationIgnored private var recoveryExhausted = false
     @ObservationIgnored private var cachedSigning: String?
     @ObservationIgnored private var pulse = BeatPulse()
     @ObservationIgnored private var paletteFade = PaletteFade(palette: PaletteExtractor.fallback)
@@ -465,19 +470,34 @@ final class AppModel {
         }
     }
 
+    /// Подсказки о доступе и о захвате, который не восстанавливается (`CaptureHints`).
     private func updatePermissionHint() {
-        let exhausted = pipeline.watchdogRebuilds >= AudioPipeline.maxWatchdogRebuilds
-        if exhausted != watchdogExhausted {
-            watchdogExhausted = exhausted
-            // Сторож исчерпал попытки: стоит заново спросить TCC, вдруг доступ отозвали.
+        let exhausted = pipeline.recoveryExhausted
+        if exhausted != recoveryExhausted {
+            recoveryExhausted = exhausted
+            // Быстрые попытки кончились: стоит заново спросить TCC, вдруг доступ отозвали.
             if exhausted {
                 applyPermissionStatus(AudioCapturePermission.preflight())
             }
         }
-        let hint = permissionStatus == .denied || (permissionStatus == .unknown && exhausted)
-        if hint != permissionHint {
-            permissionHint = hint
-            log(hint ? "подсказка о доступе к звуку показана" : "подсказка о доступе к звуку снята")
+        let hints = CaptureHints(access: Self.access(permissionStatus), recoveryExhausted: exhausted)
+        if hints.permission != permissionHint {
+            permissionHint = hints.permission
+            log(hints.permission ? "подсказка о доступе к звуку показана" : "подсказка о доступе к звуку снята")
+        }
+        if hints.stalled != captureStallHint {
+            captureStallHint = hints.stalled
+            log(hints.stalled
+                ? "подсказка показана: звук не приходит, хотя доступ разрешен, захват повторяется"
+                : "подсказка о захвате без звука снята")
+        }
+    }
+
+    nonisolated static func access(_ status: AudioCapturePermission.Status) -> CaptureAccess {
+        switch status {
+        case .authorized: .authorized
+        case .denied: .denied
+        case .unknown: .unknown
         }
     }
 
@@ -1057,9 +1077,11 @@ extension AppModel {
                 "\($0.date.formatted(date: .omitted, time: .standard)): \($0.message)"
             } ?? "нет"
         ))
+        let slowRetry = "дальше раз в \(Int(pipeline.recoveryTiming.slowRetryInterval)) с"
         rows.append(DiagnosticsRow(
             label: "Пересборок сторожа нулей",
-            value: "\(pipeline.watchdogRebuilds) из \(AudioPipeline.maxWatchdogRebuilds)"
+            value: "\(pipeline.watchdogRebuilds) из \(pipeline.recoveryTiming.maxWatchdogRebuilds)"
+                + (pipeline.watchdogRebuilds >= pipeline.recoveryTiming.maxWatchdogRebuilds ? ", \(slowRetry)" : "")
         ))
         rows.append(DiagnosticsRow(label: "Звучит по уровню", value: Self.yesNo(gate.isActive)))
         rows.append(DiagnosticsRow(label: "Играет по Now Playing", value: Self.yesNo(pipeline.adapterSaysPlaying)))
@@ -1106,6 +1128,10 @@ extension AppModel {
         DiagnosticsSection(title: "Доступ", rows: [
             DiagnosticsRow(label: "Запись системного аудио", value: Self.describe(permissionStatus)),
             DiagnosticsRow(label: "Подсказка о доступе", value: permissionHint ? "показана" : "нет"),
+            DiagnosticsRow(
+                label: "Звук не приходит",
+                value: captureStallHint ? Self.captureStallText : "нет"
+            ),
         ])
     }
 
@@ -1143,6 +1169,9 @@ extension AppModel {
     }
 
     // MARK: - Описания
+
+    /// Пояснение к `captureStallHint` в диагностике.
+    static let captureStallText = "Звук не приходит, хотя доступ разрешен. WaveFeels повторяет попытки."
 
     private static func yesNo(_ value: Bool) -> String {
         value ? "да" : "нет"
@@ -1198,7 +1227,8 @@ extension AppModel {
         case .starting: "создаю tap"
         case .capturing(.running(_, let processCount)): "захват идет, процессов в tap: \(processCount)"
         case .capturing(.idle): "tap не создан"
-        case .capturing(.failed(let message)): "ошибка: \(message)"
+        case .capturing(.failed(let message)):
+            "ошибка: \(message); повтор раз в \(Int(AudioPipeline.slowRetryInterval)) с"
         case .waitingForSource: "жду запуска источника"
         case .rebuilding(let attempt): "пересборка сторожем нулей, попытка \(attempt)"
         case .retrying(let attempt, let message):
