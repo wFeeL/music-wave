@@ -397,6 +397,9 @@ final class AudioPipeline {
 
         let systemWide = source == .systemWide
         guard systemWide || !ids.isEmpty else {
+            // Источник закрылся: исчерпанные попытки относились к нему, подсказка о захвате
+            // без звука снимается, а новый запуск источника снова получит быстрые попытки.
+            recovery.reset()
             stopCaptureInBackground()
             setStatus(.waitingForSource)
             log("пересборка (\(reason)): источник \(source.displayName) не найден, жду")

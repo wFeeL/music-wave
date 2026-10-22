@@ -74,6 +74,61 @@ struct CaptureRecoveryPipelineTests {
         #expect(pipeline.watchdogRebuilds == 0)
         #expect(!pipeline.recoveryExhausted)
     }
+
+    /// Источник закрылся, пока быстрые попытки исчерпаны: конвейер ждет источник, попытки
+    /// сброшены, и подсказка о захвате без звука (`AppModel.captureStallHint` берется из
+    /// `CaptureHints` на каждом тике) снимается.
+    @Test func exhaustionClearsWhenSourceQuits() async throws {
+        let fake = FakeTapCapture(behavior: .silent)
+        let list = FakeProcessList([FakeProcessList.player])
+        let processes = AudioProcessList()
+        processes.snapshotOverride = { list.processes }
+        let pipeline = AudioPipeline(
+            store: FrameStore(),
+            processes: processes,
+            output: OutputDeviceMonitor(),
+            timing: Self.timing,
+            makeCapture: { _ in fake }
+        )
+        defer { pipeline.stop() }
+        pipeline.source = FakeProcessList.source
+        pipeline.adapterAvailable = true
+        pipeline.adapterSaysPlaying = true
+        pipeline.start()
+
+        #expect(await waitUntil(.seconds(30)) { pipeline.recoveryExhausted })
+        #expect(CaptureHints(access: .authorized, recoveryExhausted: pipeline.recoveryExhausted).stalled)
+
+        list.processes = []
+        processes.onChange?()
+        #expect(await waitUntil(.seconds(5)) { pipeline.status == .waitingForSource })
+        #expect(!pipeline.recoveryExhausted)
+        #expect(!CaptureHints(access: .authorized, recoveryExhausted: pipeline.recoveryExhausted).stalled)
+    }
+}
+
+/// Список процессов для `AudioProcessList.snapshotOverride`: тест меняет его и сам вызывает
+/// `onChange`.
+@MainActor
+final class FakeProcessList {
+    static let source = AudioSource.application(
+        bundleID: "com.example.player",
+        bundlePath: "/nonexistent/Player.app",
+        displayName: "Плеер"
+    )
+    static let player = AudioProcessInfo(
+        objectID: 7001,
+        pid: 7001,
+        bundleID: "com.example.player",
+        executablePath: nil,
+        isRunningOutput: true
+    )
+
+    var processes: [AudioProcessInfo]
+
+    init(_ processes: [AudioProcessInfo]) {
+        self.processes = processes
+    }
 }
 
 /// Захват без Core Audio: tap либо никогда не создается, либо создается и молчит (в кольцо

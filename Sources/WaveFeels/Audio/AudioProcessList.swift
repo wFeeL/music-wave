@@ -8,6 +8,9 @@ import WaveCore
 final class AudioProcessList {
     /// Вызывается на главном потоке, когда меняется `kAudioHardwarePropertyProcessObjectList`.
     var onChange: (() -> Void)?
+    /// Тесты: свой список процессов вместо Core Audio. Смену списка тест сообщает сам,
+    /// вызывая `onChange`.
+    var snapshotOverride: (@MainActor () -> [AudioProcessInfo])?
 
     private var token: CAListenerToken?
 
@@ -26,6 +29,7 @@ final class AudioProcessList {
     }
 
     func snapshot() -> [AudioProcessInfo] {
+        if let snapshotOverride { return snapshotOverride() }
         let objects: [AudioObjectID] = CAProperty.readArray(CAProperty.systemObject, kAudioHardwarePropertyProcessObjectList)
         return objects.compactMap { object -> AudioProcessInfo? in
             let pid: pid_t = CAProperty.read(object, kAudioProcessPropertyPID, default: -1)
