@@ -11,6 +11,7 @@ struct LaunchArgumentsTests {
         #expect(parsed.fakeNotch == false)
         #expect(parsed.noCapture == false)
         #expect(parsed.exitAfter == nil)
+        #expect(parsed.settingsSuite == nil)
     }
 
     @Test func parsesAllFlags() {
@@ -21,12 +22,14 @@ struct LaunchArgumentsTests {
             "--fake-notch",
             "--no-capture",
             "--exit-after", "2.5",
+            "--settings-suite", "com.wfeels.wavefeels.benchmark",
         ])
         #expect(parsed.demoFile == URL(fileURLWithPath: "/tmp/demo.wav"))
         #expect(parsed.snapshotDirectory == URL(fileURLWithPath: "/tmp/snapshots", isDirectory: true))
         #expect(parsed.fakeNotch)
         #expect(parsed.noCapture)
         #expect(parsed.exitAfter == 2.5)
+        #expect(parsed.settingsSuite == "com.wfeels.wavefeels.benchmark")
     }
 
     @Test func ignoresUnknownArguments() {
@@ -56,6 +59,14 @@ struct LaunchArgumentsTests {
         #expect(LaunchArguments.parse(["--exit-after", "-1"]).exitAfter == nil)
         #expect(LaunchArguments.parse(["--exit-after", "0"]).exitAfter == nil)
         #expect(LaunchArguments.parse(["--exit-after", "inf"]).exitAfter == nil)
+    }
+
+    @Test func missingOrEmptySettingsSuiteGivesNil() {
+        #expect(LaunchArguments.parse(["--settings-suite"]).settingsSuite == nil)
+        #expect(LaunchArguments.parse(["--settings-suite", ""]).settingsSuite == nil)
+        let parsed = LaunchArguments.parse(["--settings-suite", "--fake-notch"])
+        #expect(parsed.settingsSuite == nil)
+        #expect(parsed.fakeNotch)
     }
 
     @Test func integerExitAfterIsAccepted() {

@@ -13,19 +13,25 @@ struct LaunchArguments: Equatable {
     var noCapture: Bool
     /// `--exit-after <seconds>`: завершиться через заданное число секунд.
     var exitAfter: Double?
+    /// `--settings-suite <name>`: настройки из набора `UserDefaults(suiteName:)` вместо настроек
+    /// пользователя. Им пользуется замер CPU (scripts/cpu-probe.sh), чтобы мерить на заданных
+    /// настройках, а не на тех, что выбраны на этом маке.
+    var settingsSuite: String?
 
     init(
         demoFile: URL? = nil,
         snapshotDirectory: URL? = nil,
         fakeNotch: Bool = false,
         noCapture: Bool = false,
-        exitAfter: Double? = nil
+        exitAfter: Double? = nil,
+        settingsSuite: String? = nil
     ) {
         self.demoFile = demoFile
         self.snapshotDirectory = snapshotDirectory
         self.fakeNotch = fakeNotch
         self.noCapture = noCapture
         self.exitAfter = exitAfter
+        self.settingsSuite = settingsSuite
     }
 
     static func parse(_ args: [String]) -> LaunchArguments {
@@ -54,6 +60,8 @@ struct LaunchArguments: Equatable {
                 result.exitAfter = takeValue()
                     .flatMap(Double.init)
                     .flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            case "--settings-suite":
+                result.settingsSuite = takeValue().flatMap { $0.isEmpty ? nil : $0 }
             default:
                 break
             }

@@ -1,5 +1,6 @@
 import AppKit
 import CoreAudio
+import WaveCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -50,7 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Модель читает свойства Core Audio в главном потоке. Первое обращение к HAL
             // процесса может идти секундами, поэтому оно делается заранее вне главного потока.
             await Self.warmUpCoreAudio()
-            let model = AppModel()
+            let benchmarkDefaults = Self.suiteDefaults(named: arguments.settingsSuite)
+            let model = AppModel(defaults: benchmarkDefaults ?? .standard)
             let windows = WindowsController(model: model)
             let notch = NotchWindowController(model: model, arguments: arguments)
             self.model = model
@@ -60,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model.start(arguments: arguments)
             self.subscribeToSystemEvents()
             notch.show()
+            // После `show()`: у панели уже есть раскладка, по ней видно, какое крыло рисуется.
+            if let suite = arguments.settingsSuite, benchmarkDefaults != nil {
+                Self.logSettings(model.settings, suite: suite, layout: notch.layout)
+            }
             if self.settingsRequested {
                 self.settingsRequested = false
                 windows.showSettings()
@@ -195,6 +201,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.flush()
             exit(1)
         }
+    }
+
+    /// `--settings-suite`: все настройки модели (`AppSettings`, кэш проверки адаптера, история
+    /// источников Now Playing) берутся из отдельного набора `UserDefaults`, настройки пользователя
+    /// не читаются и не меняются. `nil` без флага и для имени, которое `UserDefaults` не
+    /// принимает: тогда модель берет `.standard`. Во втором случае в лог идет только строка
+    /// «набор настроек ... недоступен», строки «настройки из набора» нет, и cpu-probe.sh
+    /// отбракует замер.
+    private static func suiteDefaults(named suite: String?) -> UserDefaults? {
+        guard let suite else { return nil }
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            let line = "набор настроек \(suite) недоступен, используются настройки пользователя"
+            Log.app.error("\(line, privacy: .public)")
+            Log.file(line)
+            return nil
+        }
+        return defaults
+    }
+
+    /// Действующие настройки вида из набора `--settings-suite` (после ограничения диапазонов) и
+    /// то, что еще меняет нагрузку: крыло, которое рисуется на самом деле (по раскладке панели,
+    /// не шире предела экрана; у капсулы без выреза крыльев нет), режим энергосбережения
+    /// (30 кадров в секунду) и «Уменьшение движения» (без «вздоха» и свечения). По этой строке
+    /// cpu-probe.sh проверяет, на чем шел замер, и переносит ее в шапку отчета.
+    private static func logSettings(_ settings: AppSettings, suite: String, layout: NotchLayout?) {
+        func number(_ value: Double) -> String { String(format: "%g", value) }
+        func yesNo(_ value: Bool) -> String { value ? "да" : "нет" }
+        let drawnWing: String
+        if let layout {
+            let island = layout.collapsedIsland(wingWidth: layout.wingWidth)
+            let wing = Double((island.width - layout.notch.width) / 2)
+            let kind = layout.hasNotch ? "предел экрана" : "капсула без выреза, предел"
+            drawnWing = "\(number(wing)) pt (\(kind) \(number(Double(layout.wingLimit))) pt)"
+        } else {
+            drawnWing = "неизвестно, экрана нет"
+        }
+        let values: [String] = [
+            "линий \(settings.lineCount)",
+            "заливка \(number(settings.fill))",
+            "радиус свечения \(number(settings.glowRadius))",
+            "свечение \(number(settings.glowIntensity))",
+            "крылья \(number(settings.wingWidth)) pt",
+            "рисуется крыло \(drawnWing)",
+            "толщина \(number(settings.lineThickness))",
+            "амплитуда \(number(settings.waveAmplitude))",
+            "вздох \(yesNo(settings.beatPulse))",
+            "пауза \(yesNo(settings.paused))",
+            "энергосбережение \(yesNo(ProcessInfo.processInfo.isLowPowerModeEnabled))",
+            "уменьшение движения \(yesNo(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion))",
+        ]
+        let line = "настройки из набора \(suite): " + values.joined(separator: ", ")
+        Log.app.info("\(line, privacy: .public)")
+        Log.file(line)
     }
 
     /// Первое чтение свойства HAL на фоновом потоке, с записью в лог до и после.

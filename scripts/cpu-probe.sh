@@ -1,50 +1,118 @@
 #!/usr/bin/env bash
-# Замер CPU и памяти собранного приложения. Использование: scripts/cpu-probe.sh <WaveFeels.app> [секунды]
+# Замер CPU и памяти собранного приложения. Использование:
+#   scripts/cpu-probe.sh [--preset default|max] [--sample] <WaveFeels.app> [секунды]
+#
+# Приложение читает настройки не из настроек пользователя, а из отдельного набора
+# com.wfeels.wavefeels.benchmark (--settings-suite), поэтому числа сравнимы между маками и
+# коммитами. Перед замером набор удаляется целиком и заполняется заново через `defaults write`
+# (настройки кэширует cfprefsd, поэтому файл plist напрямую не правится):
+#   default: вид 1.1 по умолчанию (линий 3, заливка 0, радиус свечения 1, свечение 0.6, крылья 64,
+#            толщина 1, амплитуда 1); предел play 15 %, итог в cpu.txt;
+#   max:     верхние границы диапазонов (линий 6, заливка 1, радиус свечения 3, свечение 1, крылья
+#            200, толщина 2, амплитуда 2); предел play 20 %, итог в cpu-max.txt.
+# В обоих наборах «вздох» включен, пауза выключена. Содержимое набора (`defaults read`) пишется в
+# начало отчета, а действующие значения приложение пишет в свой лог строкой «настройки из набора
+# ...»: вид, крыло, которое рисуется на самом деле, энергосбережение и «Уменьшение движения».
+# Строка из прогона play попадает в шапку отчета (applied settings). Прогон без этой строки
+# считается проваленным: сборка без --settings-suite мерила бы настройки пользователя.
 #
 # Два прогона, каждый со своим процессом приложения:
-#   play:    --demo Demo/demo.wav --fake-notch --exit-after <секунды+10>; среднее выше 15 % одного
-#            ядра считается провалом. Остров обязан появиться (строка «остров: скрыт -> ...» в логе
-#            приложения), иначе замер ничего не говорит и тоже считается провалом.
-#   silence: --demo Demo/silence.wav --fake-notch --no-capture --exit-after <секунды+20>; среднее
-#            должно быть меньше 1 %. Остров обязан остаться скрытым (ни одного перехода из «скрыт»):
-#            в тишине анализ идет с частотой 15 Гц вместо 60 и ничего не рисуется, иначе замер не про
-#            простой.
-# Демо никогда не создает tap, поэтому захват звука в CI не запускается.
+#   play:    --demo Demo/demo.wav --fake-notch --exit-after <секунды+10>; среднее выше предела
+#            набора (15 или 20 % одного ядра) считается провалом. Остров обязан появиться (строка
+#            «остров: скрыт -> ...» в логе приложения), иначе замер ничего не говорит и тоже
+#            считается провалом.
+#   silence: --demo Demo/silence.wav --fake-notch --no-capture --exit-after <секунды+10> (с
+#            --sample <секунды+20>); среднее должно быть меньше 1 % в обоих наборах. Остров обязан
+#            остаться скрытым (ни одного перехода из «скрыт»): в тишине анализ идет с частотой 15 Гц
+#            вместо 60 и ничего не рисуется, иначе замер не про простой.
+# Демо никогда не создает tap, поэтому захват звука в CI не запускается. С другим запущенным
+# WaveFeels (например, из «Программ») скрипт не работает: тот пишет в тот же лог и грузит процессор.
 #
 # CPU считается как прирост накопленного процессорного времени (`ps -o time=`) за окно в
 # <секунды> (по умолчанию 30) после прогрева 5 с, деленный на прошедшее время. `%cpu` из `ps` не
 # годится: это затухающее среднее. Внутри окна раз в секунду пишется загрузка за эту секунду и RSS
-# (`ps -o rss=`). `sample <pid> 3` снимает стеки всех потоков: в play в середине окна, в silence
-# сразу после окна (сам sample грузит процессор и исказил бы замер в тишине, поэтому приложение
-# в этом прогоне живет на 10 с дольше). Итоги по потокам и самые частые функции на вершине стека
-# идут в cpu-sample.txt (play) и cpu-sample-silence.txt, полный вывод в cpu-sample.raw.txt и
-# cpu-sample-silence.raw.txt. Фоновый сторож убивает приложение вместе с потомками через 10 с после
-# его --exit-after (в macOS нет timeout).
+# (`ps -o rss=`). С --sample `sample <pid> 5` снимает стеки всех потоков: в play в середине окна,
+# в silence сразу после окна (сам sample грузит процессор и исказил бы замер в тишине, поэтому
+# приложение в этом прогоне живет на 10 с дольше). Итоги по потокам и самые частые функции на
+# вершине стека идут в cpu-sample.txt (play) и cpu-sample-silence.txt, полный вывод в
+# cpu-sample.raw.txt и cpu-sample-silence.raw.txt; у набора max те же файлы начинаются с cpu-max
+# (cpu-max-sample.txt и так далее). Фоновый сторож убивает приложение вместе с потомками через
+# 10 с после его --exit-after (в macOS нет timeout).
 #
-# Итог в $OUT/cpu.txt (по умолчанию ci-out/cpu.txt), он же печатается в stdout. Код 0, если оба
-# прогона в пределах, 1 при провале, 2 при ошибке вызова. Рассчитан на bash 3.2 и BSD-утилиты.
+# Итог в $OUT/cpu.txt или $OUT/cpu-max.txt (по умолчанию каталог ci-out), он же печатается в
+# stdout. Код 0, если оба прогона в пределах, 1 при провале, 2 при ошибке вызова или записи набора.
+# Рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 
 usage() {
-    echo "usage: $0 <WaveFeels.app> [seconds]" >&2
+    echo "usage: $0 [--preset default|max] [--sample] <WaveFeels.app> [seconds]" >&2
     exit 2
 }
 
-[[ $# -ge 1 && -d "$1" ]] || usage
-APP=$(cd "$1" && pwd) || usage
-DURATION=${2:-30}
+PRESET=default
+SAMPLE=0
+APP_ARG=""
+DURATION=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --preset)
+            [[ $# -ge 2 ]] || usage
+            PRESET=$2
+            shift 2
+            ;;
+        --sample)
+            SAMPLE=1
+            shift
+            ;;
+        -*)
+            echo "cpu-probe: unknown option $1" >&2
+            usage
+            ;;
+        *)
+            if [[ -z "$APP_ARG" ]]; then
+                APP_ARG=$1
+            elif [[ -z "$DURATION" ]]; then
+                DURATION=$1
+            else
+                usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+case "$PRESET" in
+    default)
+        PLAY_LIMIT=15
+        PREFIX=cpu
+        ;;
+    max)
+        PLAY_LIMIT=20
+        PREFIX=cpu-max
+        ;;
+    *)
+        echo "cpu-probe: unknown preset $PRESET (expected default or max)" >&2
+        usage
+        ;;
+esac
+
+[[ -n "$APP_ARG" && -d "$APP_ARG" ]] || usage
+APP=$(cd "$APP_ARG" && pwd) || usage
+DURATION=${DURATION:-30}
 [[ "$DURATION" =~ ^[0-9]+$ && $DURATION -ge 5 ]] || usage
 
 WARMUP=5
-PLAY_LIMIT=15
 SILENCE_LIMIT=1
-SAMPLE_SECONDS=3
+SAMPLE_SECONDS=5
 SAMPLE_LIMIT=60
+# Набор настроек замера и строка, которой приложение сообщает о нем в лог (AppDelegate.logSettings).
+SUITE=com.wfeels.wavefeels.benchmark
+SETTINGS_MARK="настройки из набора $SUITE: "
 
 cd "$(dirname "$0")/.." || exit 2
 OUT=${OUT:-$PWD/ci-out}
 mkdir -p "$OUT"
-REPORT="$OUT/cpu.txt"
+REPORT="$OUT/$PREFIX.txt"
 BIN="$APP/Contents/MacOS/WaveFeels"
 DEMO_DIR="$APP/Contents/Resources/Demo"
 APP_LOG="$HOME/Library/Logs/WaveFeels/wavefeels.log"
@@ -57,6 +125,41 @@ for file in "$BIN" "$DEMO_DIR/demo.wav" "$DEMO_DIR/silence.wav"; do
         exit 2
     fi
 done
+
+# Другой экземпляр пишет в тот же лог (переходы острова, строка настроек) и грузит процессор.
+OTHERS=$(pgrep -x WaveFeels 2>/dev/null | tr '\n' ' ')
+if [[ -n "$OTHERS" ]]; then
+    echo "cpu-probe: WaveFeels is already running (pid ${OTHERS% }), quit it first: it shares the log and the CPU" >&2
+    exit 2
+fi
+
+# Заполняет набор замера заново. Удаляется только он, настройки пользователя
+# (com.wfeels.wavefeels) не трогаются; `defaults delete` несуществующего набора просто
+# возвращает ошибку. Числа пишутся как -float и -int: AppSettings читает их через
+# `double(forKey:)` и NSNumber и ограничивает теми же диапазонами, что и ползунки.
+write_preset() {
+    local lines fill radius glow wings thickness amplitude
+    if [[ $PRESET == max ]]; then
+        lines=6 fill=1 radius=3 glow=1 wings=200 thickness=2 amplitude=2
+    else
+        lines=3 fill=0 radius=1 glow=0.6 wings=64 thickness=1 amplitude=1
+    fi
+    defaults delete "$SUITE" > /dev/null 2>&1
+    defaults write "$SUITE" wf.lineCount -int "$lines" &&
+        defaults write "$SUITE" wf.fill -float "$fill" &&
+        defaults write "$SUITE" wf.glowRadius -float "$radius" &&
+        defaults write "$SUITE" wf.glowIntensity -float "$glow" &&
+        defaults write "$SUITE" wf.wingWidth -float "$wings" &&
+        defaults write "$SUITE" wf.lineThickness -float "$thickness" &&
+        defaults write "$SUITE" wf.waveAmplitude -float "$amplitude" &&
+        defaults write "$SUITE" wf.beatPulse -bool true &&
+        defaults write "$SUITE" wf.paused -bool false
+}
+
+if ! write_preset; then
+    echo "cpu-probe: defaults write $SUITE failed" >&2
+    exit 2
+fi
 
 FAILED=0
 
@@ -173,11 +276,11 @@ finish_sample() { # имя прогона
     SAMPLE_PID=""
     SAMPLE_WD=""
     if [[ $1 == play ]]; then
-        report="$OUT/cpu-sample.txt"
-        raw="$OUT/cpu-sample.raw.txt"
+        report="$OUT/$PREFIX-sample.txt"
+        raw="$OUT/$PREFIX-sample.raw.txt"
     else
-        report="$OUT/cpu-sample-$1.txt"
-        raw="$OUT/cpu-sample-$1.raw.txt"
+        report="$OUT/$PREFIX-sample-$1.txt"
+        raw="$OUT/$PREFIX-sample-$1.raw.txt"
     fi
     if [[ -f "$TMP/sample.txt" ]]; then
         mv "$TMP/sample.txt" "$raw"
@@ -210,15 +313,15 @@ probe() {
     shift 6
     local log_start pid wd rc t0 c0 k0 t1 c1 k1 t c r prev_t prev_c sec
     local per_second="" max_sec=0 rss_first="" rss_last=0 rss_max=0 alive=1 sampled=0
-    local average children verdict=ok reasons="" app_log="$TMP/$name.log"
+    local average children verdict=ok reasons="" app_log="$TMP/$name.log" settings_line
 
     report ""
     report "## $name"
     report ""
-    report "args: $* --exit-after $exit_after"
+    report "args: $* --settings-suite $SUITE --exit-after $exit_after"
 
     log_start=$(log_lines)
-    "$BIN" "$@" --exit-after "$exit_after" > "$TMP/$name.stdout" 2>&1 &
+    "$BIN" "$@" --settings-suite "$SUITE" --exit-after "$exit_after" > "$TMP/$name.stdout" 2>&1 &
     pid=$!
     watchdog "$pid" $((exit_after + 10)) 2>> "$TMP/$name.stdout" &
     wd=$!
@@ -259,12 +362,12 @@ probe() {
         c1=$c
         prev_t=$t
         prev_c=$c
-        if [[ $sample_at == window && $sampled -eq 0 && $((t - t0)) -ge $((DURATION * 500)) ]]; then
+        if [[ $SAMPLE -eq 1 && $sample_at == window && $sampled -eq 0 && $((t - t0)) -ge $((DURATION * 500)) ]]; then
             sampled=1
             take_sample "$pid"
         fi
     done
-    if [[ $sample_at == after && $alive -eq 1 ]]; then
+    if [[ $SAMPLE -eq 1 && $sample_at == after && $alive -eq 1 ]]; then
         sampled=1
         take_sample "$pid"
     fi
@@ -302,6 +405,16 @@ probe() {
     if [[ $rc -ne 0 ]]; then
         reasons="$reasons; app exit code $rc"
     fi
+    settings_line=$(grep -F "$SETTINGS_MARK" "$app_log" | tail -n 1)
+    if [[ -n "$settings_line" ]]; then
+        report "effective settings: ${settings_line#*"$SETTINGS_MARK"}"
+        if [[ -z "$APPLIED" ]]; then
+            APPLIED=${settings_line#*"$SETTINGS_MARK"}
+        fi
+    else
+        report "effective settings: not reported"
+        reasons="$reasons; app did not report settings from $SUITE (build without --settings-suite?), the run may have used personal settings"
+    fi
     if awk -v a="$average" -v l="$limit" -v c="$compare" 'BEGIN { exit !(c == "max" ? a > l : a >= l) }'; then
         reasons="$reasons; average $average % is over the limit of $limit %"
     fi
@@ -336,12 +449,36 @@ probe() {
 report "# WaveFeels CPU probe"
 report ""
 report "app: $APP"
+report "preset: $PRESET (play: at most $PLAY_LIMIT %, silence: below $SILENCE_LIMIT %)"
 report "method: cumulative CPU time from ps over a ${DURATION} s window after ${WARMUP} s warm-up, % of one core"
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
+report ""
+report "defaults read $SUITE:"
+report "$(defaults read "$SUITE" 2>&1)"
+# Строку заменяет настоящая строка приложения из первого прогона, где она нашлась (обычно play).
+APPLIED_PLACEHOLDER="applied settings: not reported by the app"
+APPLIED=""
+report ""
+report "$APPLIED_PLACEHOLDER"
 
 EXIT_AFTER=$((DURATION + 10))
+# С --sample в тишине стеки снимаются после окна, на это приложению нужны лишние 10 с.
+SILENCE_EXIT_AFTER=$EXIT_AFTER
+if [[ $SAMPLE -eq 1 ]]; then
+    SILENCE_EXIT_AFTER=$((EXIT_AFTER + 10))
+fi
 probe play "$PLAY_LIMIT" max shown window "$EXIT_AFTER" --demo "$DEMO_DIR/demo.wav" --fake-notch
-probe silence "$SILENCE_LIMIT" below hidden after $((EXIT_AFTER + 10)) --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture
+probe silence "$SILENCE_LIMIT" below hidden after "$SILENCE_EXIT_AFTER" --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture
+
+# Шапка отчета уже записана, поэтому строка подставляется в файл на место заглушки (через
+# ENVIRON, а не -v: awk -v разбирает обратные косые черты). В stdout она идет перед итогом.
+if [[ -n "$APPLIED" ]]; then
+    PLACEHOLDER="$APPLIED_PLACEHOLDER" LINE="applied settings: $APPLIED" \
+        awk '!done && $0 == ENVIRON["PLACEHOLDER"] { print ENVIRON["LINE"]; done = 1; next } { print }' \
+        "$REPORT" > "$TMP/report.txt" && cat "$TMP/report.txt" > "$REPORT"
+    echo ""
+    echo "applied settings: $APPLIED"
+fi
 
 report ""
 if [[ $FAILED -eq 0 ]]; then
