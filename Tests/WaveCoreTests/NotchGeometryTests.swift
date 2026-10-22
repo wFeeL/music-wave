@@ -627,8 +627,8 @@ struct NotchGeometryTests {
             for state in [IslandState.hidden, .collapsed] {
                 let shown = layout.pointer(at: point, state: state, banner: true)
                 #expect(shown.inHoverZone)
-                #expect(!shown.acceptsClicks)
-                #expect(!shown.needsPolling)
+                #expect(shown.acceptsClicks == (state == .collapsed))
+                #expect(shown.needsPolling == (state == .collapsed))
                 let plain = layout.pointer(at: point, state: state, banner: false)
                 #expect(!plain.inHoverZone)
                 #expect(!plain.acceptsClicks)
@@ -646,6 +646,48 @@ struct NotchGeometryTests {
                 layout.pointer(at: center, state: .expanded, banner: true)
                     == layout.pointer(at: center, state: .expanded)
             )
+        }
+    }
+
+    /// Баннер над свернутым островом принимает клики видимым телом, в том числе частью под
+    /// строкой меню, чтобы клик не ушел в окно под баннером. Прозрачные полосы под плечами,
+    /// все вокруг и баннер, который уже не виден, клики пропускают. Опрос идет, пока баннер
+    /// виден, и где бы ни был курсор: окно пропускает события только вне тела баннера.
+    @Test func bannerBodyAcceptsClicksOverCollapsedIsland() throws {
+        var tall = notched()
+        tall.safeAreaTop = 38
+        for screen in [notched(), tall, external()] {
+            let layout = try #require(NotchGeometry.layout(for: [screen]))
+            let body = layout.bannerIsland
+            let inside = [
+                CGPoint(x: body.midX, y: body.minY + 1),
+                CGPoint(x: body.minX + 1, y: body.minY + 1),
+                CGPoint(x: body.maxX - 1, y: body.midY),
+                CGPoint(x: body.midX, y: body.midY),
+            ]
+            for point in inside {
+                #expect(point.y < layout.notch.minY || !layout.hasNotch)
+                let shown = layout.pointer(at: point, state: .collapsed, banner: true)
+                #expect(shown.acceptsClicks, "\(screen.id) \(point)")
+                #expect(shown.needsPolling)
+                let gone = layout.pointer(at: point, state: .collapsed, banner: false)
+                #expect(!gone.acceptsClicks)
+                #expect(!gone.needsPolling)
+            }
+            var outside = [
+                CGPoint(x: body.midX, y: body.minY - 1),
+                CGPoint(x: body.minX - 1, y: body.midY),
+                CGPoint(x: body.maxX + 1, y: body.midY),
+            ]
+            if layout.hasNotch {
+                // Полоса под плечом рамки баннера прозрачна.
+                outside.append(CGPoint(x: layout.bannerFrame.minX + 1, y: body.minY + 1))
+            }
+            for point in outside {
+                let shown = layout.pointer(at: point, state: .collapsed, banner: true)
+                #expect(!shown.acceptsClicks, "\(screen.id) \(point)")
+                #expect(shown.needsPolling)
+            }
         }
     }
 

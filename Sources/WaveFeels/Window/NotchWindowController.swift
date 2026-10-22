@@ -15,15 +15,17 @@ import WaveCore
 /// закрытой крышке), капсула встает под строку меню основного экрана (`NotchGeometry.layout`).
 ///
 /// Курсор. Пока остров не раскрыт, панель пропускает события мыши, и глобальный монитор
-/// `mouseMoved` видит каждое движение, в том числе над вырезом. Раскрытый остров принимает
-/// события, а событий над окнами своего приложения монитор не видит, поэтому только пока
-/// остров раскрыт, таймер 30 Гц опрашивает `NSEvent.mouseLocation`. Смена состояния острова
-/// (`AppModel.onIslandStateChange`) сразу пересчитывает клики и опрос: остров раскрывается
-/// по таймеру модели, когда курсор уже стоит на месте. Панель лежит частью на строке меню,
-/// поэтому клики она принимает только над раскрытым островом, свернутый остров всегда их
-/// пропускает. Пока виден баннер нового трека, зона наведения: баннер до верха экрана, и
-/// наведение на него раскрывает полную панель. Если курсор уже стоял там, когда баннер
-/// появился, панель раскрывается, только когда он сдвинется или войдет заново.
+/// `mouseMoved` видит каждое движение, в том числе над вырезом. Раскрытый остров и баннер
+/// нового трека принимают события, а событий над окнами своего приложения монитор не видит,
+/// поэтому только пока остров раскрыт или виден баннер, таймер 30 Гц опрашивает
+/// `NSEvent.mouseLocation`. Смена состояния острова (`AppModel.onIslandStateChange`) сразу
+/// пересчитывает клики и опрос: остров раскрывается по таймеру модели, когда курсор уже стоит
+/// на месте. Панель лежит частью на строке меню, поэтому клики она принимает только над
+/// раскрытым островом и над телом баннера (оно свисает на окно под строкой меню, и клик по
+/// нему не должен уходить в это окно); свернутый остров без баннера их пропускает. Пока
+/// виден баннер, зона наведения: баннер до верха экрана, и наведение на него раскрывает
+/// полную панель. Если курсор уже стоял там, когда баннер появился, панель раскрывается,
+/// только когда он сдвинется, войдет заново или по баннеру щелкнут.
 ///
 /// Подписок и таймеров в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
@@ -44,6 +46,9 @@ final class NotchWindowController {
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var pollTimer: Timer?
+    /// Где был курсор при последнем пересчете: опрос засчитывает движение, только если
+    /// курсор сдвинулся.
+    private var lastPointerLocation: NSPoint?
     /// Номер подписки на ширину крыла и радиус свечения; `stop()` его меняет, и старая
     /// подписка больше не продлевается.
     private var settingsGeneration = 0
@@ -214,6 +219,9 @@ final class NotchWindowController {
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
         panel.setFrame(frame, display: false)
+        panel.onLeftMouseDown = { [weak self] in
+            self?.panelClicked()
+        }
         self.panel = panel
         self.hostingView = hostingView
     }
@@ -223,23 +231,27 @@ final class NotchWindowController {
     /// Положение курсора в модель, пропуск кликов в панель, включение и выключение опроса.
     /// `moved`: вызов от движения мыши или опроса. Без движения (смена состояния острова или
     /// баннера, экранов, настроек) курсор, оказавшийся в зоне только потому, что под ним
-    /// появился баннер, в зону не засчитывается.
-    private func updatePointer(moved: Bool = false) {
+    /// появился баннер, в зону не засчитывается. `polled`: вызов от опроса, движение
+    /// засчитывается, только если курсор сдвинулся с прошлого пересчета.
+    private func updatePointer(moved: Bool = false, polled: Bool = false) {
         guard isShown, let layout, let panel else {
             stopPolling()
             panel?.ignoresMouseEvents = true
             model.setPointerInHoverZone(false)
             return
         }
+        let location = NSEvent.mouseLocation
+        let movedNow = moved || (polled && location != lastPointerLocation)
+        lastPointerLocation = location
         let banner = model.bannerVisible
         let pointer = layout.pointer(
-            at: NSEvent.mouseLocation,
+            at: location,
             state: model.islandState,
             suppressed: model.islandSuppressed,
             banner: banner
         )
         let inside = NotchPointer.countsAsHover(
-            inZone: pointer.inHoverZone, moved: moved, banner: banner, wasInZone: model.pointerInHoverZone
+            inZone: pointer.inHoverZone, moved: movedNow, banner: banner, wasInZone: model.pointerInHoverZone
         )
         if panel.ignoresMouseEvents == pointer.acceptsClicks {
             panel.ignoresMouseEvents = !pointer.acceptsClicks
@@ -254,11 +266,25 @@ final class NotchWindowController {
         model.setPointerInHoverZone(inside)
     }
 
+    /// Нажатие в панели. По телу баннера (`NotchPointer.acceptsClicks`) раскрывает панель, как
+    /// наведение, даже если курсор не двигался с появления баннера.
+    private func panelClicked() {
+        guard isShown, let layout, model.bannerVisible else { return }
+        let pointer = layout.pointer(
+            at: NSEvent.mouseLocation,
+            state: model.islandState,
+            suppressed: model.islandSuppressed,
+            banner: true
+        )
+        guard pointer.acceptsClicks else { return }
+        model.setPointerInHoverZone(true)
+    }
+
     private func startPolling() {
         guard pollTimer == nil else { return }
         let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.updatePointer(moved: true)
+                self?.updatePointer(polled: true)
             }
         }
         timer.tolerance = Self.pollInterval / 4

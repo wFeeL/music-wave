@@ -192,19 +192,25 @@ public struct NotchLayout: Sendable, Equatable {
     /// `suppressed`: остров принудительно скрыт (пауза, блокировка экрана, полноэкранное окно)
     /// и на курсор не отвечает, поэтому ни опроса, ни кликов. `banner`: виден баннер нового
     /// трека; пока остров не раскрыт, зона наведения: баннер, продленный до верха экрана.
-    /// Клики баннер не принимает и опроса не требует, наведение на него раскрывает панель.
+    /// Наведение на баннер раскрывает панель. Над свернутым островом баннер принимает клики
+    /// своим видимым телом (`bannerIsland`), чтобы они не уходили в окно под ним, и держит
+    /// опрос, пока виден.
     public func pointer(
         at point: CGPoint, state: IslandState, suppressed: Bool = false, banner: Bool = false
     ) -> NotchPointer {
         let expanded = state == .expanded && !suppressed
+        let bannerOverCollapsed = banner && state == .collapsed && !suppressed
         let zone = banner && state != .expanded && !suppressed
             ? hoverZone(over: bannerIsland)
             : hoverZone(expanded: expanded)
         let inHoverZone = zone.contains(point)
+        let acceptsClicks = expanded
+            ? expandedClickArea.contains(point)
+            : bannerOverCollapsed && bannerIsland.contains(point)
         return NotchPointer(
             inHoverZone: inHoverZone,
-            acceptsClicks: expanded && expandedClickArea.contains(point),
-            needsPolling: expanded
+            acceptsClicks: acceptsClicks,
+            needsPolling: expanded || bannerOverCollapsed
         )
     }
 }
@@ -213,14 +219,14 @@ public struct NotchLayout: Sendable, Equatable {
 public struct NotchPointer: Sendable, Equatable {
     /// Курсор в зоне наведения, идет в `IslandInputs.pointerInHoverZone`.
     public var inHoverZone: Bool
-    /// Окно принимает клики. Только раскрытый остров и только над его видимым телом
-    /// (`expandedClickArea`): свернутый остров, полосы под плечами и все вокруг пропускают
-    /// клики в строку меню.
+    /// Окно принимает клики. Раскрытый остров только над его видимым телом
+    /// (`expandedClickArea`), свернутый с баннером только над телом баннера (`bannerIsland`):
+    /// свернутый остров без баннера, полосы под плечами и все вокруг пропускают клики дальше.
     public var acceptsClicks: Bool
-    /// Нужен частый опрос курсора: раскрытый остров принимает события мыши, а глобальный
-    /// монитор не видит событий над своими окнами. Пока остров не раскрыт, панель пропускает
-    /// события и монитор видит движения сам, поэтому курсор, оставленный в вырезе, опроса
-    /// не держит.
+    /// Нужен частый опрос курсора: раскрытый остров и баннер принимают события мыши, а
+    /// глобальный монитор не видит событий над своими окнами. Свернутый остров без баннера
+    /// пропускает события, и монитор видит движения сам, поэтому курсор, оставленный в
+    /// вырезе, опроса не держит.
     public var needsPolling: Bool
 
     public init(inHoverZone: Bool, acceptsClicks: Bool, needsPolling: Bool) {

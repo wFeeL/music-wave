@@ -2,8 +2,11 @@ import AppKit
 
 /// Панель у выреза: без рамки, не активирует приложение, стоит над строкой меню на всех
 /// пространствах, в том числе полноэкранных. По умолчанию пропускает все клики; принимать их
-/// разрешает только `NotchWindowController` над раскрытым островом.
+/// разрешает только `NotchWindowController` над раскрытым островом и над баннером нового трека.
 final class NotchPanel: NSPanel {
+    /// Нажатие левой кнопкой в панели, до того как его разберет содержимое.
+    var onLeftMouseDown: (@MainActor () -> Void)?
+
     /// `.nonactivatingPanel` задается только здесь: смена флага после создания окна
     /// не перестраивает его в WindowServer.
     convenience init(contentRect: NSRect) {
@@ -33,6 +36,13 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            onLeftMouseDown?()
+        }
+        super.sendEvent(event)
+    }
 
     /// Панель частично лежит на строке меню; AppKit не должен сдвигать ее под строку меню.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
