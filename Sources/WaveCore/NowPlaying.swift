@@ -114,13 +114,25 @@ enum JSONValue: Sendable, Equatable {
 public struct NowPlayingStreamParser: Sendable {
     private static let maxDuration: Double = 24 * 3600
 
+    private struct TrackKey: Sendable, Equatable {
+        var title: String
+        var artist: String?
+        var album: String?
+    }
+
     private var state: [String: JSONValue] = [:]
     private var current: NowPlayingInfo?
+    /// Обложка последнего трека. Переживает строки, после которых играть нечему,
+    /// и сбрасывается только при смене трека.
+    private var lastArtwork: (key: TrackKey, data: Data)?
+    /// Результат последнего разбора base64, чтобы не декодировать одну и ту же строку заново.
+    private var decodedArtwork: (encoded: String, data: Data?)?
 
     public init() {}
 
     /// Принимает одну строку потока. Возвращает текущее состояние или `nil`, если играть нечему.
-    /// Строки другого `type` и пустые строки состояние не меняют. Невалидный JSON бросает ошибку.
+    /// Строки другого `type`, пустые строки и пустой diff состояние не меняют.
+    /// Невалидный JSON бросает ошибку.
     @discardableResult
     public mutating func consume(line: String) throws -> NowPlayingInfo? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -141,7 +153,9 @@ public struct NowPlayingStreamParser: Sendable {
         let isDiff = (root["diff"] as? NSNumber)?.boolValue ?? false
 
         if payload.isEmpty {
-            if !isDiff { state = [:] }
+            // Слияние пустого diff ничего не меняет; пустой полный снимок значит «ничего не играет».
+            if isDiff { return current }
+            state = [:]
             current = nil
             return nil
         }
@@ -154,11 +168,15 @@ public struct NowPlayingStreamParser: Sendable {
             state = payload.filter { $0.value != .null }
         }
 
-        var info = Self.makeInfo(from: state)
+        var info = makeInfo()
         if var built = info {
-            if built.artworkData == nil, let previous = current,
-               previous.title == built.title, previous.artist == built.artist {
-                built.artworkData = previous.artworkData
+            let key = TrackKey(title: built.title, artist: built.artist, album: built.album)
+            if let artwork = built.artworkData {
+                lastArtwork = (key, artwork)
+            } else if let last = lastArtwork, last.key == key {
+                built.artworkData = last.data
+            } else {
+                lastArtwork = nil
             }
             info = built
         }
@@ -166,7 +184,7 @@ public struct NowPlayingStreamParser: Sendable {
         return info
     }
 
-    private static func makeInfo(from state: [String: JSONValue]) -> NowPlayingInfo? {
+    private mutating func makeInfo() -> NowPlayingInfo? {
         guard let bundle = state["bundleIdentifier"]?.string,
               let title = state["title"]?.string
         else { return nil }
@@ -178,13 +196,20 @@ public struct NowPlayingStreamParser: Sendable {
             artist: state["artist"]?.string,
             album: state["album"]?.string,
             isPlaying: state["playing"]?.flag ?? false,
-            duration: state["durationMicros"]?.double.flatMap(duration(fromMicros:)),
+            duration: state["durationMicros"]?.double.flatMap(Self.duration(fromMicros:)),
             elapsedTime: state["elapsedTimeMicros"]?.double.flatMap { $0.isFinite ? $0 / 1_000_000 : nil },
             timestamp: state["timestampEpochMicros"]?.double.flatMap {
                 $0.isFinite ? Date(timeIntervalSince1970: $0 / 1_000_000) : nil
             },
-            artworkData: state["artworkData"]?.string.flatMap { Data(base64Encoded: $0) }
+            artworkData: state["artworkData"]?.string.flatMap { decodeArtwork($0) }
         )
+    }
+
+    private mutating func decodeArtwork(_ encoded: String) -> Data? {
+        if let cached = decodedArtwork, cached.encoded == encoded { return cached.data }
+        let data = Data(base64Encoded: encoded)
+        decodedArtwork = (encoded, data)
+        return data
     }
 
     private static func duration(fromMicros micros: Double) -> Double? {

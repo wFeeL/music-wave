@@ -39,6 +39,34 @@ struct NowPlayingTests {
         #expect(info.duration == 215)
     }
 
+    @Test func emptyDiffKeepsState() throws {
+        var parser = NowPlayingStreamParser()
+        let before = try parser.consume(line: Self.fullLine)
+        #expect(before != nil)
+        #expect(try parser.consume(line: #"{"type":"data","diff":true,"payload":{}}"#) == before)
+        let next = try parser.consume(line: #"{"type":"data","diff":true,"payload":{"playing":false}}"#)
+        #expect(next?.title == "Кино 🎸")
+        #expect(next?.isPlaying == false)
+    }
+
+    @Test func artworkSurvivesTemporaryNilState() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.fullLine)
+        #expect(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":null}}"#) == nil)
+        let restored = try #require(try parser.consume(
+            line: #"{"type":"data","diff":true,"payload":{"title":"Кино 🎸"}}"#))
+        #expect(restored.artworkData == Data([1, 2, 3, 4]))
+
+        #expect(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":null}}"#) == nil)
+        let other = try #require(try parser.consume(
+            line: #"{"type":"data","diff":true,"payload":{"title":"Другая","artworkData":null}}"#))
+        #expect(other.artworkData == nil)
+        // Старая обложка не возвращается после смены трека.
+        let back = try #require(try parser.consume(
+            line: #"{"type":"data","diff":true,"payload":{"title":"Кино 🎸"}}"#))
+        #expect(back.artworkData == nil)
+    }
+
     @Test func nonDiffReplacesState() throws {
         var parser = NowPlayingStreamParser()
         _ = try parser.consume(line: Self.fullLine)
@@ -78,7 +106,7 @@ struct NowPlayingTests {
         #expect(kept.artworkData == Data([1, 2, 3, 4]))
 
         let keptByReplace = try #require(try parser.consume(line:
-            #"{"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.Music","title":"Кино 🎸","artist":"Цой"}}"#))
+            #"{"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.Music","title":"Кино 🎸","artist":"Цой","album":"Группа крови"}}"#))
         #expect(keptByReplace.artworkData == Data([1, 2, 3, 4]))
 
         let changed = try #require(try parser.consume(
