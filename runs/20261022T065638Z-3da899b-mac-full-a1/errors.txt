@@ -1,0 +1,12 @@
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:80:9: Expectation failed: started
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:81:9: Expectation failed: (adapter.lastTestExitCode → nil) == (SIGKILL → 9)
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:82:9: Expectation failed: (adapter.availability → .checking) == .available
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:83:9: Expectation failed: (fake.defaults.integer(forKey: MediaRemoteAdapter.testExitCodeKey) → 0) == (Int(SIGKILL) → 9)
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:84:9: Expectation failed: (fake.defaults.string(forKey: MediaRemoteAdapter.testedBuildKey) → nil) == "1"
+✘ Test hungTestIsKilledAndStreamStillStarts() failed after 39.593 seconds with 5 issues.
+✘ Test sleepStopsDemoAndWakeRestartsIt() recorded an issue at PipelineLifecycleTests.swift:77:9: Expectation failed: (model.pipeline.status → .stopped) == .demo
+✘ Test sleepStopsDemoAndWakeRestartsIt() recorded an issue at PipelineLifecycleTests.swift:78:9: Expectation failed: (model.pipeline.ringForTesting.activeWriters → 0) == 1
+✘ Test sleepStopsDemoAndWakeRestartsIt() failed after 39.579 seconds with 2 issues.
+✘ Suite PipelineLifecycleTests failed after 39.621 seconds with 2 issues.
+✘ Suite MediaRemoteAdapterTests failed after 40.153 seconds with 5 issues.
+✘ Test run with 245 tests in 26 suites failed after 64.679 seconds with 7 issues.
