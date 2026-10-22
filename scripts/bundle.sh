@@ -6,9 +6,13 @@
 # Перед запуском нужен `swift build -c release`.
 # Необязательные части адаптера берутся из $ADAPTER_DIR (по умолчанию dist/adapter, туда их
 # кладет build-adapter.sh), если собраны.
-# Иконка: Resources/AppIcon.icns, если она есть, иначе scripts/make-icon.swift рисует ее в
-# dist/icon (повторно только после правки скрипта). С $ICON_SNAPSHOT_DIR туда же кладутся
-# icon.png (1024 px) и icon-sizes.png (все размеры) для проверки на глаз.
+# Иконка: Resources/AppIcon.icns, если она есть, иначе scripts/make-icon.swift рисует в
+# dist/icon (повторно только после правки скрипта) AppIcon.icns и пакет AppIcon.icon для
+# macOS 26. Пакет собирает `xcrun actool` в Assets.car, тогда в Info.plist добавляется
+# CFBundleIconName; не собрался, приложение остается с одним .icns (CFBundleIconFile).
+# С $ICON_SNAPSHOT_DIR туда кладутся icon.png (1024 px), icon-sizes.png (все размеры) и,
+# если Icon Composer на месте, icon-macos26.png (как .icon рисует система).
+# С $RELEASE без AppIcon.icns сборка падает.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -58,10 +62,34 @@ plutil -lint "$CONTENTS/Info.plist"
 # Рисует иконку в каталог $1. В `if !` set -e не действует, поэтому шаги связаны через &&.
 make_icon() {
     rm -rf "$1" && mkdir -p "$1" &&
-        swift scripts/make-icon.swift "$1/AppIcon.iconset" "$1/icon-sizes.png" &&
+        swift scripts/make-icon.swift "$1/AppIcon.iconset" "$1/icon-sizes.png" "$1/AppIcon.icon" &&
         iconutil -c icns -o "$1/AppIcon.icns" "$1/AppIcon.iconset"
 }
 
+# Собирает $1/AppIcon.icon в $1/car/Assets.car и рисует превью icon-macos26.png через ictool
+# из Icon Composer. actool возвращает 0 и при ошибке, поэтому успех определяется по Assets.car.
+# Пути абсолютные: относительные actool ищет не там.
+compile_icon() {
+    local dir="$PWD/$1" ictool
+    rm -rf "$dir/car" && mkdir -p "$dir/car" || return 1
+    xcrun actool "$dir/AppIcon.icon" --compile "$dir/car" \
+        --output-format human-readable-text --notices --warnings --errors \
+        --output-partial-info-plist "$dir/car/partial.plist" \
+        --app-icon AppIcon --include-all-app-icons --enable-on-demand-resources NO \
+        --development-region en --target-device mac --minimum-deployment-target 26.0 \
+        --platform macosx || true
+    [[ -f "$dir/car/Assets.car" ]] || return 1
+    xcrun assetutil --info "$dir/car/Assets.car" || true
+    ictool="${DEVELOPER_DIR:-$(xcode-select -p)}/../Applications/Icon Composer.app/Contents/Executables/ictool"
+    if [[ -x "$ictool" ]]; then
+        "$ictool" "$dir/AppIcon.icon" --export-image --output-file "$dir/icon-macos26.png" \
+            --platform macOS --rendition Default --width 1024 --height 1024 --scale 1 ||
+            echo "warning: ictool could not render AppIcon.icon" >&2
+    fi
+    return 0
+}
+
+CAR=""
 if [[ -f Resources/AppIcon.icns ]]; then
     ICNS=Resources/AppIcon.icns
 else
@@ -69,23 +97,41 @@ else
     ICNS="$ICON_DIR/AppIcon.icns"
     # .icns пишется последним: если его нет, прошлый запуск не дошел до конца.
     if [[ ! -f "$ICNS" || scripts/make-icon.swift -nt "$ICNS" ]] && ! make_icon "$ICON_DIR"; then
+        if [[ -n "${RELEASE:-}" ]]; then
+            echo "error: icon generation failed, a release needs AppIcon.icns" >&2
+            exit 1
+        fi
         # Без иконки бандл все равно собирается, чтобы подпись и снимки прошли; пропажу
         # icon.png заметит проверка снимков в ci-mac.sh.
         echo "warning: icon generation failed, bundling without icon" >&2
         rm -f "$ICNS"
     fi
-    if [[ -n "${ICON_SNAPSHOT_DIR:-}" ]]; then
-        mkdir -p "$ICON_SNAPSHOT_DIR"
-        if [[ -f "$ICON_DIR/AppIcon.iconset/icon_512x512@2x.png" ]]; then
-            cp "$ICON_DIR/AppIcon.iconset/icon_512x512@2x.png" "$ICON_SNAPSHOT_DIR/icon.png"
+    if [[ -f "$ICNS" && -d "$ICON_DIR/AppIcon.icon" ]]; then
+        if [[ -f "$ICON_DIR/car/Assets.car" ]] || compile_icon "$ICON_DIR"; then
+            CAR="$ICON_DIR/car/Assets.car"
+        else
+            echo "warning: actool could not compile AppIcon.icon, bundling AppIcon.icns only" >&2
         fi
-        if [[ -f "$ICON_DIR/icon-sizes.png" ]]; then
-            cp "$ICON_DIR/icon-sizes.png" "$ICON_SNAPSHOT_DIR/icon-sizes.png"
+    fi
+    if [[ -n "${ICON_SNAPSHOT_DIR:-}" && -f "$ICNS" ]]; then
+        mkdir -p "$ICON_SNAPSHOT_DIR"
+        cp "$ICON_DIR/AppIcon.iconset/icon_512x512@2x.png" "$ICON_SNAPSHOT_DIR/icon.png"
+        cp "$ICON_DIR/icon-sizes.png" "$ICON_SNAPSHOT_DIR/icon-sizes.png"
+        if [[ -f "$ICON_DIR/icon-macos26.png" ]]; then
+            cp "$ICON_DIR/icon-macos26.png" "$ICON_SNAPSHOT_DIR/icon-macos26.png"
         fi
     fi
 fi
 if [[ -f "$ICNS" ]]; then
     cp "$ICNS" "$CONTENTS/Resources/AppIcon.icns"
+fi
+if [[ -n "$CAR" ]]; then
+    cp "$CAR" "$CONTENTS/Resources/Assets.car"
+    plutil -replace CFBundleIconName -string AppIcon "$CONTENTS/Info.plist"
+fi
+if [[ -n "${RELEASE:-}" && ! -f "$CONTENTS/Resources/AppIcon.icns" ]]; then
+    echo "error: $CONTENTS/Resources/AppIcon.icns missing, a release needs it" >&2
+    exit 1
 fi
 
 cp Resources/Demo/demo.wav Resources/Demo/silence.wav "$CONTENTS/Resources/Demo/"
