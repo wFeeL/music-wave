@@ -21,6 +21,11 @@ nonisolated enum Log {
         fileWriter.flush()
     }
 
+    /// Последние `count` строк файла лога (вместе с перенесенным `.1`), после записи очереди.
+    static func recentLines(_ count: Int) -> [String] {
+        fileWriter.recentLines(count)
+    }
+
     private static let fileWriter = LogFileWriter()
 }
 
@@ -49,6 +54,24 @@ private final class LogFileWriter: Sendable {
 
     func flush() {
         queue.sync {}
+    }
+
+    func recentLines(_ count: Int) -> [String] {
+        guard count > 0 else { return [] }
+        return queue.sync {
+            var lines = Self.lines(of: fileURL)
+            if lines.count < count {
+                lines = Self.lines(of: rotatedURL) + lines
+            }
+            return Array(lines.suffix(count))
+        }
+    }
+
+    private static func lines(of url: URL) -> [String] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return String(decoding: data, as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
     }
 
     private func write(_ line: String) {

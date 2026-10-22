@@ -7,6 +7,10 @@ struct WaveFeelsApp: App {
 
     var body: some Scene {
         MenuBarExtra("WaveFeels", systemImage: "waveform") {
+            Button("Диагностика…") {
+                appDelegate.showDiagnostics()
+            }
+            Divider()
             Button("Выйти из WaveFeels") {
                 NSApp.terminate(nil)
             }
