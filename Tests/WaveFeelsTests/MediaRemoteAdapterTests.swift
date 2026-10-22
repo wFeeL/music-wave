@@ -3,7 +3,8 @@ import Testing
 import WaveCore
 @testable import WaveFeels
 
-/// Без запуска адаптера: на CI MediaRemote может не работать, а `test` создает фиктивную запись.
+/// Настоящий адаптер не запускается: на CI MediaRemote может не работать, а `test` создает
+/// фиктивную запись. Процессы проверяются на поддельном скрипте под тем же `/usr/bin/perl`.
 struct MediaRemoteAdapterTests {
     @Test @MainActor func emptyBundleIsUnavailable() throws {
         let app = FileManager.default.temporaryDirectory
@@ -59,5 +60,187 @@ struct MediaRemoteAdapterTests {
         var infinite = track
         infinite.duration = .infinity
         #expect(MediaRemoteAdapter.sanitized(infinite).duration == nil)
+    }
+
+    @Test @MainActor func hungTestIsKilledAndStreamStillStarts() async throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'test') { $SIG{TERM} = 'IGNORE'; sleep 30; exit 0; }
+            if ($cmd eq 'stream') { print track('One'); sleep 30; }
+            """#)
+        defer { fake.remove() }
+        var timing = AdapterTiming()
+        timing.testTimeout = .milliseconds(300)
+        timing.testKillGrace = .milliseconds(300)
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, timing: timing)
+        adapter.start()
+        defer { adapter.stop() }
+        #expect(adapter.availability == .checking)
+
+        let started = await waitUntil(.seconds(5)) { adapter.info?.title == "One" }
+        #expect(started)
+        #expect(adapter.lastTestExitCode == SIGKILL)
+        #expect(adapter.availability == .available)
+        #expect(fake.defaults.integer(forKey: MediaRemoteAdapter.testExitCodeKey) == Int(SIGKILL))
+        #expect(fake.defaults.string(forKey: MediaRemoteAdapter.testedBuildKey) == "1")
+    }
+
+    @Test @MainActor func longLivedStreamDeathsDoNotAccumulate() async throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'stream') { print $empty; pause_s(0.4); exit 3; }
+            """#)
+        defer { fake.remove() }
+        var timing = AdapterTiming()
+        timing.restartDelays = [.milliseconds(50)]
+        timing.maxRestarts = 1
+        timing.stableRun = .milliseconds(200)
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, timing: timing)
+        adapter.start()
+        defer { adapter.stop() }
+
+        let launched = await waitUntil(.seconds(6)) { fake.streamLaunches() >= 4 }
+        #expect(launched)
+        #expect(adapter.availability == .available)
+    }
+
+    @Test @MainActor func quickStreamDeathsMakeAdapterUnavailable() async throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'stream') { print $empty; pause_s(0.1); print STDERR "boom\n"; exit 3; }
+            """#)
+        defer { fake.remove() }
+        var timing = AdapterTiming()
+        timing.restartDelays = [.milliseconds(50)]
+        timing.maxRestarts = 1
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, timing: timing)
+        adapter.start()
+        defer { adapter.stop() }
+
+        let gaveUp = await waitUntil(.seconds(5)) { !adapter.isAvailable && adapter.availability != .checking }
+        #expect(gaveUp)
+        #expect(adapter.availability == .unavailable(exitCode: 3, stderr: "boom\nboom"))
+        #expect(fake.streamLaunches() == 2)
+    }
+
+    @Test @MainActor func restartKeepsTrackUntilNewPayload() async throws {
+        let fake = try FakeAdapter(body: Self.restartBody)
+        defer { fake.remove() }
+        var timing = AdapterTiming()
+        timing.restartDelays = [.milliseconds(50)]
+        timing.restartInfoHold = .seconds(3)
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, timing: timing)
+        adapter.start()
+        defer { adapter.stop() }
+
+        #expect(await waitUntil(.seconds(5)) { adapter.info?.title == "One" })
+        var titles: [String?] = []
+        let reachedTwo = await waitUntil(.seconds(5)) {
+            if titles.last != adapter.info?.title { titles.append(adapter.info?.title) }
+            return adapter.info?.title == "Two"
+        }
+        #expect(reachedTwo)
+        #expect(titles == ["One", "Two"])
+        #expect(fake.streamLaunches() == 2)
+    }
+
+    @Test @MainActor func restartHoldExpires() async throws {
+        let fake = try FakeAdapter(body: Self.restartBody)
+        defer { fake.remove() }
+        var timing = AdapterTiming()
+        timing.restartDelays = [.milliseconds(50)]
+        timing.restartInfoHold = .milliseconds(200)
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults, timing: timing)
+        adapter.start()
+        defer { adapter.stop() }
+
+        #expect(await waitUntil(.seconds(5)) { adapter.info?.title == "One" })
+        #expect(await waitUntil(.seconds(5)) { fake.streamLaunches() == 2 })
+        // Второй поток молчит 1,5 с после пустого снимка: удержание (0,2 с) кончается раньше.
+        #expect(await waitUntil(.seconds(1)) { adapter.info == nil })
+        #expect(await waitUntil(.seconds(5)) { adapter.info?.title == "Two" })
+    }
+
+    /// Первый поток: трек One и смерть. Второй: пустой снимок, пауза, трек Two.
+    private static let restartBody = #"""
+        if ($cmd eq 'stream' && $launch == 1) { print $empty; print track('One'); pause_s(0.3); exit 1; }
+        if ($cmd eq 'stream') { print $empty; pause_s(1.5); print track('Two'); sleep 30; }
+        """#
+}
+
+/// Ждет условия, отпуская главный актор между проверками.
+@MainActor
+private func waitUntil(_ timeout: Duration, _ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
+}
+
+/// Временный `.app` с поддельным `mediaremote-adapter.pl`. Тело скрипта видит `$cmd`
+/// (`test`, `stream`, `send`), `$launch` (номер запуска `stream`), `$empty`, `track(title)`
+/// и `pause_s(seconds)`. По умолчанию `test` выходит с 0.
+private struct FakeAdapter {
+    let app: URL
+    let bundle: Bundle
+    let defaults: UserDefaults
+    let suiteName: String
+
+    init(body: String) throws {
+        let manager = FileManager.default
+        app = manager.temporaryDirectory
+            .appendingPathComponent("wf-fake-\(UUID().uuidString).app", isDirectory: true)
+        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        let adapterDir = contents.appendingPathComponent("Resources/Adapter", isDirectory: true)
+        try manager.createDirectory(at: adapterDir, withIntermediateDirectories: true)
+        try manager.createDirectory(
+            at: contents.appendingPathComponent("Frameworks/MediaRemoteAdapter.framework", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let helpers = contents.appendingPathComponent("Helpers", isDirectory: true)
+        try manager.createDirectory(at: helpers, withIntermediateDirectories: true)
+        let client = helpers.appendingPathComponent("MediaRemoteAdapterTestClient")
+        try Data("#!/bin/sh\n".utf8).write(to: client)
+        try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: client.path(percentEncoded: false))
+
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": "com.wfeels.wavefeels.fake-adapter-test",
+            "CFBundleVersion": "1",
+            "CFBundlePackageType": "APPL",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            .write(to: contents.appendingPathComponent("Info.plist"))
+
+        let log = app.appendingPathComponent("calls.log").path(percentEncoded: false)
+        let script = #"""
+            #!/usr/bin/perl
+            use strict; use warnings;
+            $| = 1;
+            shift @ARGV;
+            shift @ARGV if (($ARGV[0] // '') =~ m{/});
+            my $cmd = shift @ARGV // '';
+            my $log = '\#(log)';
+            open(my $out, '>>', $log) or die; print $out "$cmd\n"; close $out;
+            open(my $in, '<', $log) or die; my $launch = grep { /^stream$/ } <$in>; close $in;
+            my $empty = qq({"type":"data","diff":false,"payload":{}}\n);
+            sub track { my ($title) = @_; return qq({"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.Music","title":"$title","playing":true}}\n); }
+            sub pause_s { select(undef, undef, undef, $_[0]); }
+
+            """# + body + "\nexit 0;\n"
+        try Data(script.utf8).write(to: adapterDir.appendingPathComponent("mediaremote-adapter.pl"))
+
+        bundle = try #require(Bundle(url: app))
+        suiteName = "wf-adapter-tests-\(UUID().uuidString)"
+        defaults = try #require(UserDefaults(suiteName: suiteName))
+    }
+
+    /// Сколько раз запускался `stream`.
+    func streamLaunches() -> Int {
+        let text = (try? String(contentsOf: app.appendingPathComponent("calls.log"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").filter { $0 == "stream" }.count
+    }
+
+    func remove() {
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: app)
     }
 }

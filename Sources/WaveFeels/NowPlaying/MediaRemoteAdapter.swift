@@ -19,28 +19,44 @@ enum AdapterAvailability: Equatable, Sendable {
     case unavailable(exitCode: Int32, stderr: String)
 }
 
+/// Сроки адаптера. Значения по умолчанию рабочие; тесты подставляют короткие.
+struct AdapterTiming: Sendable {
+    /// Сколько ждать `test` до SIGTERM.
+    var testTimeout: Duration = .seconds(10)
+    /// Сколько ждать выхода `test` после SIGTERM до SIGKILL.
+    var testKillGrace: Duration = .seconds(2)
+    var sendTimeout: Duration = .seconds(5)
+    var restartDelays: [Duration] = [.seconds(2), .seconds(4), .seconds(8)]
+    /// Перезапусков подряд, после которых адаптер недоступен.
+    var maxRestarts = 5
+    /// Поток, проживший столько, умер не «подряд»: счетчик перезапусков обнуляется.
+    var stableRun: Duration = .seconds(60)
+    /// Сколько после перезапуска держать прежний трек, пока поток не выдал новый.
+    var restartInfoHold: Duration = .seconds(3)
+
+    static let standard = AdapterTiming()
+}
+
 /// «Сейчас играет» через ungive/mediaremote-adapter: `/usr/bin/perl` запускает скрипт адаптера,
 /// тот загружает `MediaRemoteAdapter.framework` из бандла.
 ///
 /// `start()` один раз на версию приложения (`CFBundleVersion`) запускает `test`: при тишине он
-/// показывает в Пункте управления фиктивную запись, поэтому результат кэшируется. Затем идет
+/// показывает в Пункте управления фиктивную запись, поэтому результат кэшируется. Завис `test`:
+/// SIGTERM через 10 с, SIGKILL еще через 2 с, поток стартует в любом случае. Затем идет
 /// `stream --micros --debounce=100`; первая строка с настоящим треком тоже считается
 /// подтверждением, что адаптер работает. Умерший поток перезапускается через 2, 4, 8 с, не больше
-/// 5 раз подряд. Дочерние процессы завершаются (SIGTERM) только в `stop()`, очистки в `deinit` нет:
-/// владелец вызывает `stop()` перед выходом.
+/// 5 раз подряд (поток, проживший минуту, счетчик обнуляет); после перезапуска прежний трек
+/// держится до первого настоящего трека, но не дольше 3 с. Дочерние процессы завершаются
+/// (SIGTERM) только в `stop()`, очистки в `deinit` нет: владелец вызывает `stop()` перед выходом.
 @MainActor
 @Observable
 final class MediaRemoteAdapter {
     static let perl = URL(fileURLWithPath: "/usr/bin/perl")
     static let streamArguments = ["stream", "--micros", "--debounce=100"]
-    static let testTimeout: Duration = .seconds(10)
-    static let sendTimeout: Duration = .seconds(5)
-    static let restartDelays: [Duration] = [.seconds(2), .seconds(4), .seconds(8)]
-    static let maxRestarts = 5
     static let testedBuildKey = "wf.adapterTestedBuild"
     static let testExitCodeKey = "wf.adapterTestExitCode"
     static let missingFilesMessage = "нет файлов адаптера"
-    static let testTimeoutMessage = "проверка адаптера не уложилась в 10 с"
+    static let testTimeoutMessage = "проверка адаптера не уложилась в срок"
     nonisolated static let maxDuration: Double = 24 * 3600
     static let maxStderrBytes = 4096
 
@@ -53,6 +69,8 @@ final class MediaRemoteAdapter {
 
     private let paths: AdapterPaths?
     private let build: String?
+    private let defaults: UserDefaults
+    private let timing: AdapterTiming
 
     @ObservationIgnored private var running = false
     /// Каждый запуск процесса получает свой номер; ответы старых процессов отбрасываются.
@@ -64,15 +82,23 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var testTimer: Task<Void, Never>?
     @ObservationIgnored private var streamToken = 0
     @ObservationIgnored private var stream: AdapterProcess?
+    @ObservationIgnored private var streamStartedAt: ContinuousClock.Instant?
     @ObservationIgnored private var parser = NowPlayingStreamParser()
-    /// Смерти потока подряд; сбрасывается, когда поток выдал настоящий трек.
+    /// Последнее состояние текущего потока; во время удержания может отличаться от `info`.
+    @ObservationIgnored private var streamInfo: NowPlayingInfo?
+    /// После перезапуска: прежний `info` держится, пока поток не выдал трек или не вышел срок.
+    @ObservationIgnored private var holdingInfo = false
+    @ObservationIgnored private var holdTask: Task<Void, Never>?
+    /// Смерти потока подряд; сбрасывается, когда поток выдал настоящий трек или прожил `stableRun`.
     @ObservationIgnored private var restarts = 0
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var commands: [Int: AdapterProcess] = [:]
 
-    init(bundle: Bundle) {
+    init(bundle: Bundle, defaults: UserDefaults = .standard, timing: AdapterTiming = .standard) {
         paths = AdapterPaths(bundle: bundle)
         build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        self.defaults = defaults
+        self.timing = timing
     }
 
     func start() {
@@ -85,13 +111,12 @@ final class MediaRemoteAdapter {
             log("адаптер недоступен: \(Self.missingFilesMessage)")
             return
         }
-        let defaults = UserDefaults.standard
         if let build, defaults.string(forKey: Self.testedBuildKey) == build {
             let code = Int32(truncatingIfNeeded: defaults.integer(forKey: Self.testExitCodeKey))
             lastTestExitCode = code
             availability = code == 0 ? .available : .unavailable(exitCode: code, stderr: "")
             log("проверка адаптера из кэша (сборка \(build)): код \(code)")
-            launchStream()
+            launchStream(restart: false)
         } else {
             availability = .checking
             runTest(paths)
@@ -107,6 +132,9 @@ final class MediaRemoteAdapter {
         testTimer = nil
         restartTask?.cancel()
         restartTask = nil
+        holdTask?.cancel()
+        holdTask = nil
+        holdingInfo = false
         test?.terminate()
         test = nil
         stream?.terminate()
@@ -137,8 +165,8 @@ final class MediaRemoteAdapter {
             return
         }
         commands[token] = process
-        Task { [weak self] in
-            try? await Task.sleep(for: Self.sendTimeout)
+        Task { [weak self, timing = self.timing] in
+            try? await Task.sleep(for: timing.sendTimeout)
             self?.commands[token]?.terminate()
         }
     }
@@ -177,10 +205,12 @@ final class MediaRemoteAdapter {
         }
         test = process
         log("проверка адаптера запущена")
-        testTimer = Task { [weak self] in
-            try? await Task.sleep(for: Self.testTimeout)
+        testTimer = Task { [weak self, timing = self.timing] in
+            try? await Task.sleep(for: timing.testTimeout)
+            guard !Task.isCancelled, self?.testTimeoutFired(token: token) == true else { return }
+            try? await Task.sleep(for: timing.testKillGrace)
             guard !Task.isCancelled else { return }
-            self?.testTimeoutFired(token: token)
+            self?.testKillFired(token: token)
         }
     }
 
@@ -190,21 +220,32 @@ final class MediaRemoteAdapter {
         noteStderr(line)
     }
 
-    private func testTimeoutFired(token: Int) {
-        guard token == testToken, let test else { return }
+    /// SIGTERM зависшему `test`. `true`, если процесс еще ждали.
+    private func testTimeoutFired(token: Int) -> Bool {
+        guard token == testToken, let test else { return false }
         testTimedOut = true
         log(Self.testTimeoutMessage)
         test.terminate()
+        return true
+    }
+
+    /// `test` не вышел после SIGTERM: SIGKILL и дальше без него, чтобы не застрять в `.checking`.
+    private func testKillFired(token: Int) {
+        guard token == testToken, let test else { return }
+        log("проверка адаптера не вышла после SIGTERM, SIGKILL")
+        test.forceKill()
+        testFinished(status: SIGKILL, token: token)
     }
 
     private func testFinished(status: Int32, token: Int) {
         guard token == testToken, running else { return }
+        // Поздний ответ того же процесса (после SIGKILL) уже не нужен.
+        testToken = nextToken()
         test = nil
         testTimer?.cancel()
         testTimer = nil
         lastTestExitCode = status
         if let build {
-            let defaults = UserDefaults.standard
             defaults.set(Int(status), forKey: Self.testExitCodeKey)
             defaults.set(build, forKey: Self.testedBuildKey)
         }
@@ -215,16 +256,28 @@ final class MediaRemoteAdapter {
             availability = .unavailable(exitCode: status, stderr: stderr)
         }
         log("проверка адаптера завершилась: код \(status)")
-        launchStream()
+        launchStream(restart: false)
     }
 
     // MARK: - stream
 
-    private func launchStream() {
+    private func launchStream(restart: Bool) {
         guard running, let paths else { return }
         let token = nextToken()
         streamToken = token
+        streamStartedAt = nil
         parser = NowPlayingStreamParser()
+        streamInfo = nil
+        holdTask?.cancel()
+        holdTask = nil
+        holdingInfo = restart && info != nil
+        if holdingInfo {
+            holdTask = Task { [weak self, timing = self.timing] in
+                try? await Task.sleep(for: timing.restartInfoHold)
+                guard !Task.isCancelled else { return }
+                self?.holdExpired(token: token)
+            }
+        }
         let process = AdapterProcess(
             arguments: [paths.script, paths.framework] + Self.streamArguments,
             onStdout: { [weak self] line in self?.streamLine(line, token: token) },
@@ -239,7 +292,17 @@ final class MediaRemoteAdapter {
             return
         }
         stream = process
+        streamStartedAt = .now
         log("поток адаптера запущен")
+    }
+
+    private func holdExpired(token: Int) {
+        guard token == streamToken, holdingInfo else { return }
+        holdingInfo = false
+        holdTask = nil
+        if streamInfo != info {
+            info = streamInfo
+        }
     }
 
     private func streamLine(_ line: String, token: Int) {
@@ -252,6 +315,14 @@ final class MediaRemoteAdapter {
             return
         }
         let next = parsed.map(Self.sanitized)
+        streamInfo = next
+        // Перезапущенный поток начинает с пустого снимка: прежний трек пока остается.
+        if holdingInfo {
+            guard parsed != nil else { return }
+            holdingInfo = false
+            holdTask?.cancel()
+            holdTask = nil
+        }
         if next != info {
             info = next
         }
@@ -271,20 +342,29 @@ final class MediaRemoteAdapter {
     private func streamEnded(status: Int32, token: Int) {
         guard token == streamToken, running else { return }
         stream = nil
+        if let started = streamStartedAt, ContinuousClock.now - started >= timing.stableRun {
+            // Редкие смерти с большими промежутками не копятся до «недоступен».
+            restarts = 0
+        }
+        streamStartedAt = nil
         restarts += 1
-        if restarts > Self.maxRestarts {
+        if restarts > timing.maxRestarts {
+            holdTask?.cancel()
+            holdTask = nil
+            holdingInfo = false
             info = nil
             availability = .unavailable(exitCode: status, stderr: lastStderr)
             log("поток адаптера умер \(restarts) раз подряд (код \(status)), адаптер недоступен")
             return
         }
-        let delay = Self.restartDelays[min(restarts, Self.restartDelays.count) - 1]
+        let delays = timing.restartDelays
+        let delay = delays.isEmpty ? .zero : delays[min(restarts, delays.count) - 1]
         log("поток адаптера завершился с кодом \(status), перезапуск \(restarts) через \(delay)")
         restartTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, self.streamToken == token else { return }
             self.restartTask = nil
-            self.launchStream()
+            self.launchStream(restart: true)
         }
     }
 
@@ -401,6 +481,13 @@ private final class AdapterProcess {
     func terminate() {
         if process.isRunning {
             process.terminate()
+        }
+    }
+
+    /// SIGKILL, если процесс еще жив.
+    func forceKill() {
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
         }
     }
 
