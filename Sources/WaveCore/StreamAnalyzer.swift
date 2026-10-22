@@ -102,9 +102,10 @@ public final class StreamAnalyzer {
     static let kickPickerParameters = OnlinePeakPicker.Parameters(floor: 2.0, relativeFloor: 0.25, minRiseDB: 7.5)
     /// Выбор пиков широкополосной функции. Проверки подъема уровня нет: уровень здесь это
     /// максимум полос, его почти всегда держит бочка или бас, и хэт между ними его не поднимает
-    /// (с проверкой 9 дБ хип-хоп дает F 0.6). Шум отсекает порог odf 12: у розового шума -20 dBFS
-    /// пики около 8, у хэта от 30, у бочки и малого 70-90.
-    static let broadbandPickerParameters = OnlinePeakPicker.Parameters(floor: 12, minRiseDB: -.infinity)
+    /// (с проверкой 9 дБ хип-хоп дает F 0.6). Шум отсекает порог odf 10: у розового шума -20 dBFS
+    /// пики около 8, у хэта от 30, у бочки и малого 70-90. При пороге 12 на GTZAN (полоса до 11 кГц)
+    /// у половины долей не было онсета, и трекер редко набирал попадания для захвата.
+    static let broadbandPickerParameters = OnlinePeakPicker.Parameters(floor: 10, minRiseDB: -.infinity)
     private static let hannENBW: Float = 1.5
     private static let floorDB: Float = -120
 

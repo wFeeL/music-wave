@@ -309,6 +309,19 @@ struct OnlinePeakPickerTests {
         #expect(fired == [50, 120])
     }
 
+    /// Порог широкополосной функции 10: пик 11 (тихая доля в музыке без верхних октав) дает онсет,
+    /// пик 9 (выше пиков розового шума -20 dBFS, около 8) нет.
+    @Test func broadbandFloorIsTen() {
+        for (peak, fires) in [(Float(11), true), (Float(9), false)] {
+            var picker = OnlinePeakPicker(hopDuration: Self.hop, parameters: StreamAnalyzer.broadbandPickerParameters)
+            var fired = false
+            for n in 0..<100 {
+                fired = picker.process(n == 80 ? peak : 0, levelDB: -20) != nil || fired
+            }
+            #expect(fired == fires, "peak \(peak)")
+        }
+    }
+
     @Test func needsARealLevelRise() {
         var picker = OnlinePeakPicker(hopDuration: Self.hop)
         var fired = 0
