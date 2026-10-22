@@ -1,0 +1,576 @@
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[0/13] Write sources
+[0/13] Write WaveFeels-entitlement.plist
+[4/13] Write sources
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/24] Compiling WaveCore ActivityGate.swift
+[10/24] Compiling WaveCore Analyzer.swift
+[11/24] Compiling WaveCore AttackRelease.swift
+[12/24] Compiling WaveCore AudioSource.swift
+[13/24] Compiling WaveCore BandMapper.swift
+[14/29] Compiling WaveCore BeatDetector.swift
+[15/29] Compiling WaveCore IslandStateMachine.swift
+[16/29] Compiling WaveCore Latency.swift
+[17/29] Compiling WaveCore LevelProcessor.swift
+[18/29] Compiling WaveCore NotchGeometry.swift
+[19/29] Emitting module WaveCore
+[20/29] Compiling WaveCore NowPlaying.swift
+[21/29] Compiling WaveCore Palette.swift
+[22/29] Compiling WaveCore RealFFT.swift
+[23/29] Compiling WaveCore SampleRingBuffer.swift
+[24/29] Compiling WaveCore WaveShape.swift
+[25/54] Compiling WaveFeels AudioPipeline.swift
+[26/54] Compiling WaveFeels AudioProcessList.swift
+[27/54] Compiling WaveFeels CoreAudio+Property.swift
+[28/54] Compiling WaveFeels DemoAudioSource.swift
+[29/54] Compiling WaveFeels OutputDeviceMonitor.swift
+[30/54] Compiling WaveFeels ProcessTapCapture.swift
+[31/59] Compiling WaveCoreTests LatencyTests.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[32/59] Compiling WaveCoreTests LevelProcessorTests.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[33/59] Compiling WaveCoreTests NotchGeometryTests.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[34/59] Compiling WaveCoreTests NowPlayingTests.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[35/59] Compiling WaveCoreTests PaletteTests.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[36/59] Compiling WaveCoreTests ProcessMatcherTests.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[43/65] Emitting module WaveFeels
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    |                                `- error: 'RGBColor' is ambiguous for type lookup in this context
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[45/65] Compiling WaveFeels MediaRemoteAdapter.swift
+[46/65] Compiling WaveFeels AppSettings.swift
+[47/65] Compiling WaveFeels AudioCapturePermission.swift
+[48/65] Compiling WaveFeels Log.swift
+[54/65] Emitting module WaveCoreTests
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[59/65] Compiling WaveFeels SigningInfo.swift
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;
+[60/65] Compiling WaveFeels DiagnosticsView.swift
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
+`- /Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:69: note: expanded code originates here
+ 30 |     /// Последний трек выбранного источника, держится и на паузе.
+ 31 |     private(set) var lastTrack: NowPlayingInfo?
+ 32 |     private(set) var palette: [RGBColor] = PaletteExtractor.fallback
+    +--- macro expansion @ObservationTracked ---------------------------
+    |1 | @ObservationIgnored
+    |2 | private  var _palette: [RGBColor] = PaletteExtractor.fallback
+    |  |                         `- error: 'RGBColor' is ambiguous for type lookup in this context
+    +-------------------------------------------------------------------
+ 33 |     /// Показать подсказку о доступе к звуку.
+ 34 |     private(set) var permissionHint = false
+
+/Users/runner/work/music-wave/music-wave/Sources/WaveCore/Palette.swift:64:15: note: found this candidate
+ 62 | 
+ 63 | /// sRGB с гамма-кривой, значения 0...1.
+ 64 | public struct RGBColor: Sendable, Equatable, Codable {
+    |               `- note: found this candidate
+ 65 |     public var r, g, b: Float
+ 66 | 
+
+/Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/ApplicationServices.framework/Frameworks/QD.framework/Headers/Quickdraw.h:65:8: note: found this candidate
+ 63 | typedef BitMap *                        BitMapPtr;
+ 64 | typedef BitMapPtr *                     BitMapHandle;
+ 65 | struct RGBColor {
+    |        `- note: found this candidate
+ 66 |   unsigned short      red;
+ 67 |   unsigned short      green;

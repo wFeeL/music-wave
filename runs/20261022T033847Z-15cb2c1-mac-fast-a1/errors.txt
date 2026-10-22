@@ -1,0 +1,2 @@
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/AppModel.swift:32:32: error: 'RGBColor' is ambiguous for type lookup in this context
+macro expansion @ObservationTracked:2:25: error: 'RGBColor' is ambiguous for type lookup in this context
