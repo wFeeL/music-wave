@@ -1,0 +1,47 @@
+# sample <pid> 3 of the silence run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 11574) every 1 millisecond
+Process:         WaveFeels [11574]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x104a44000
+Identifier:      com.wfeels.wavefeels
+Version:         0.9.0 (2)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [9209]
+Target Type:     live task
+
+Date/Time:       2026-10-22 09:40:43.190 +0000
+Launch Time:     2026-10-22 09:40:21.865 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         19.4M
+Physical footprint (peak):  21.5M
+Idle exit:                  untracked
+Samples per thread:
+    1609 Thread_35332   DispatchQueue_1: com.apple.main-thread  (serial)
+    1609 Thread_35350: com.apple.NSEventThread
+    1609 Thread_35360: caulk.messenger.shared:17
+    1609 Thread_35361: caulk.messenger.shared:high
+    1609 Thread_35367: caulk::deferred_logger
+    1603 Thread_35357
+    1602 Thread_35347
+    1600 Thread_35348
+    1596 Thread_35341
+    21 Thread_<multiple>   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    6 Thread_<multiple>   DispatchQueue_408: com.wfeels.wavefeels.demo  (serial)
+    4 Thread_<multiple>   DispatchQueue_407: com.wfeels.wavefeels.analysis  (serial)
+    1 Thread_35341   DispatchQueue_20: com.apple.root.user-interactive-qos.overcommit  (concurrent)
+    1 Thread_35341   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+    1 Thread_35347   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+    1 Thread_35347   DispatchQueue_20: com.apple.root.user-interactive-qos.overcommit  (concurrent)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        6393
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        4827
+        mach_msg2_trap  (in libsystem_kernel.dylib)        3218
+        kevent_id  (in libsystem_kernel.dylib)        11
+        start_wqthread  (in libsystem_pthread.dylib)        9
+        _dispatch_event_loop_drain_timers  (in libdispatch.dylib)        5
