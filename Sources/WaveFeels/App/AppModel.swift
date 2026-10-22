@@ -497,6 +497,8 @@ final class AppModel {
         machine.hideDelay = settings.hideDelay
         let state = machine.update(inputs, now: now)
         if state != islandState {
+            // По этой строке замер CPU в CI убеждается, что остров действительно показан.
+            log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
             islandState = state
         }
         updatePermissionHint()

@@ -2,7 +2,8 @@
 # Публикует ci-out/ в ветку ci-results: runs/<UTC>-<sha7>-<workflow>-<mode>-a<attempt>/.
 # Запускается последним шагом workflow (if: always()) с GH_TOKEN, CI_OUTCOME и MODE в окружении (в release.yml еще RELEASE_OUTCOME).
 # Каждая попытка заново клонирует ветку (или создает orphan при первом запуске), до пяти попыток.
-# Код 0 при успехе, 1 после пяти неудачных попыток. Рассчитан на bash 3.2 и BSD-утилиты.
+# Код 0 при успехе, 1 после пяти неудачных попыток. Рассчитан на bash 3.2 и BSD-утилиты, работает
+# и на Linux-раннере (tester.yml).
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
@@ -65,7 +66,12 @@ publish_once() { # рабочий каталог
 
     mkdir -p "$repo/$RUN_DIR" || return 1
     if [[ -d "$OUT" ]]; then
-        ditto "$OUT" "$repo/$RUN_DIR" || return 1
+        # ditto есть только в macOS; tester.yml публикует с ubuntu.
+        if command -v ditto > /dev/null 2>&1; then
+            ditto "$OUT" "$repo/$RUN_DIR" || return 1
+        else
+            cp -R "$OUT/." "$repo/$RUN_DIR" || return 1
+        fi
     fi
     write_summary "$repo/$RUN_DIR" || return 1
     git -C "$repo" add -A "$RUN_DIR" || return 1
