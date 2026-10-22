@@ -55,6 +55,8 @@ struct AdapterTiming: Sendable {
 /// адаптер в запасной режим («тишина адаптера»), трек выбранного источника (`clearSilence()`)
 /// или новый `start()` его возвращают. Дочерние процессы завершаются
 /// (SIGTERM) только в `stop()`, очистки в `deinit` нет: владелец вызывает `stop()` перед выходом.
+/// Процессы адаптера, пережившие упавший или принудительно закрытый прошлый запуск, первый
+/// `start()` находит и завершает (`OrphanedAdapterProcesses`).
 @MainActor
 @Observable
 final class MediaRemoteAdapter {
@@ -101,6 +103,8 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var restarts = 0
     @ObservationIgnored private var restartTask: Task<Void, Never>?
     @ObservationIgnored private var commands: [Int: AdapterProcess] = [:]
+    /// Процессы от прошлого запуска уже искались.
+    @ObservationIgnored private var orphansChecked = false
 
     /// `system`: описание версии macOS со сборкой; тесты подставляют свое.
     init(
@@ -136,6 +140,10 @@ final class MediaRemoteAdapter {
             availability = .unavailable(exitCode: -1, stderr: Self.missingFilesMessage)
             log("адаптер недоступен: \(Self.missingFilesMessage)")
             return
+        }
+        if !orphansChecked {
+            orphansChecked = true
+            Self.terminateOrphans(scriptPath: paths.script)
         }
         if let cacheKey, defaults.string(forKey: Self.testedBuildKey) == cacheKey {
             let code = Int32(truncatingIfNeeded: defaults.integer(forKey: Self.testExitCodeKey))
@@ -212,6 +220,44 @@ final class MediaRemoteAdapter {
         guard availability == .silent else { return }
         availability = .available
         log("тишина адаптера снята")
+    }
+
+    /// Вне главного потока: SIGTERM процессам адаптера этого бандла, которые остались от
+    /// прошлого запуска (родитель launchd). Свои дочерние процессы не задеваются: их родитель
+    /// это приложение. Сколько нашлось, пишется в лог.
+    nonisolated static func terminateOrphans(scriptPath: String) {
+        DispatchQueue.global(qos: .utility).async {
+            let ps = Process()
+            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+            ps.arguments = ["-axww", "-o", "pid=,ppid=,command="]
+            let pipe = Pipe()
+            ps.standardOutput = pipe
+            ps.standardError = FileHandle.nullDevice
+            ps.standardInput = FileHandle.nullDevice
+            do {
+                try ps.run()
+            } catch {
+                logFromAnyThread("процессы адаптера от прошлого запуска не проверены: \(error.localizedDescription)")
+                return
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            ps.waitUntilExit()
+            let pids = OrphanedAdapterProcesses.pids(
+                psOutput: String(decoding: data, as: UTF8.self),
+                scriptPath: scriptPath,
+                excluding: getpid()
+            )
+            for pid in pids {
+                kill(pid, SIGTERM)
+            }
+            logFromAnyThread("процессов адаптера от прошлого запуска: \(pids.count)"
+                + (pids.isEmpty ? "" : ", завершены (SIGTERM): \(pids.map { String($0) }.joined(separator: ", "))"))
+        }
+    }
+
+    nonisolated private static func logFromAnyThread(_ message: String) {
+        Log.nowPlaying.info("\(message, privacy: .public)")
+        Log.file(message)
     }
 
     /// Защита от бессмысленной длительности: бесконечная, отрицательная или больше суток

@@ -170,6 +170,42 @@ struct MediaRemoteAdapterTests {
         #expect(adapter.availability == .available)
     }
 
+    /// Поток адаптера, переживший прошлый запуск (родитель launchd), первый `start()`
+    /// завершает; свои процессы адаптер не трогает.
+    @Test @MainActor func orphanedStreamFromPreviousRunIsTerminated() async throws {
+        let fake = try FakeAdapter(body: #"""
+            if ($cmd eq 'stream') { print track('Own'); sleep 30; }
+            """#)
+        defer { fake.remove() }
+        let paths = try #require(AdapterPaths(bundle: fake.bundle))
+
+        // Оболочка запускает поток в фоне и выходит: родителем потока становится launchd.
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = [
+            "-c", #"/usr/bin/perl "$0" "$1" stream --micros </dev/null >/dev/null 2>&1 & echo $!"#,
+            paths.script, paths.framework,
+        ]
+        let pipe = Pipe()
+        shell.standardOutput = pipe
+        try shell.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        shell.waitUntilExit()
+        let orphan = try #require(Int32(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer {
+            // Если тест упал, поток не должен пережить его.
+            if kill(orphan, 0) == 0 { kill(orphan, SIGKILL) }
+        }
+        #expect(kill(orphan, 0) == 0)
+
+        let adapter = MediaRemoteAdapter(bundle: fake.bundle, defaults: fake.defaults)
+        adapter.start()
+        defer { adapter.stop() }
+        #expect(await waitUntil(.seconds(30)) { kill(orphan, 0) != 0 })
+        // Свой поток адаптера при этом жив и выдает трек.
+        #expect(await waitUntil(.seconds(30)) { adapter.info?.title == "Own" })
+    }
+
     /// Пометить молчащим можно только работающий адаптер.
     @Test @MainActor func onlyAvailableAdapterCanBeMarkedSilent() throws {
         let fake = try FakeAdapter(body: #"""
