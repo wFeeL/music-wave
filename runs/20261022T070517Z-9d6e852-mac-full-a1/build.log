@@ -1,0 +1,139 @@
+== step build-release: swift build -c release
+Building for production...
+[0/5] Write sources
+[2/5] Write swift-version-7974D3F7F03D5E95.txt
+[4/6] Compiling WaveCore ActivityGate.swift
+[5/7] Compiling WaveFeels AppDelegate.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] Write sources
+[0/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[2/13] Write WaveFeels-entitlement.plist
+[2/13] Write sources
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/25] Emitting module WaveCore
+[10/25] Compiling WaveCore ActivityGate.swift
+[11/25] Compiling WaveCore Analyzer.swift
+[12/25] Compiling WaveCore AttackRelease.swift
+[13/25] Compiling WaveCore AudioSource.swift
+[14/25] Compiling WaveCore BandMapper.swift
+[15/25] Compiling WaveCore BeatDetector.swift
+[16/25] Compiling WaveCore IslandStateMachine.swift
+[17/25] Compiling WaveCore Latency.swift
+[18/25] Compiling WaveCore LevelProcessor.swift
+[19/25] Compiling WaveCore NotchGeometry.swift
+[20/25] Compiling WaveCore NowPlaying.swift
+[21/30] Compiling WaveCore Palette.swift
+[22/30] Compiling WaveCore RealFFT.swift
+[23/30] Compiling WaveCore SampleRingBuffer.swift
+[24/30] Compiling WaveCore TapStreamLayout.swift
+[25/30] Compiling WaveCore WaveShape.swift
+[26/64] Emitting module WaveFeels
+[27/74] Compiling WaveFeels AppDelegate.swift
+[28/74] Compiling WaveFeels AppModel.swift
+[29/74] Compiling WaveFeels LaunchArguments.swift
+[30/74] Compiling WaveFeels WaveFeelsApp.swift
+[31/74] Compiling WaveFeels WindowsController.swift
+[32/74] Compiling WaveFeels AnalysisEngine.swift
+[33/80] Compiling WaveFeels OutputDeviceMonitor.swift
+[34/80] Compiling WaveFeels ProcessTapCapture.swift
+[35/80] Compiling WaveCoreTests RealFFTTests.swift
+[36/80] Compiling WaveCoreTests SampleRingBufferTests.swift
+[37/80] Compiling WaveCoreTests SourceChoicesTests.swift
+[38/80] Compiling WaveCoreTests TapStreamLayoutTests.swift
+[39/80] Compiling WaveCoreTests TestSignals.swift
+[40/80] Compiling WaveCoreTests WaveShapeTests.swift
+[41/80] Compiling WaveFeels Log.swift
+[42/80] Compiling WaveFeels SigningInfo.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+[49/80] Compiling WaveFeels AudioPipeline.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+[50/80] Compiling WaveFeels AudioProcessList.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+[51/80] Compiling WaveFeels CoreAudio+Property.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+[52/80] Compiling WaveFeels DemoAudioSource.swift
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
+48 |     var body: some View {
+49 |         Button("Настройки…") {
+50 |             delegate.showSettings()
+   |                      `- error: value of type 'AppDelegate' has no member 'showSettings'
+51 |         }
+52 |         .keyboardShortcut(",")
+[53/80] Compiling WaveFeels DiagnosticsView.swift
+[54/80] Compiling WaveFeels ExpandedPanelView.swift
+[55/80] Compiling WaveFeels IslandShape.swift
+[56/80] Compiling WaveFeels IslandView.swift
+[57/80] Compiling WaveFeels MarqueeText.swift
+[58/80] Compiling WaveFeels SettingsView.swift
+[59/80] Compiling WaveFeels WaveCanvas.swift
+[60/80] Compiling WaveFeels FullscreenDetector.swift
+[61/80] Compiling WaveFeels NotchPanel.swift
+[62/80] Compiling WaveFeels NotchWindowController.swift
+[63/80] Emitting module WaveCoreTests

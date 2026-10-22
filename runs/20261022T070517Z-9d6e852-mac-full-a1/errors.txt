@@ -1,0 +1,1 @@
+/Users/runner/work/music-wave/music-wave/Sources/WaveFeels/App/WaveFeelsApp.swift:50:22: error: value of type 'AppDelegate' has no member 'showSettings'
