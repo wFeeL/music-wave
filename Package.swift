@@ -14,5 +14,18 @@ let package = Package(
 )
 
 #if os(macOS)
-// Таргеты WaveFeels и WaveFeelsTests добавляются в задаче 12.
+// Приложение и его тесты собираются только на macOS; на Linux виден один WaveCore.
+package.targets += [
+    .executableTarget(
+        name: "WaveFeels",
+        dependencies: ["WaveCore"],
+        linkerSettings: [
+            .linkedFramework("CoreAudio"),
+            .linkedFramework("AudioToolbox"),
+            .linkedFramework("AVFoundation"),
+            .linkedFramework("ServiceManagement"),
+        ]
+    ),
+    .testTarget(name: "WaveFeelsTests", dependencies: ["WaveFeels"]),
+]
 #endif
