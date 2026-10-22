@@ -121,3 +121,27 @@ public struct IslandStateMachine: Sendable {
         now - since >= delay - 1e-9
     }
 }
+
+/// Какие слои волн острова живут во время смены состояния.
+///
+/// Волны крыла и полоса панели обе всегда стоят в дереве вида и проявляются или гаснут по
+/// прозрачности. Пока идет переход (`overlap` после смены состояния), считаются оба набора
+/// волн, чтобы уходящий слой двигался, пока гаснет. Потом считается только слой текущего
+/// состояния, у скрытого острова ни одного.
+public enum IslandTransition {
+    /// Сколько секунд после смены состояния живут оба слоя: дольше пружин раскрытия и сворачивания.
+    public static let overlap = 0.8
+
+    /// `sinceStateChange`: секунды от последней смены состояния; бесконечность значит, что
+    /// остров давно в `state`.
+    public static func waveLayers(state: IslandState, sinceStateChange: Double) -> (wing: Bool, panel: Bool) {
+        if sinceStateChange < overlap {
+            return (true, true)
+        }
+        switch state {
+        case .hidden: return (false, false)
+        case .collapsed: return (true, false)
+        case .expanded: return (false, true)
+        }
+    }
+}

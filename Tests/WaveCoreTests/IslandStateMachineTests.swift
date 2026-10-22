@@ -140,4 +140,29 @@ import Testing
         machine.update(playing, now: 4.1)
         #expect(run(&machine, silent, from: 4.2, to: 7.2) == .collapsed)
     }
+
+    @Test func transitionKeepsBothWaveLayers() {
+        func layers(_ state: IslandState, _ since: Double) -> (wing: Bool, panel: Bool) {
+            IslandTransition.waveLayers(state: state, sinceStateChange: since)
+        }
+        let collapsed = layers(.collapsed, 5)
+        #expect(collapsed.wing == true)
+        #expect(collapsed.panel == false)
+        let expanding = layers(.expanded, 0.3)
+        #expect(expanding.wing == true)
+        #expect(expanding.panel == true)
+        let expanded = layers(.expanded, 0.81)
+        #expect(expanded.wing == false)
+        #expect(expanded.panel == true)
+        let collapsing = layers(.collapsed, 0.5)
+        #expect(collapsing.wing == true)
+        #expect(collapsing.panel == true)
+        let hidden = layers(.hidden, 1)
+        #expect(hidden.wing == false)
+        #expect(hidden.panel == false)
+        // Снимки ставят смену состояния в минус бесконечность: остров давно в своем состоянии.
+        let steady = layers(.expanded, .infinity)
+        #expect(steady.wing == false)
+        #expect(steady.panel == true)
+    }
 }
