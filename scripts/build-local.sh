@@ -49,6 +49,7 @@ EOF
 
 RUN_TESTS=0
 INSTALL=0
+OPENED=0
 VERSION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -223,13 +224,32 @@ if ! SWIFT_INFO=$(swift --version 2>&1); then
     fail "swift не запускается. Выполните xcode-select --install и запустите скрипт снова."
 fi
 echo "$SWIFT_INFO"
+# Версия Swift вида 6.3. Проверено на 6.3 (CI, Xcode 26); на других версиях сборка может не пройти.
+SWIFT_MM=""
+SWIFT_PATTERN='Swift version ([0-9]+)\.([0-9]+)'
+if [[ "$SWIFT_INFO" =~ $SWIFT_PATTERN ]]; then
+    SWIFT_MM="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+fi
+if [[ "$SWIFT_MM" != 6.3 ]]; then
+    warn "Сборка проверена на Swift 6.3, здесь ${SWIFT_MM:-неизвестная версия}."
+    add_warning "проверено на Swift 6.3, здесь ${SWIFT_MM:-неизвестная версия}"
+fi
+
+# Подсказка, как обновить инструменты разработчика.
+update_tools_hint() {
+    if [[ $IS_CLT -eq 1 ]]; then
+        echo "Обновите Command Line Tools: Системные настройки, «Основные», «Обновление ПО». Или в Терминале: softwareupdate --list, затем sudo softwareupdate --install \"<название Command Line Tools из строки Label>\"."
+    else
+        echo "Обновите Xcode в App Store."
+    fi
+}
 
 SDK_VERSION=$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)
 if [[ "${SDK_VERSION%%.*}" =~ ^[0-9]+$ ]]; then
     echo "SDK macOS $SDK_VERSION"
     if [[ ${SDK_VERSION%%.*} -lt 26 ]]; then
         if [[ $IS_CLT -eq 1 ]]; then
-            fail "Command Line Tools устарели (SDK $SDK_VERSION, нужен 26 или новее). Обновите их в Системных настройках: «Основные», «Обновление ПО». Если обновления там нет, выполните sudo rm -rf /Library/Developer/CommandLineTools, затем xcode-select --install."
+            fail "Command Line Tools устарели (SDK $SDK_VERSION, нужен 26 или новее). $(update_tools_hint) Если обновления нет и там, выполните sudo rm -rf /Library/Developer/CommandLineTools, затем xcode-select --install."
         fi
         fail "Xcode устарел (SDK $SDK_VERSION, нужен 26 или новее). Обновите Xcode в App Store."
     fi
@@ -356,6 +376,11 @@ if ! run_logged "$WORK/build.log" swift build -c release; then
     if [[ $IS_CLT -eq 1 ]] && grep -q 'external macro implementation' "$WORK/build.log"; then
         fail "Command Line Tools не хватает для макросов Swift. Поставьте Xcode из App Store, выполните sudo xcode-select -s /Applications/Xcode.app/Contents/Developer и запустите скрипт снова."
     fi
+    case "$SWIFT_MM" in
+        5.* | 6.0 | 6.1 | 6.2)
+            fail "Приложение не собралось, а Swift $SWIFT_MM старее проверенного 6.3. $(update_tools_hint) Потом выполните rm -rf .build и запустите скрипт снова."
+            ;;
+    esac
     fail "Приложение не собралось, ошибки выше. Пришлите файл $LOG."
 fi
 
@@ -452,15 +477,20 @@ if [[ $INSTALL -eq 1 ]]; then
     STEP="установка"
     if pgrep -x WaveFeels > /dev/null 2>&1; then
         say "Закрываю запущенный WaveFeels"
-        echo "Если macOS спросит, можно ли Терминалу управлять WaveFeels, ответ не важен:"
-        echo "без разрешения скрипт закроет приложение сам."
-        osascript -e 'quit app "WaveFeels"' > /dev/null 2>&1 || true
+        echo "Если macOS спросит, можно ли Терминалу управлять WaveFeels, можно отказать:"
+        echo "через 10 секунд скрипт закроет приложение сам."
+        # osascript в фоне: вопрос macOS про управление приложением не должен останавливать скрипт.
+        osascript -e 'quit app "WaveFeels"' > /dev/null 2>&1 &
+        osa=$!
         for _ in 1 2 3 4 5 6 7 8 9 10; do
             if ! pgrep -x WaveFeels > /dev/null 2>&1; then
                 break
             fi
             sleep 1
         done
+        kill "$osa" 2> /dev/null || true
+        wait "$osa" 2> /dev/null || true
+        # Осиротевшие процессы адаптера WaveFeels убирает сам при следующем запуске.
         if pgrep -x WaveFeels > /dev/null 2>&1; then
             pkill -x WaveFeels || true
             sleep 2
@@ -472,12 +502,14 @@ if [[ $INSTALL -eq 1 ]]; then
     fi
     say "Устанавливаю в $INSTALLED"
     if [[ -e "$INSTALLED" ]] && ! rm -rf "$INSTALLED"; then
-        fail "Не удалось удалить старый WaveFeels. Перетащите его из «Программ» в Корзину и запустите скрипт снова."
+        fail "Не удалось удалить старый WaveFeels. Перетащите его из «Программ» в Корзину или разрешите Терминалу «Управление приложениями» (Системные настройки, «Конфиденциальность и безопасность») и запустите скрипт снова."
     fi
     if ! ditto "$APP" "$INSTALLED"; then
         fail "Не удалось скопировать приложение в «Программы». Перетащите $APP туда вручную."
     fi
-    if ! open "$INSTALLED"; then
+    if open "$INSTALLED"; then
+        OPENED=1
+    else
         warn "Не удалось открыть WaveFeels, откройте его из «Программ»."
     fi
 fi
@@ -487,7 +519,11 @@ echo
 echo "=================================================================="
 echo "Готово: WaveFeels $VERSION (сборка $BUILD)."
 if [[ $INSTALL -eq 1 ]]; then
-    echo "Установлен в $INSTALLED и запущен."
+    if [[ $OPENED -eq 1 ]]; then
+        echo "Установлен в $INSTALLED и запущен."
+    else
+        echo "Установлен в $INSTALLED. Откройте его из «Программ»."
+    fi
 else
     echo "Приложение: $APP"
     echo "Чтобы установить, выйдите из WaveFeels и выполните:"
