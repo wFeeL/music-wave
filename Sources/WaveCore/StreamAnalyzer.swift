@@ -45,6 +45,8 @@ public struct HopResult: Sendable {
     public var broadbandOnset: OnsetEvent?
     /// Широкополосная функция онсетов этого шага (вход оценки темпа и фазы).
     public var broadbandODF: Float
+    /// Функция онсетов бочки этого шага (поток SuperFlux по бинам до 150 Гц), вход выбора октавы темпа.
+    public var kickODF: Float
     /// `10 · log10` суммарной мощности бинов бочки (до 150 Гц, без бина 0), деленной на ENBW окна
     /// Ханна, как у полос `BandMapper`: синус амплитуды A дает A². Пол -120 dBFS.
     public var kickLevelDB: Float
@@ -56,6 +58,7 @@ public struct HopResult: Sendable {
         kickOnset: OnsetEvent?,
         broadbandOnset: OnsetEvent?,
         broadbandODF: Float,
+        kickODF: Float = 0,
         kickLevelDB: Float
     ) {
         self.frame = frame
@@ -64,6 +67,7 @@ public struct HopResult: Sendable {
         self.kickOnset = kickOnset
         self.broadbandOnset = broadbandOnset
         self.broadbandODF = broadbandODF
+        self.kickODF = kickODF
         self.kickLevelDB = kickLevelDB
     }
 }
@@ -256,6 +260,7 @@ public final class StreamAnalyzer {
             kickOnset: kickOnset,
             broadbandOnset: broadbandOnset,
             broadbandODF: broadbandODF,
+            kickODF: kickODF,
             kickLevelDB: kickLevelDB
         )
     }

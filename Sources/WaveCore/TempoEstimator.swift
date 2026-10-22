@@ -15,16 +15,15 @@ public struct TempoEstimate: Sendable, Equatable {
 
 /// Темп по автокорреляции широкополосной функции онсетов с гребенкой гармоник (`beat-sync.md` 2.4).
 ///
-/// `append` принимает функцию онсетов каждого шага анализа, `update` вызывается каждые
-/// `updateInterval` секунд времени потока и смотрит на последние `historySeconds`:
-/// 1. функция возводится в куб, прореживается вдвое (средние пар) и центрируется. Куб отдает
-///    автокорреляцию громким акцентам (бочка, малый), а не частым тихим (хэт): у широкополосной
+/// `append` принимает функции онсетов каждого шага анализа (широкополосную и бочки), `update`
+/// вызывается каждые `updateInterval` секунд времени потока и смотрит на последние `historySeconds`:
+/// 1. широкополосная функция возводится в квадрат, прореживается вдвое (средние пар) и центрируется.
+///    Квадрат отдает автокорреляцию громким акцентам (бочка, малый), а не частым тихим (хэт): у этой
 ///    функции хэт восьмыми почти так же силен, как бочка с хэтом на доле, и без степени на 160 BPM
-///    выигрывал лаг в три восьмых (107 BPM), а на 90 BPM восьмые (180 BPM). Квадрата не хватало при
-///    неровной игре (165 и 170 BPM уходили в 3:2);
-/// 2. автокорреляция `acf[l]` нормирована на число пар `n - l`, чтобы длинные лаги (медленные темпы,
-///    старшие гармоники) не проигрывали коротким только из-за короткой истории, и сглажена ядром
-///    [1, 2, 1] / 4;
+///    выигрывал лаг в три восьмых (107 BPM), а на 90 BPM восьмые (180 BPM);
+/// 2. автокорреляция взвешена по свежести (вес шага `exp(-возраст / recencySeconds)`, нормировка на
+///    сумму весов пар), так что смена темпа видна через 2-3 с, а не когда новый темп займет половину
+///    шести секунд. Нормировка на пары не дает длинным лагам проигрывать из-за короткой истории;
 /// 3. для лагов τ темпов 70-180 BPM `S(τ) = Σ_{h=1..4} max(acf[hτ-1...hτ+1]) / √h` умножается на
 ///    лог-гауссов приоритет вокруг 120 BPM с σ = 0.9 октавы. τ перебирается с шагом в половину шага
 ///    истории: при целом τ четвертая гармоника уходит от настоящего пика на два шага, за окно ±1, и
@@ -32,8 +31,14 @@ public struct TempoEstimate: Sendable, Equatable {
 ///    Пока история коротка, гармоники, у которых меньше секунды пар, не считаются, а сумма остальных
 ///    растягивается на полный вес гребенки: иначе в первые секунды быстрый темп собирал бы больше
 ///    гармоник и выигрывал октавой;
-/// 4. лучший лаг уточняется параболой по трем соседним `S`;
-/// 5. шаг устойчивости `accept(period:)` с удержанием от кратных перебросов.
+/// 4. когда темп установился, лаги в пределах 6 % от текущего периода получают `currentBonus`:
+///    почти равные октавы (140 и 70 BPM с малым на слабых долях) не перебрасываются туда и обратно;
+/// 5. спор 3:2, 2:3, 4:3 и 3:4 решает бочка: если такой лаг набирает не меньше 85 % от лучшего,
+///    выбирается тот, который сильнее в той же гребенке по функции бочки. Хэт и малый между долями
+///    поднимают широкополосную функцию на лагах в три восьмых, бочка на каждой доле их не поддерживает
+///    (неровная игра на 160-175 BPM уходила в 107-117 BPM);
+/// 6. выбранный лаг уточняется параболой по трем соседним `S`;
+/// 7. шаг устойчивости `accept(period:)` с удержанием от кратных перебросов.
 ///
 /// Тишина или история без периодичности дают `nil`. Буферы выделены в `init`, `update` не выделяет.
 public struct TempoEstimator: Sendable {
@@ -44,37 +49,48 @@ public struct TempoEstimator: Sendable {
     public static let historySeconds = 6.0
     public static let updateInterval = 0.25
     public static let minimumHistory = 2.0
-    /// Сколько подряд согласных оценок нужно, чтобы сменить установившийся темп на кратный ему
-    /// (2, ½, 3/2, 2/3, 4/3, 3/4 в пределах 4 %). 8 и меньше пропускали переброс 170 и 85 BPM при
-    /// разбросе бочки 8 мс; 12 оценок это 3 с.
+    /// Сколько из последних `relatedWindow` оценок должны совпасть с кандидатом (в пределах 4 %), чтобы
+    /// сменить установившийся темп на кратный ему (2, ½, 3/2, 2/3, 4/3, 3/4 в пределах 4 %).
     public static let relatedSwitchUpdates = 12
+    public static let relatedWindow = 16
     /// Через столько секунд потока после первой оценки темп считается установившимся.
-    public static let establishedAfter = 3.0
+    public static let establishedAfter = 2.0
 
     /// Оценка в пределах этой доли от текущего периода подтягивает его на `followRate`.
     static let followTolerance = 0.06
     static let followRate = 0.2
-    /// Далекая оценка принимается, когда следующая совпадает с ней в пределах этой доли.
+    /// Далекая некратная оценка принимается, когда следующая совпадает с ней в пределах этой доли.
     static let switchTolerance = 0.03
     static let harmonics = 4
-    /// Кратные отношения, переход на которые сдерживается, и допуск к ним.
+    /// Кратные отношения, переход на которые сдерживается; допуск к ним и к согласию с кандидатом.
     static let relatedRatios: [Double] = [2, 0.5, 1.5, 2.0 / 3, 4.0 / 3, 0.75]
     static let relatedTolerance = 0.04
+    /// Отношения, спор которых решает функция бочки, и насколько соперник может уступать лучшему.
+    static let kickTieRatios: [Double] = [1.5, 2.0 / 3, 4.0 / 3, 0.75]
+    static let kickTieMargin = 0.15
+    /// Прибавка к оценке лагов рядом с установившимся периодом.
+    static let currentBonus = 0.15
+    /// Постоянная времени веса свежести в секундах.
+    static let recencySeconds = 2.0
     /// Меньше стольких секунд пар гармоника не учитывается.
     static let minimumOverlapSeconds = 1.0
 
     public let framesPerSecond: Double
     /// Текущий период доли в секундах, `nil` до первой оценки.
     public private(set) var period: Double?
-    private var candidate: Double?
-    /// Сколько оценок подряд совпали с кандидатом, включая первую.
-    private var agreeingUpdates = 0
+    /// Прошлая далекая оценка (для некратной смены темпа по двум согласным).
+    private var previousFar: Double?
+    /// Кольцо последних `relatedWindow` оценок после первой.
+    private var recent: [Double]
+    private var recentCount = 0
+    private var recentIndex = 0
     /// Шагов функции онсетов с `reset` и номер шага первой оценки.
     private var framesAppended = 0
     private var firstEstimateFrame: Int?
 
-    /// Кольцо функции онсетов на `historySeconds`.
+    /// Кольца функций онсетов на `historySeconds`.
     private var history: [Float]
+    private var kickHistory: [Float]
     private var writeIndex = 0
     private var count = 0
 
@@ -88,18 +104,23 @@ public struct TempoEstimator: Sendable {
     /// Лог-гауссов приоритет по лагу в половинах шага, `0...halfLagMax + 1`.
     private let prior: [Double]
     private let combWeight: Double
+    /// Вес свежести по возрасту в шагах прореженной истории.
+    private let recency: [Double]
 
     private var decimated: [Double]
+    private var weights: [Double]
     private var acf: [Double]
-    /// `acf`, сглаженная ядром [1, 2, 1] / 4.
-    private var smoothedACF: [Double]
-    private var score: [Double]
+    /// Оценки гребенки: широкополосная с 0, бочки с `scoreStride`.
+    private var scores: [Double]
+    private let scoreStride: Int
 
     public init(framesPerSecond: Double) {
         precondition(framesPerSecond > 0, "framesPerSecond must be positive")
         self.framesPerSecond = framesPerSecond
         let capacity = max(Int((Self.historySeconds * framesPerSecond).rounded()), 2)
         history = [Float](repeating: 0, count: capacity)
+        kickHistory = history
+        recent = [Double](repeating: 0, count: Self.relatedWindow)
         let rate = framesPerSecond / 2
         decimatedRate = rate
         halfLagMin = max(Int((2 * rate * 60 / Self.maxBPM).rounded()), 4)
@@ -112,15 +133,19 @@ public struct TempoEstimator: Sendable {
             return exp(-0.5 * octaves * octaves)
         }
         combWeight = (1...Self.harmonics).reduce(0) { $0 + 1 / Double($1).squareRoot() }
+        recency = (0..<(capacity / 2)).map { exp(-Double($0) / (Self.recencySeconds * rate)) }
         decimated = [Double](repeating: 0, count: capacity / 2)
-        acf = [Double](repeating: 0, count: Self.center(harmonic: Self.harmonics, halfLag: halfLagMax + 1) + 3)
-        smoothedACF = acf
-        score = [Double](repeating: 0, count: halfLagMax + 2)
+        weights = decimated
+        acf = [Double](repeating: 0, count: Self.center(harmonic: Self.harmonics, halfLag: halfLagMax + 1) + 2)
+        scoreStride = halfLagMax + 2
+        scores = [Double](repeating: 0, count: 2 * scoreStride)
     }
 
-    /// Функция онсетов очередного шага анализа.
-    public mutating func append(_ odf: Float) {
+    /// Функции онсетов очередного шага анализа: широкополосная (`HopResult.broadbandODF`) и бочки
+    /// (`HopResult.kickODF`). Без функции бочки спор 3:2 решает только широкополосная.
+    public mutating func append(_ odf: Float, kick: Float = 0) {
         history[writeIndex] = odf.isFinite ? max(odf, 0) : 0
+        kickHistory[writeIndex] = kick.isFinite ? max(kick, 0) : 0
         writeIndex = (writeIndex + 1) % history.count
         count = min(count + 1, history.count)
         framesAppended += 1
@@ -136,45 +161,74 @@ public struct TempoEstimator: Sendable {
     }
 
     /// Шаг устойчивости отдельно от оценки: близкое значение (до 6 %) подтягивает период на 20 %,
-    /// далекое становится кандидатом и принимается, только если следующее совпадает с ним до 3 %.
-    /// Когда темп установился (`establishedAfter` секунд потока после первой оценки), кандидат в
-    /// кратном отношении к нему (`relatedRatios`) принимается только после `relatedSwitchUpdates`
-    /// согласных оценок подряд: переброс октавы или 3:2 сбрасывает захват трекера. Первые секунды
-    /// и некратные кандидаты (настоящая смена темпа) переключаются как раньше. Значение не больше нуля
-    /// или не конечное пропускается: возвращается текущий период (без него 0.5 с) без переключения.
+    /// далекое некратное принимается, когда следующее совпадает с ним до 3 %. Когда темп установился
+    /// (`establishedAfter` секунд потока после первой оценки), кратное ему значение (`relatedRatios`)
+    /// принимается, только когда `relatedSwitchUpdates` из последних `relatedWindow` оценок совпадают с
+    /// ним до 4 %: переброс октавы или 3:2 сбрасывает захват трекера. Оценки, которые еще идут за
+    /// старым темпом, счет не обнуляют. Значение не больше нуля или не конечное пропускается:
+    /// возвращается текущий период (без него 0.5 с) без переключения.
     public mutating func accept(period estimate: Double) -> TempoEstimate {
         guard estimate.isFinite, estimate > 0 else {
             return TempoEstimate(period: period ?? 60 / Self.priorBPM, switched: false)
         }
         guard let current = period else {
             period = estimate
-            candidate = nil
-            agreeingUpdates = 0
             firstEstimateFrame = framesAppended
+            clearRecent()
             return TempoEstimate(period: estimate, switched: true)
         }
+        recent[recentIndex] = estimate
+        recentIndex = (recentIndex + 1) % recent.count
+        recentCount = min(recentCount + 1, recent.count)
+
         if abs(estimate - current) / current < Self.followTolerance {
             let moved = current + Self.followRate * (estimate - current)
             period = moved
-            candidate = nil
-            agreeingUpdates = 0
+            previousFar = nil
             return TempoEstimate(period: moved, switched: false)
         }
-        if let candidate, abs(estimate - candidate) / candidate < Self.switchTolerance {
-            agreeingUpdates += 1
-            let needed = isEstablished && Self.isRelated(estimate, to: current) ? Self.relatedSwitchUpdates : 2
-            if agreeingUpdates >= needed {
-                period = estimate
-                self.candidate = nil
-                agreeingUpdates = 0
-                return TempoEstimate(period: estimate, switched: true)
+        if isEstablished, Self.isRelated(estimate, to: current) {
+            previousFar = estimate
+            var agreeing = 0
+            for index in 0..<recentCount where abs(recent[index] - estimate) / estimate < Self.relatedTolerance {
+                agreeing += 1
             }
-            self.candidate = estimate
-            return TempoEstimate(period: current, switched: false)
+            guard agreeing >= Self.relatedSwitchUpdates else {
+                return TempoEstimate(period: current, switched: false)
+            }
+            return switchTo(estimate)
         }
-        candidate = estimate
-        agreeingUpdates = 1
+        if let previousFar, abs(estimate - previousFar) / previousFar < Self.switchTolerance {
+            return switchTo(estimate)
+        }
+        previousFar = estimate
         return TempoEstimate(period: current, switched: false)
+    }
+
+    /// Пауза, перемотка или смена источника: история и темп начинаются заново.
+    public mutating func reset() {
+        for index in history.indices {
+            history[index] = 0
+            kickHistory[index] = 0
+        }
+        writeIndex = 0
+        count = 0
+        period = nil
+        framesAppended = 0
+        firstEstimateFrame = nil
+        clearRecent()
+    }
+
+    private mutating func switchTo(_ estimate: Double) -> TempoEstimate {
+        period = estimate
+        clearRecent()
+        return TempoEstimate(period: estimate, switched: true)
+    }
+
+    private mutating func clearRecent() {
+        recentCount = 0
+        recentIndex = 0
+        previousFar = nil
     }
 
     private var isEstablished: Bool {
@@ -187,20 +241,6 @@ public struct TempoEstimator: Sendable {
         return relatedRatios.contains { abs(ratio / $0 - 1) < relatedTolerance }
     }
 
-    /// Пауза, перемотка или смена источника: история и темп начинаются заново.
-    public mutating func reset() {
-        for index in history.indices {
-            history[index] = 0
-        }
-        writeIndex = 0
-        count = 0
-        period = nil
-        candidate = nil
-        agreeingUpdates = 0
-        framesAppended = 0
-        firstEstimateFrame = nil
-    }
-
     /// Центр окна гармоники `h` лага `halfLag / 2`: `h · halfLag / 2`, половина вверх.
     private static func center(harmonic: Int, halfLag: Int) -> Int {
         (harmonic * halfLag + 1) / 2
@@ -208,16 +248,95 @@ public struct TempoEstimator: Sendable {
 
     /// Лаг доли в половинах шага прореженной истории с дробной частью, `nil` без периодичности.
     private mutating func bestHalfLag() -> Double? {
+        guard comb(kick: false) else { return nil }
+        if isEstablished, let period {
+            for halfLag in halfLagMin...halfLagMax where scores[halfLag] > 0 {
+                let lagPeriod = Double(halfLag) / 2 / decimatedRate
+                if abs(lagPeriod - period) / period < Self.followTolerance {
+                    scores[halfLag] *= 1 + Self.currentBonus
+                }
+            }
+        }
+
+        var best = halfLagMin
+        for halfLag in halfLagMin...halfLagMax where scores[halfLag] > scores[best] {
+            best = halfLag
+        }
+        guard scores[best] > 0 else { return nil }
+        best = kickTieBreak(best)
+
+        let left = scores[best - 1]
+        let middle = scores[best]
+        let right = scores[best + 1]
+        let curvature = left - 2 * middle + right
+        guard curvature < 0 else { return Double(best) }
+        let offset = 0.5 * (left - right) / curvature
+        return Double(best) + min(max(offset, -0.5), 0.5)
+    }
+
+    /// Соперники лучшего лага в отношениях `kickTieRatios`, набравшие не меньше `1 - kickTieMargin`
+    /// от него, сравниваются по гребенке функции бочки; при равенстве остается лучший.
+    private mutating func kickTieBreak(_ best: Int) -> Int {
+        let threshold = (1 - Self.kickTieMargin) * scores[best]
+        var hasRival = false
+        for ratio in Self.kickTieRatios {
+            if let rival = rival(of: best, ratio: ratio), scores[rival] >= threshold {
+                hasRival = true
+                break
+            }
+        }
+        guard hasRival, comb(kick: true) else { return best }
+        var chosen = best
+        var support = kickSupport(best)
+        for ratio in Self.kickTieRatios {
+            guard let rival = rival(of: best, ratio: ratio), scores[rival] >= threshold else { continue }
+            let rivalSupport = kickSupport(rival)
+            if rivalSupport > support {
+                chosen = rival
+                support = rivalSupport
+            }
+        }
+        return chosen
+    }
+
+    /// Лучший лаг в пределах ±2 половин шага от `best × ratio`, `nil` вне диапазона темпов.
+    private func rival(of best: Int, ratio: Double) -> Int? {
+        let target = Int((Double(best) * ratio).rounded())
+        guard target >= halfLagMin, target <= halfLagMax else { return nil }
+        var result = max(halfLagMin, target - 2)
+        for halfLag in result...min(halfLagMax, target + 2) where scores[halfLag] > scores[result] {
+            result = halfLag
+        }
+        return result
+    }
+
+    /// Наибольшая оценка гребенки бочки в пределах ±1 половины шага.
+    private func kickSupport(_ halfLag: Int) -> Double {
+        var support = -Double.infinity
+        for lag in max(halfLagMin, halfLag - 1)...min(halfLagMax, halfLag + 1) {
+            support = max(support, scores[scoreStride + lag])
+        }
+        return support
+    }
+
+    /// Гребенка с приоритетом по широкополосной истории (в квадрате) или по истории бочки в `scores`.
+    /// `false`, если в истории нет энергии или она слишком коротка.
+    private mutating func comb(kick: Bool) -> Bool {
         let capacity = history.count
         let n = count / 2
-        // Пары от самого старого из последних 2n шагов, в кубе; среднее вычитается.
+        // Пары от самого старого из последних 2n шагов; среднее вычитается.
         var start = (writeIndex - 2 * n + capacity) % capacity
         var mean = 0.0
         for i in 0..<n {
             let next = (start + 1) % capacity
-            let first = Double(history[start])
-            let second = Double(history[next])
-            let value = 0.5 * (first * first * first + second * second * second)
+            let value: Double
+            if kick {
+                value = 0.5 * (Double(kickHistory[start]) + Double(kickHistory[next]))
+            } else {
+                let first = Double(history[start])
+                let second = Double(history[next])
+                value = 0.5 * (first * first + second * second)
+            }
             decimated[i] = value
             mean += value
             start = (next + 1) % capacity
@@ -225,55 +344,40 @@ public struct TempoEstimator: Sendable {
         mean /= Double(max(n, 1))
         var energy = 0.0
         for i in 0..<n {
-            decimated[i] -= mean
-            energy += decimated[i] * decimated[i]
+            let centered = decimated[i] - mean
+            energy += centered * centered
+            weights[i] = recency[n - 1 - i]
+            decimated[i] = centered * weights[i]
         }
-        guard energy > 1e-9 * Double(max(n, 1)) else { return nil }
+        guard energy > 1e-9 * Double(max(n, 1)) else { return false }
 
-        // Автокорреляция на число пар; лаги, у которых меньше `minimumOverlap` пар, не считаются.
-        // Сглаживание [1, 2, 1] / 4 собирает пик, размазанный неровной игрой (σ 8 мс у бочки дает
-        // разброс разности двух ударов 11 мс, больше шага истории), иначе лаги бочки к бочке
-        // проигрывали лагам бочки к хэту, и 160 BPM уходил в 107.
+        // Автокорреляция с весом свежести; лаги, у которых меньше `minimumOverlap` пар, не считаются.
         let maxLag = min(acf.count - 1, n - minimumOverlap)
-        guard maxLag >= Self.center(harmonic: 1, halfLag: halfLagMax + 1) + 2 else { return nil }
+        guard maxLag >= Self.center(harmonic: 1, halfLag: halfLagMax + 1) + 1 else { return false }
         for l in 1...maxLag {
             var sum = 0.0
+            var norm = 0.0
             for i in 0..<(n - l) {
                 sum += decimated[i] * decimated[i + l]
+                norm += weights[i] * weights[i + l]
             }
-            acf[l] = sum / Double(n - l)
+            acf[l] = sum / norm
         }
-        for l in 2..<maxLag {
-            smoothedACF[l] = 0.25 * (acf[l - 1] + 2 * acf[l] + acf[l + 1])
-        }
-        let combLag = maxLag - 1
 
-        // Гребенка с приоритетом; соседи по краям диапазона нужны только параболе.
+        // Соседи по краям диапазона нужны только параболе.
+        let offset = kick ? scoreStride : 0
         for halfLag in (halfLagMin - 1)...(halfLagMax + 1) {
             var sum = 0.0
             var weight = 0.0
             for h in 1...Self.harmonics {
                 let center = Self.center(harmonic: h, halfLag: halfLag)
-                guard center + 1 <= combLag else { break }
+                guard center + 1 <= maxLag else { break }
                 let w = 1 / Double(h).squareRoot()
-                sum += max(smoothedACF[center - 1], smoothedACF[center], smoothedACF[center + 1]) * w
+                sum += max(acf[center - 1], acf[center], acf[center + 1]) * w
                 weight += w
             }
-            score[halfLag] = sum / weight * combWeight * prior[halfLag]
+            scores[offset + halfLag] = sum / weight * combWeight * prior[halfLag]
         }
-
-        var best = halfLagMin
-        for halfLag in halfLagMin...halfLagMax where score[halfLag] > score[best] {
-            best = halfLag
-        }
-        guard score[best] > 0 else { return nil }
-
-        let left = score[best - 1]
-        let middle = score[best]
-        let right = score[best + 1]
-        let curvature = left - 2 * middle + right
-        guard curvature < 0 else { return Double(best) }
-        let offset = 0.5 * (left - right) / curvature
-        return Double(best) + min(max(offset, -0.5), 0.5)
+        return true
     }
 }
