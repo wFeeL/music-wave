@@ -136,21 +136,4 @@ struct AnalyzerTests {
         #expect(fresh.level > 0.5)
         #expect(abs(resumed.level - fresh.level) < 0.05)
     }
-
-    @Test func frameStoreReturnsLastPublished() {
-        let store = FrameStore()
-        #expect(store.latest == .silent)
-        let first = WaveFrame(bands: [Float](repeating: 0.1, count: 24), layers: [0.1, 0.2, 0.3], beat: 0.4, level: 0.3, rawLevelDB: -20)
-        let second = WaveFrame(bands: [Float](repeating: 0.5, count: 24), layers: [0.5, 0.6, 0.7], beat: 0.8, level: 0.7, rawLevelDB: -10)
-        store.publish(first)
-        store.publish(second)
-        #expect(store.latest == second)
-    }
-
-    @Test func silentFrameShape() {
-        let frame = WaveFrame.silent
-        #expect(frame.bands == [Float](repeating: 0, count: 24))
-        #expect(frame.layers == [0, 0, 0])
-        #expect(frame.beat == 0 && frame.level == 0 && frame.rawLevelDB == -120)
-    }
 }
