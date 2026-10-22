@@ -1,0 +1,149 @@
+# sample <pid> 1 of the play run (top of the call tree, trimmed)
+
+Analysis of sampling WaveFeels (pid 6355) every 1 millisecond
+Process:         WaveFeels [6355]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x100284000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.31 (31)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [6321]
+Target Type:     live task
+
+Date/Time:       2026-10-22 08:07:40.929 +0000
+Launch Time:     2026-10-22 08:07:20.403 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         23.4M
+Physical footprint (peak):  23.8M
+Idle exit:                  untracked
+Call graph:
+    15 Thread_22020: Main Thread   DispatchQueue_<multiple>
+    + 15 start  (in dyld) + 6992  [0x18969c4e4]
+    +   15 WaveFeels_main  (in WaveFeels) + 64  [0x100326b10]  WaveFeelsApp.swift:0
+    +     15 static App.main()  (in SwiftUI) + 224  [0x1bf640778]
+    +       15 runApp<A>(_:)  (in SwiftUI) + 104  [0x1bf3748d8]
+    +         15 specialized runApp(_:)  (in SwiftUI) + 140  [0x1befb9af8]
+    +           15 NSApplicationMain  (in AppKit) + 880  [0x18df257b0]
+    +             15 -[NSApplication run]  (in AppKit) + 368  [0x18df4d13c]
+    +               15 -[NSApplication(NSEventRouting) nextEventMatchingMask:untilDate:inMode:dequeue:]  (in AppKit) + 72  [0x18eaef678]
+    +                 15 -[NSApplication(NSEventRouting) _nextEventMatchingEventMask:untilDate:inMode:dequeue:]  (in AppKit) + 688  [0x18eaef96c]
+    +                   15 _DPSNextEvent  (in AppKit) + 576  [0x18df5a084]
+    +                     15 _DPSBlockUntilNextEventMatchingListInMode  (in AppKit) + 228  [0x18e6063d0]
+    +                       15 _BlockUntilNextEventMatchingListInMode  (in HIToolbox) + 48  [0x196a9c14c]
+    +                         15 ReceiveNextEventCommon  (in HIToolbox) + 488  [0x1969128bc]
+    +                           14 RunCurrentEventLoopInMode  (in HIToolbox) + 320  [0x19690f560]
+    +                           ! 14 _CFRunLoopRunSpecificWithOptions  (in CoreFoundation) + 532  [0x189bf6264]
+    +                           !   9 __CFRunLoopRun  (in CoreFoundation) + 1188  [0x189b239f4]
+    +                           !   : 9 __CFRunLoopServiceMachPort  (in CoreFoundation) + 160  [0x189b25108]
+    +                           !   :   9 mach_msg  (in libsystem_kernel.dylib) + 24  [0x189a23fc0]
+    +                           !   :     9 mach_msg_overwrite  (in libsystem_kernel.dylib) + 480  [0x189a2c9c0]
+    +                           !   :       9 mach_msg2_internal  (in libsystem_kernel.dylib) + 76  [0x189a365a4]
+    +                           !   :         9 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x189a23c34]
+    +                           !   4 __CFRunLoopRun  (in CoreFoundation) + 820  [0x189b23884]
+    +                           !   : 4 __CFRunLoopDoSources0  (in CoreFoundation) + 232  [0x189b24c60]
+    +                           !   :   4 __CFRunLoopDoSource0  (in CoreFoundation) + 172  [0x189b24ef4]
+    +                           !   :     4 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__  (in CoreFoundation) + 28  [0x189b24f60]
+    +                           !   :       4 UC::DriverCore::continueProcessing()  (in UpdateCycle) + 84  [0x281ae12f4]
+    +                           !   :         4 stepTransactionFlush  (in AppKit) + 220  [0x18e8940c8]
+    +                           !   :           4 CA::Transaction::flush_as_runloop_observer(bool)  (in QuartzCore) + 140  [0x193d572bc]
+    +                           !   :             2 CA::Transaction::commit()  (in QuartzCore) + 324  [0x193b593d8]
+    +                           !   :             | 2 CA::Transaction::run_commit_handlers(CATransactionPhase)  (in QuartzCore) + 120  [0x193b5ad9c]
+    +                           !   :             |   2 NSDisplayCycleFlush  (in AppKit) + 656  [0x18dffcfe0]
+    +                           !   :             |     2 NSDisplayCycleObserverInvoke  (in AppKit) + 168  [0x18dffd364]
+    +                           !   :             |       1 __NSWindowGetDisplayCycleObserverForLayout_block_invoke  (in AppKit) + 364  [0x18dffde60]
+    +                           !   :             |       + 1 -[NSWindow(NSConstraintBasedLayoutInternal) layoutIfNeeded]  (in AppKit) + 272  [0x18ef62b90]
+    +                           !   :             |       +   1 objc_msgSend$postNotificationName:object:userInfo:  (in Foundation) + 0  [0x18c2edc60]
+    +                           !   :             |       1 __NSWindowGetDisplayCycleObserverForUpdateConstraints_block_invoke  (in AppKit) + 364  [0x18dffd504]
+    +                           !   :             |         1 -[NSWindow(NSConstraintBasedLayoutInternal) updateConstraintsIfNeeded]  (in AppKit) + 172  [0x18ef62df4]
+    +                           !   :             |           1 -[NSView updateConstraintsForSubtreeIfNeeded]  (in AppKit) + 96  [0x18dfdcba0]
+    +                           !   :             |             1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !   :             |               1 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke  (in AppKit) + 224  [0x18dfdcc8c]
+    +                           !   :             |                 1 __45-[NSView updateConstraintsForSubtreeIfNeeded]_block_invoke_2  (in AppKit) + 52  [0x18ec83a2c]
+    +                           !   :             |                   1 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:]  (in AppKit) + 372  [0x18dfdcf9c]
+    +                           !   :             |                     1 -[NSView _updateConstraintsForSubtreeIfNeededCollectingViewsWithInvalidBaselines:]  (in AppKit) + 804  [0x18dfdd14c]
+    +                           !   :             |                       1 _NSViewUpdateConstraints  (in AppKit) + 96  [0x18dfdd448]
+    +                           !   :             |                         1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !   :             |                           1 ___NSViewUpdateConstraints_block_invoke  (in AppKit) + 100  [0x18ec8e6a4]
+    +                           !   :             |                             1 ???  (in AppKit)  load address 0x18df21000 + 0x5291cc  [0x18e44a1cc]
+    +                           !   :             |                               1 ???  (in AppKit)  load address 0x18df21000 + 0x528b80  [0x18e449b80]
+    +                           !   :             |                                 1 ???  (in AppKit)  load address 0x18df21000 + 0x564534  [0x18e485534]
+    +                           !   :             |                                   1 ???  (in AppKit)  load address 0x18df21000 + 0x56450c  [0x18e48550c]
+    +                           !   :             |                                     1 @objc NSHostingView.updateConstraints()  (in SwiftUI) + 28  [0x1bf7288d8]
+    +                           !   :             |                                       1 NSHostingView.updateConstraints()  (in SwiftUI) + 136  [0x1bf72879c]
+    +                           !   :             |                                         1 NSHostingView.updateWindowContentSizeExtremaIfNecessary()  (in SwiftUI) + 1304  [0x1bf716c38]
+    +                           !   :             |                                           1 ViewRendererHost.updateViewGraph<A>(body:)  (in SwiftUICore) + 96  [0x237c024f8]
+    +                           !   :             |                                             1 closure #1 in ViewRendererHost.updateViewGraph<A>(body:)  (in SwiftUICore) + 60  [0x237c04620]
+    +                           !   :             |                                               1 ViewGraphRootValueUpdater.updateGraph()  (in SwiftUICore) + 0  [0x237c03758]
+    +                           !   :             2 CA::Transaction::commit()  (in QuartzCore) + 652  [0x193b59520]
+    +                           !   :               2 CA::Context::commit_transaction(CA::Transaction*, double, double*)  (in QuartzCore) + 620  [0x193d25d38]
+    +                           !   :                 2 CA::Layer::display_if_needed(CA::Transaction*)  (in QuartzCore) + 784  [0x193b787e4]
+    +                           !   :                   2 -[RBLayer display]  (in RenderBox) + 204  [0x1ae46d2c0]
+    +                           !   :                     1 -[RBLayer displayWithBounds:callback:]  (in RenderBox) + 2352  [0x1ae46dc0c]
+    +                           !   :                     + 1 objc_msgSend  (in libobjc.A.dylib) + 68  [0x1895fd844]
+    +                           !   :                     1 -[RBLayer displayWithBounds:callback:]  (in RenderBox) + 3068  [0x1ae46ded8]
+    +                           !   :                       1 _dispatch_lane_barrier_sync_invoke_and_complete  (in libdispatch.dylib) + 56  [0x1898bb360]
+    +                           !   :                         1 _dispatch_client_callout  (in libdispatch.dylib) + 16  [0x1898c54b0]
+    +                           !   :                           1 __38-[RBLayer displayWithBounds:callback:]_block_invoke.29  (in RenderBox) + 544  [0x1ae46efa8]
+    +                           !   :                             1 RB::DisplayList::render(RB::DisplayList::Contents const&, RB::RenderParams const&, id<MTLTexture> () block_pointer, RB::Bounds, floa
+    +                           !   :                               1 RB::DisplayList::render_many(RB::RenderParams const&, id<MTLTexture> () block_pointer, std::span<RB::DisplayList::Renderable const
+    +                           !   :                                 1 RB::DisplayList::RenderState::~RenderState()  (in RenderBox) + 460  [0x1ae4bfe54]
+    +                           !   :                                   1 RB::DisplayList::RenderState::RootTexture::render(void*, unsigned int)  (in RenderBox) + 52  [0x1ae4bcd70]
+    +                           !   :                                     1 RB::DisplayList::RenderState::RootTexture::make_texture()  (in RenderBox) + 128  [0x1ae4bcb34]
+    +                           !   :                                       1 __38-[RBLayer displayWithBounds:callback:]_block_invoke_2  (in RenderBox) + 116  [0x1ae46f2dc]
+    +                           !   :                                         1 __38-[RBLayer displayWithBounds:callback:]_block_invoke_2.cold.1  (in RenderBox) + 184  [0x1ae51065c]
+    +                           !   :                                           1 RB::SurfacePool::alloc(RB::Device*, int vector[2], MTLPixelFormat, RB::ColorSpace, float, RB::SurfaceUsage, NSString*,
+    +                           !   :                                             1 RB::SurfacePool::set_surface_volatile(RB::Surface*, bool)  (in RenderBox) + 56  [0x1ae4f19f0]
+    +                           !   :                                               1 RB::Surface::set_volatile(bool)  (in RenderBox) + 56  [0x1ae4f2fe8]
+    +                           !   :                                                 1 IOSurfaceClientSetPurgeable  (in IOSurface) + 108  [0x1960b77d4]
+    +                           !   :                                                   1 IOConnectCallMethod  (in IOKit) + 176  [0x18ddc8d84]
+    +                           !   :                                                     1 io_connect_method  (in IOKit) + 520  [0x18ddc8ff4]
+    +                           !   :                                                       1 mach_msg2_internal  (in libsystem_kernel.dylib) + 76  [0x189a365a4]
+    +                           !   :                                                         1 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x189a23c34]
+    +                           !   1 __CFRunLoopRun  (in CoreFoundation) + 2168  [0x189b23dc8]
+    +                           !     1 __CFRunLoopDoSource1  (in CoreFoundation) + 504  [0x189b25400]
+    +                           !       1 __CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE1_PERFORM_FUNCTION__  (in CoreFoundation) + 60  [0x189b254d8]
+    +                           !         1 __CFMachPortPerform  (in CoreFoundation) + 288  [0x189b5043c]
+    +                           !           1 UC::DriverCore::continueProcessing()  (in UpdateCycle) + 84  [0x281ae12f4]
+    +                           !             1 stepTransactionFlush  (in AppKit) + 220  [0x18e8940c8]
+    +                           !               1 CA::Transaction::flush_as_runloop_observer(bool)  (in QuartzCore) + 140  [0x193d572bc]
+    +                           !                 1 CA::Transaction::commit()  (in QuartzCore) + 324  [0x193b593d8]
+    +                           !                   1 CA::Transaction::run_commit_handlers(CATransactionPhase)  (in QuartzCore) + 120  [0x193b5ad9c]
+    +                           !                     1 NSDisplayCycleFlush  (in AppKit) + 656  [0x18dffcfe0]
+    +                           !                       1 NSDisplayCycleObserverInvoke  (in AppKit) + 168  [0x18dffd364]
+    +                           !                         1 __NSWindowGetDisplayCycleObserverForLayout_block_invoke  (in AppKit) + 364  [0x18dffde60]
+    +                           !                           1 -[NSWindow(NSConstraintBasedLayoutInternal) layoutIfNeeded]  (in AppKit) + 240  [0x18ef62b70]
+    +                           !                             1 -[NSWindow(NSConstraintBasedLayoutInternal) _layoutViewTree]  (in AppKit) + 120  [0x18ef62958]
+    +                           !                               1 -[NSView layoutSubtreeIfNeeded]  (in AppKit) + 96  [0x18df9f710]
+    +                           !                                 1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !                                   1 -[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]  (in AppKit) + 100  [0x18df9f780]
+    +                           !                                     1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !                                       1 __56-[NSView _layoutSubtreeIfNeededAndAllowTemporaryEngine:]_block_invoke  (in AppKit) + 908  [0x18ec8493c]
+    +                           !                                         1 -[NSView _layoutSubtreeWithOldSize:]  (in AppKit) + 100  [0x18df9fba4]
+    +                           !                                           1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !                                             1 __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke  (in AppKit) + 684  [0x18ec83ea4]
+    +                           !                                               1 -[NSView _layoutSubtreeWithOldSize:]  (in AppKit) + 100  [0x18df9fba4]
+    +                           !                                                 1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !                                                   1 __36-[NSView _layoutSubtreeWithOldSize:]_block_invoke  (in AppKit) + 372  [0x18ec83d6c]
+    +                           !                                                     1 _NSViewLayout  (in AppKit) + 96  [0x18df9fc10]
+    +                           !                                                       1 NSPerformVisuallyAtomicChange  (in AppKit) + 128  [0x18df9b2d8]
+    +                           !                                                         1 ___NSViewLayout_block_invoke  (in AppKit) + 624  [0x18ec8e078]
+    +                           !                                                           1 ???  (in AppKit)  load address 0x18df21000 + 0x529dec  [0x18e44adec]
+    +                           !                                                             1 ???  (in AppKit)  load address 0x18df21000 + 0x5297a0  [0x18e44a7a0]
+    +                           !                                                               1 ???  (in AppKit)  load address 0x18df21000 + 0x564534  [0x18e485534]
+    +                           !                                                                 1 ???  (in AppKit)  load address 0x18df21000 + 0x56450c  [0x18e48550c]
+    +                           !                                                                   1 @objc NSHostingView.layout()  (in SwiftUI) + 28  [0x1bf729060]
+    +                           !                                                                     1 NSHostingView.layout()  (in SwiftUI) + 480  [0x1bf728ae4]
+    +                           !                                                                       1 +[NSAnimationContext runAnimationGroup:]  (in AppKit) + 56  [0x18df70f58]
+    +                           !                                                                         1 <deduplicated_symbol>  (in SwiftUI) + 44  [0x1bf723084]
+    +                           !                                                                           1 <deduplicated_symbol>  (in SwiftUI) + 28  [0x1bf743fcc]
+    +                           !                                                                             1 closure #1 in NSHostingView.layout()  (in SwiftUI) + 484  [0x1bf728d6c]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        53
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        45
+        mach_msg2_trap  (in libsystem_kernel.dylib)        25
+        start_wqthread  (in libsystem_pthread.dylib)        7

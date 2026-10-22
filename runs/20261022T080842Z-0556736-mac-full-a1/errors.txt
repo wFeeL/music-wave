@@ -1,0 +1,8 @@
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:80:9: Expectation failed: started
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:81:9: Expectation failed: (adapter.lastTestExitCode → nil) == (SIGKILL → 9)
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:82:9: Expectation failed: (adapter.availability → .checking) == .available
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:83:9: Expectation failed: (fake.defaults.integer(forKey: MediaRemoteAdapter.testExitCodeKey) → 0) == (Int(SIGKILL) → 9)
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:84:9: Expectation failed: (fake.defaults.string(forKey: MediaRemoteAdapter.testedBuildKey) → nil) == "1"
+✘ Test hungTestIsKilledAndStreamStillStarts() failed after 40.964 seconds with 5 issues.
+✘ Suite MediaRemoteAdapterTests failed after 41.555 seconds with 5 issues.
+✘ Test run with 248 tests in 26 suites failed after 43.226 seconds with 5 issues.
