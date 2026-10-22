@@ -25,7 +25,8 @@ enum WavePass: Sendable {
 }
 
 /// Волны одного кадра: точки и цвета считаются один раз и общие для всех холстов кадра
-/// (два крыла, линии и свечение).
+/// (два крыла, линии и свечение). Точки всех линий лежат в одном массиве, точки градиента всех
+/// наборов в другом, линии держат свои срезы: на кадр два выделения памяти, а не по паре на линию.
 nonisolated struct WaveSet: Sendable {
     /// Одна линия (`WaveLine`).
     struct Layer: Sendable {
@@ -35,20 +36,59 @@ nonisolated struct WaveSet: Sendable {
         let level: Float
         /// Есть ли у линии свечение: основная линия баса или середины с уровнем от `glowLevel`.
         let glows: Bool
-        /// y в -1...1: в крыле от выреза к краю, в панели от левого края к правому.
-        let samples: [Float]
-        let stops: [WavePaint.Stop]
+        /// y в -1...1: в крыле от выреза к краю, в панели от левого края к правому. Срез общего
+        /// массива набора, индексы не с нуля.
+        let samples: ArraySlice<Float>
+        /// Точки градиента источника и формы линии с прозрачностью основной линии: у основной
+        /// линии и ее эха один и тот же срез.
+        let baseStops: ArraySlice<WavePaint.Stop>
+        /// Номер набора `baseStops`: у основной линии и ее эха один, по нему холст строит градиент
+        /// заливки один раз на набор.
+        let stopSet: Int
+        /// Множитель прозрачности линии (`WaveLine.opacity`).
+        let opacity: Float
+
+        /// Точки градиента самой линии: `baseStops` с прозрачностью × `opacity`.
+        var stops: [WavePaint.Stop] {
+            baseStops.map { WavePaint.Stop(location: $0.location, color: $0.color, opacity: $0.opacity * opacity) }
+        }
     }
 
     /// Точек на крыло и на всю ширину панели.
     static let wingPoints = 64
     /// В панели около 2 pt между точками: гармоника на 436 pt рисуется без потери размаха.
     static let panelPoints = 224
+    /// Эхо середины и верха в крыле: вдвое меньше точек. Путь эха строится и закрашивается
+    /// вдвое быстрее, а расхождение с эхом на 64 точках не больше 0.15 pt (0.5 pt при «Размахе»
+    /// 2×). У баса огибающая у выреза растет круто (`u^0.43`), на 32 точках его эхо у выреза
+    /// расходится до 1 pt, поэтому бас, как и панель (гармоника), остается с полным числом точек.
+    static let wingEchoPoints = wingPoints / 2
     /// Положения точек градиента: частые на проявлении у выреза и растворении у края.
     static let wingLocations = WavePaint.locations(for: .wing)
     static let panelLocations = WavePaint.locations(for: .panel)
     /// Ниже этого уровня у слоя нет свечения.
     static let glowLevel: Float = 0.05
+
+    /// Огибающие по форме (`WaveLayer.rawValue`): от кадра не зависят, считаются один раз.
+    private static let wingEnvelopes = envelopes(count: wingPoints, profile: .wing)
+    private static let wingEchoEnvelopes = envelopes(count: wingEchoPoints, profile: .wing)
+    private static let panelEnvelopes = envelopes(count: panelPoints, profile: .panel)
+
+    private static func envelopes(count: Int, profile: WaveProfile) -> [WaveShape.Envelope] {
+        WaveLayer.allCases.map { WaveShape.Envelope(layer: $0, count: count, profile: profile) }
+    }
+
+    /// Огибающая линии: число точек по стилю и по тому, эхо ли это (`wingEchoPoints`).
+    static func envelope(for line: WaveLine, style: WaveStyle) -> WaveShape.Envelope {
+        let index = line.shape.rawValue
+        switch style {
+        case .wing:
+            let echo = line.phaseOffset != 0 && line.shape != .bass
+            return echo ? wingEchoEnvelopes[index] : wingEnvelopes[index]
+        case .panel:
+            return panelEnvelopes[index]
+        }
+    }
 
     let style: WaveStyle
     let layers: [Layer]
@@ -73,40 +113,70 @@ nonisolated struct WaveSet: Sendable {
         frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle,
         appearance: WaveAppearance
     ) {
-        let points = style == .wing ? Self.wingPoints : Self.panelPoints
         let locations = style == .wing ? Self.wingLocations : Self.panelLocations
         self.style = style
         thickness = CGFloat(appearance.thickness)
         fill = appearance.fill
-        var computed: [(source: WaveLine.Source, shape: WaveLayer, stops: [WavePaint.Stop])] = []
-        layers = appearance.lines.map { line in
-            let sourceLevel: Float = switch line.source {
+        let lines = appearance.lines
+        func sourceLevel(_ source: WaveLine.Source) -> Float {
+            switch source {
             case .overall: frame.level
             case .layer(let layer): layer.rawValue < frame.layers.count ? frame.layers[layer.rawValue] : 0
             }
-            let level = sourceLevel * line.amplitudeScale
-            let stops: [WavePaint.Stop]
-            if let shared = computed.first(where: { $0.source == line.source && $0.shape == line.shape }) {
-                stops = shared.stops
-            } else {
-                stops = WavePaint.stops(
-                    palette: palette, layer: line.shape, level: sourceLevel, time: time, locations: locations,
-                    profile: style.profile
-                )
-                computed.append((line.source, line.shape, stops))
+        }
+
+        // Наборы точек градиента: по одному на источник и форму, эхо берет набор основной линии.
+        var keys: [(source: WaveLine.Source, shape: WaveLayer)] = []
+        let stopSets = lines.map { line -> Int in
+            if let index = keys.firstIndex(where: { $0.source == line.source && $0.shape == line.shape }) {
+                return index
             }
-            let phase = motion.phase(line.shape, profile: style.profile).shifted(by: line.phaseOffset)
+            keys.append((line.source, line.shape))
+            return keys.count - 1
+        }
+        let stopCount = locations.count
+        let placeholder = WavePaint.Stop(location: 0, color: PaletteColor(r: 0, g: 0, b: 0), opacity: 0)
+        var stops = [WavePaint.Stop](repeating: placeholder, count: keys.count * stopCount)
+        stops.withUnsafeMutableBufferPointer { buffer in
+            for (index, key) in keys.enumerated() {
+                WavePaint.stops(
+                    palette: palette, layer: key.shape, level: sourceLevel(key.source), time: time, locations: locations,
+                    profile: style.profile,
+                    into: UnsafeMutableBufferPointer(rebasing: buffer[(index * stopCount)..<((index + 1) * stopCount)])
+                )
+            }
+        }
+
+        let envelopes = lines.map { Self.envelope(for: $0, style: style) }
+        let levels = lines.map { sourceLevel($0.source) * $0.amplitudeScale }
+        var ranges: [Range<Int>] = []
+        var total = 0
+        for envelope in envelopes {
+            ranges.append(total..<(total + envelope.count))
+            total += envelope.count
+        }
+        var samples = [Float](repeating: 0, count: total)
+        samples.withUnsafeMutableBufferPointer { buffer in
+            for (index, line) in lines.enumerated() {
+                let phase = motion.phase(line.shape, profile: style.profile).shifted(by: line.phaseOffset)
+                WaveShape.samples(
+                    amplitude: levels[index], phase: phase, envelope: envelopes[index], gain: appearance.amplitude,
+                    into: UnsafeMutableBufferPointer(rebasing: buffer[ranges[index]])
+                )
+            }
+        }
+
+        layers = lines.indices.map { index in
+            let line = lines[index]
+            let set = stopSets[index]
             return Layer(
                 shape: line.shape,
-                level: level,
-                glows: line.phaseOffset == 0 && line.shape != .high && level >= Self.glowLevel,
-                samples: WaveShape.samples(
-                    layer: line.shape, amplitude: level, phase: phase, count: points, profile: style.profile,
-                    gain: appearance.amplitude
-                ),
-                stops: line.opacity == 1 ? stops : stops.map { stop in
-                    WavePaint.Stop(location: stop.location, color: stop.color, opacity: stop.opacity * line.opacity)
-                }
+                level: levels[index],
+                glows: line.glows && levels[index] >= Self.glowLevel,
+                samples: samples[ranges[index]],
+                baseStops: stops[(set * stopCount)..<((set + 1) * stopCount)],
+                stopSet: set,
+                opacity: line.opacity
             )
         }
     }
@@ -174,16 +244,19 @@ nonisolated struct WaveDrawing: Sendable {
         let start: CGFloat = isWing && mirrored ? size.width : 0
         let end: CGFloat = isWing && mirrored ? 0 : size.width
 
+        // x точек считаются один раз на холст и число точек: их делят основные линии и эхо.
+        var columns = Columns(start: start, end: end)
+        // Путь каждой линии строится один раз и идет и в заливку, и в обводку.
         let lines: [(layer: WaveSet.Layer, path: Path)] = waves.layers.compactMap { layer in
             let count = layer.samples.count
             guard count > 1, pass == .lines || layer.glows else { return nil }
-            let step = (end - start) / CGFloat(count - 1)
-            let points = layer.samples.enumerated().map { i, y in
-                CGPoint(x: start + step * CGFloat(i), y: middle - swing * CGFloat(y))
+            let xs = columns.positions(count: count)
+            let points = zip(xs, layer.samples).map { x, y in
+                CGPoint(x: x, y: middle - swing * CGFloat(y))
             }
             return (layer: layer, path: Self.smoothPath(through: points))
         }
-        func shading(_ stops: [WavePaint.Stop], opacity: (Float) -> Double) -> GraphicsContext.Shading {
+        func shading(_ stops: ArraySlice<WavePaint.Stop>, opacity: (Float) -> Double) -> GraphicsContext.Shading {
             let gradient = Gradient(stops: stops.map { stop in
                 Gradient.Stop(color: Color(palette: stop.color, opacity: opacity(stop.opacity)), location: CGFloat(stop.location))
             })
@@ -191,19 +264,49 @@ nonisolated struct WaveDrawing: Sendable {
         }
 
         if pass == .lines, waves.fill > 0, !lines.isEmpty {
-            drawFill(lines, in: context, size: size, start: start, end: end, middle: middle, swing: swing) { stops in
-                let top = min(Double(WavePaint.fillTopOpacity) * waves.fill, 1)
-                return shading(stops) { _ in top }
+            // Цвет заливки не зависит от прозрачности линии: у основной линии и ее эха один
+            // градиент, он строится один раз на набор точек градиента.
+            let top = min(Double(WavePaint.fillTopOpacity) * waves.fill, 1)
+            var fillShadings: [Int: GraphicsContext.Shading] = [:]
+            for line in lines where fillShadings[line.layer.stopSet] == nil {
+                fillShadings[line.layer.stopSet] = shading(line.layer.baseStops) { _ in top }
+            }
+            drawFill(lines, in: context, size: size, start: start, end: end, middle: middle, swing: swing) { layer in
+                fillShadings[layer.stopSet] ?? shading(layer.baseStops) { _ in top }
             }
         }
 
         for line in lines {
             let width = widths[line.layer.shape.rawValue] * waves.thickness * (pass == .glow ? Self.glowLineScale : 1)
+            let opacity = line.layer.opacity
             context.stroke(
                 line.path,
-                with: shading(line.layer.stops) { Double($0) },
+                with: shading(line.layer.baseStops) { Double($0 * opacity) },
                 style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
             )
+        }
+    }
+
+    /// x точек линий одного холста по числу точек: шаг `(end - start) / (count - 1)` от `start`.
+    /// Живет один вызов `draw`, поэтому ширина и зеркальность у всех запросов одни.
+    private struct Columns {
+        let start: CGFloat
+        let end: CGFloat
+        private var cached: [(count: Int, xs: [CGFloat])] = []
+
+        init(start: CGFloat, end: CGFloat) {
+            self.start = start
+            self.end = end
+        }
+
+        mutating func positions(count: Int) -> [CGFloat] {
+            if let hit = cached.first(where: { $0.count == count }) {
+                return hit.xs
+            }
+            let step = (end - start) / CGFloat(count - 1)
+            let xs = (0..<count).map { start + step * CGFloat($0) }
+            cached.append((count, xs))
+            return xs
         }
     }
 
@@ -217,7 +320,7 @@ nonisolated struct WaveDrawing: Sendable {
     private func drawFill(
         _ lines: [(layer: WaveSet.Layer, path: Path)], in context: GraphicsContext, size: CGSize,
         start: CGFloat, end: CGFloat, middle: CGFloat, swing: CGFloat,
-        colors: ([WavePaint.Stop]) -> GraphicsContext.Shading
+        colors: (WaveSet.Layer) -> GraphicsContext.Shading
     ) {
         let areas = lines.map { line in
             var area = line.path
@@ -247,7 +350,7 @@ nonisolated struct WaveDrawing: Sendable {
             }
         }
         for (line, area) in zip(lines, areas) {
-            fills.fill(area, with: colors(line.layer.stops))
+            fills.fill(area, with: colors(line.layer))
         }
     }
 
