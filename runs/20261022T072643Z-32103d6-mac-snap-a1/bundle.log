@@ -1,0 +1,24 @@
+== step bundle: env ICON_SNAPSHOT_DIR=/Users/runner/work/music-wave/music-wave/ci-out/snapshots bash scripts/bundle.sh 0.0.28 28
+dist/WaveFeels.app/Contents/Info.plist: OK
+wrote icon_16x16.png
+wrote icon_16x16@2x.png
+wrote icon_32x32.png
+wrote icon_32x32@2x.png
+wrote icon_128x128.png
+wrote icon_128x128@2x.png
+wrote icon_256x256.png
+wrote icon_256x256@2x.png
+wrote icon_512x512.png
+wrote icon_512x512@2x.png
+wrote dist/icon/icon-sizes.png
+bundled dist/WaveFeels.app (version 0.0.28, build 28)
+dist/WaveFeels.app
+dist/WaveFeels.app/Contents
+dist/WaveFeels.app/Contents/Info.plist
+dist/WaveFeels.app/Contents/MacOS
+dist/WaveFeels.app/Contents/MacOS/WaveFeels
+dist/WaveFeels.app/Contents/Resources
+dist/WaveFeels.app/Contents/Resources/AppIcon.icns
+dist/WaveFeels.app/Contents/Resources/Demo
+dist/WaveFeels.app/Contents/Resources/Demo/demo.wav
+dist/WaveFeels.app/Contents/Resources/Demo/silence.wav
