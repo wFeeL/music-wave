@@ -53,13 +53,14 @@ struct BeatDetectorTests {
         #expect(result.found >= 0.95)
     }
 
-    @Test func steadyTonesHaveNoBeats() {
-        for frequency in stride(from: 40.0, through: 150.0, by: 5.0) {
-            let tone = TestSignals.sine(
-                frequency: frequency, amplitude: 0.8, sampleRate: Self.sampleRate, count: Int(Self.sampleRate) * 10)
-            let beats = Self.detectBeats(in: tone)
-            #expect(beats.count <= 1, "tone \(frequency) Hz gave \(beats.count) beats")
-        }
+    /// Частоты идут отдельными случаями теста, Swift Testing гоняет их параллельно: одним циклом
+    /// этот тест был самым долгим во всем наборе (около 11 с на Linux и до минуты на маке).
+    @Test(arguments: Array(stride(from: 40.0, through: 150.0, by: 5.0)))
+    func steadyToneHasNoBeats(frequency: Double) {
+        let tone = TestSignals.sine(
+            frequency: frequency, amplitude: 0.8, sampleRate: Self.sampleRate, count: Int(Self.sampleRate) * 10)
+        let beats = Self.detectBeats(in: tone)
+        #expect(beats.count <= 1, "tone \(frequency) Hz gave \(beats.count) beats")
     }
 
     @Test func silenceHasNoBeats() {
