@@ -1,0 +1,58 @@
+== step adapter: bash scripts/build-adapter.sh
+mediaremote-adapter at 0e82bf1c44ec39554fbfc402ec88a48c6ae2a0fd
+-- The OBJC compiler identification is AppleClang 21.0.0.21000101
+-- Detecting OBJC compiler ABI info
+-- Detecting OBJC compiler ABI info - done
+-- Check for working OBJC compiler: /usr/bin/clang - skipped
+-- Configuring done (4.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/runner/work/music-wave/music-wave/.build/adapter-src/build
+[  5%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/env.m.o
+[ 10%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/get.m.o
+[ 15%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/globals.m.o
+[ 21%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/keys.m.o
+[ 26%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/now_playing.m.o
+[ 31%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/repeat.m.o
+[ 36%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/seek.m.o
+[ 42%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/send.m.o
+[ 47%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/shuffle.m.o
+[ 52%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/speed.m.o
+[ 57%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/stream.m.o
+[ 63%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/adapter/test.m.o
+[ 68%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/private/MediaRemote.m.o
+[ 73%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/utility/Debounce.m.o
+[ 78%] Building OBJC object CMakeFiles/MediaRemoteAdapter.dir/src/utility/helpers.m.o
+[ 84%] Linking OBJC shared library MediaRemoteAdapter.framework/MediaRemoteAdapter
+Ad-hoc signing MediaRemoteAdapter.framework
+/Users/runner/work/music-wave/music-wave/.build/adapter-src/build/MediaRemoteAdapter.framework: replacing existing signature
+[ 84%] Built target MediaRemoteAdapter
+[ 89%] Building OBJC object CMakeFiles/MediaRemoteAdapterTestClient.dir/src/test/main.m.o
+/Users/runner/work/music-wave/music-wave/.build/adapter-src/src/test/main.m:31:26: warning: variable length array folded to constant array as an extension [-Wgnu-folding-constant]
+   31 |                 char buf[kInputBufferSize];
+      |                          ^~~~~~~~~~~~~~~~
+1 warning generated.
+/Users/runner/work/music-wave/music-wave/.build/adapter-src/src/test/main.m:31:26: warning: variable length array folded to constant array as an extension [-Wgnu-folding-constant]
+   31 |                 char buf[kInputBufferSize];
+      |                          ^~~~~~~~~~~~~~~~
+1 warning generated.
+[ 94%] Building OBJC object CMakeFiles/MediaRemoteAdapterTestClient.dir/src/test/NowPlayingTest.m.o
+[100%] Linking OBJC executable MediaRemoteAdapterTestClient
+[100%] Built target MediaRemoteAdapterTestClient
+Architectures in the fat file: dist/adapter/MediaRemoteAdapter.framework/MediaRemoteAdapter are: x86_64 arm64 
+Architectures in the fat file: dist/adapter/MediaRemoteAdapterTestClient are: x86_64 arm64 
+adapter ready in dist/adapter
+dist/adapter
+dist/adapter/LICENSE
+dist/adapter/mediaremote-adapter.pl
+dist/adapter/MediaRemoteAdapter.framework
+dist/adapter/MediaRemoteAdapter.framework/MediaRemoteAdapter
+dist/adapter/MediaRemoteAdapter.framework/Resources
+dist/adapter/MediaRemoteAdapter.framework/Versions
+dist/adapter/MediaRemoteAdapter.framework/Versions/A
+dist/adapter/MediaRemoteAdapter.framework/Versions/A/_CodeSignature
+dist/adapter/MediaRemoteAdapter.framework/Versions/A/_CodeSignature/CodeResources
+dist/adapter/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
+dist/adapter/MediaRemoteAdapter.framework/Versions/A/Resources
+dist/adapter/MediaRemoteAdapter.framework/Versions/A/Resources/Info.plist
+dist/adapter/MediaRemoteAdapter.framework/Versions/Current
+dist/adapter/MediaRemoteAdapterTestClient
