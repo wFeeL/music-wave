@@ -84,8 +84,8 @@ struct WaveAppearanceTests {
         }
         let overall = WaveLine(source: .overall, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
         let echoes = [
-            WaveLine(source: .layer(.bass), shape: .bass, phaseOffset: 0.6, amplitudeScale: 0.72, opacity: 0.6),
-            WaveLine(source: .layer(.mid), shape: .mid, phaseOffset: 0.6, amplitudeScale: 0.52, opacity: 0.4),
+            WaveLine(source: .layer(.bass), shape: .bass, phaseOffset: 0.6, amplitudeScale: 0.72, opacity: 0.45),
+            WaveLine(source: .layer(.mid), shape: .mid, phaseOffset: 0.6, amplitudeScale: 0.52, opacity: 0.3),
             WaveLine(source: .layer(.high), shape: .high, phaseOffset: 0.6, amplitudeScale: 0.38, opacity: 0.28),
         ]
         let three = [main(.bass), main(.mid), main(.high)]

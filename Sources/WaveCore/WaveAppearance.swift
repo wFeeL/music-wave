@@ -70,7 +70,7 @@ public struct WaveLine: Sendable, Equatable {
     static let echoPhase = 0.6
     /// Эхо баса, середины и верха: (размах, прозрачность).
     static let echoes: [(layer: WaveLayer, amplitude: Float, opacity: Float)] = [
-        (.bass, 0.72, 0.6), (.mid, 0.52, 0.4), (.high, 0.38, 0.28),
+        (.bass, 0.72, 0.45), (.mid, 0.52, 0.3), (.high, 0.38, 0.28),
     ]
 
     /// Линии для «Количества волн» `count` (ограничивается 1...6): одна волна показывает

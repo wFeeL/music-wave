@@ -18,11 +18,11 @@ struct WaveSetTests {
     }
 
     /// Шесть волн: основные бас, середина, верх и их эхо с размахом × 0.72 / 0.52 / 0.38,
-    /// прозрачностью × 0.6 / 0.4 / 0.28 и фазой, сдвинутой на 0.6 рад. Свечение только у
+    /// прозрачностью × 0.45 / 0.3 / 0.28 и фазой, сдвинутой на 0.6 рад. Свечение только у
     /// основных баса и середины.
     @Test func echoesScaleLevelAndOpacity() {
         let scales: [Float] = [0.72, 0.52, 0.38]
-        let opacities: [Float] = [0.6, 0.4, 0.28]
+        let opacities: [Float] = [0.45, 0.3, 0.28]
         for style in Self.styles {
             let waves = Self.waves({ $0.lineCount = 6 }, style: style)
             #expect(waves.layers.map(\.shape) == [.bass, .mid, .high, .bass, .mid, .high])
