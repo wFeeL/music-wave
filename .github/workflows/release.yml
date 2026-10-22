@@ -16,14 +16,14 @@ env:
 jobs:
   build:
     runs-on: macos-26
-    # Худший случай по лимитам ci-mac.sh с запасом на добивание процессов: build 33, restore 1, sign 7, check 15 минут плюс загрузка артефактов. Обычный запуск идет в разы быстрее.
-    timeout-minutes: 60
+    # Бюджет минут macOS (множитель 10): шаги 10 + 1 + 2 + 5 = 18 минут, 2 минуты на checkout и загрузку артефактов. Лимиты внутри ci-mac.sh ловят отдельные медленные шаги, лимит шага build служит потолком при зависании.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with: {persist-credentials: false}
       # Сборка адаптера (чужой код), сборка и тесты идут без секретов и с токеном только на чтение.
       - id: build
-        timeout-minutes: 33
+        timeout-minutes: 10
         run: bash scripts/ci-mac.sh build "$MODE"
       # Сборка могла изменить файлы в рабочей папке: перед шагом с ключом скрипты берутся из коммита.
       - id: restore
@@ -35,12 +35,12 @@ jobs:
       # Единственный шаг с ключом подписи.
       - id: sign
         if: ${{ !cancelled() && steps.restore.outcome == 'success' }}
-        timeout-minutes: 7
+        timeout-minutes: 2
         run: bash scripts/ci-mac.sh sign "$MODE"
         env: {SIGNING_P12_BASE64: '${{ secrets.SIGNING_P12_BASE64 }}', SIGNING_P12_PASSWORD: '${{ secrets.SIGNING_P12_PASSWORD }}', SIGNING_EXPECTED_LEAF: '${{ vars.SIGNING_EXPECTED_LEAF }}'}
       - id: check
         if: ${{ !cancelled() }}
-        timeout-minutes: 15
+        timeout-minutes: 5
         run: bash scripts/ci-mac.sh check "$MODE"
       - if: ${{ always() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
