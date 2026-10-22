@@ -27,6 +27,6 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.music</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>WaveFeels слушает звук выбранного приложения, чтобы волны у выреза двигались в такт музыке. Звук никуда не записывается и не отправляется.</string>
+	<string>WaveFeels слушает звук выбранного приложения, чтобы волны у выреза двигались в такт музыке. Звук никуда не отправляется и сохраняется в файл только по кнопке «Записать 30 с» в диагностике.</string>
 </dict>
 </plist>

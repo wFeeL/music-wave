@@ -64,6 +64,8 @@ final class AppModel {
     /// Те же объекты, что внутри `pipeline`; нужны настройкам и диагностике.
     let processList: AudioProcessList
     let output: OutputDeviceMonitor
+    /// «Записать 30 с» в разделе «Ритм» диагностики.
+    let rhythmRecording: RhythmRecording
 
     private(set) var islandState: IslandState = .hidden
     /// Последний трек выбранного источника, держится и на паузе.
@@ -224,7 +226,9 @@ final class AppModel {
         self.store = store
         self.processList = processList
         self.output = output
-        pipeline = AudioPipeline(store: store, processes: processList, output: output)
+        let pipeline = AudioPipeline(store: store, processes: processList, output: output)
+        self.pipeline = pipeline
+        rhythmRecording = RhythmRecording(pipeline: pipeline)
         adapter = MediaRemoteAdapter(bundle: bundle, defaults: defaults)
         nowPlayingSources = NowPlayingSourceHistory(defaults: defaults)
     }
@@ -288,6 +292,7 @@ final class AppModel {
         applyBannerPhase(.hidden)
         scanTask?.cancel()
         scanTask = nil
+        rhythmRecording.cancel()
         stopSources()
         pipeline.waitForCaptureTeardown(timeout: Self.captureTeardownTimeout)
         artworkTask?.cancel()
@@ -1223,14 +1228,20 @@ final class AppModel {
 
         var glow: Float = 0
         var breath: Float = 0
+        var shownSchedule: BeatSchedule?
         if !reduceMotion {
             let schedule = store.schedule
+            shownSchedule = schedule
             glow = glowState.value(at: presented, schedule: schedule, refreshPeriod: period)
             let early = BeatGlow.value(at: presented + Self.breathLead, schedule: schedule, refreshPeriod: period)
             let spring = pulse.step(beat: early, dt: dt)
             breath = schedule.locked ? spring : glow
         }
         let frame = springFrame(sampled, glow: glow)
+        if timelineTime != lastRecordedTimeline {
+            // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
+            rhythmRecording.frame(presented: presented, glow: glow, schedule: shownSchedule, refreshPeriod: period)
+        }
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
         return IslandVisuals(
@@ -1397,6 +1408,46 @@ extension AppModel {
         return "\(version) (сборка \(build))"
     }
 
+    /// «1.1.0 (abc1234), Swift 6.2.3»: коммит и компилятор пишет в Info.plist `bundle.sh`.
+    static var buildDescription: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        return "\(version) (\(buildCommit)), Swift \(buildSwiftVersion)"
+    }
+
+    /// `WFCommit` из Info.plist, иначе `unknown`.
+    static var buildCommit: String {
+        Bundle.main.infoDictionary?["WFCommit"] as? String ?? "unknown"
+    }
+
+    /// `WFSwiftVersion` из Info.plist, иначе `unknown`.
+    static var buildSwiftVersion: String {
+        Bundle.main.infoDictionary?["WFSwiftVersion"] as? String ?? "unknown"
+    }
+
+    static let rhythmSectionTitle = "Ритм"
+
+    /// «Записать 30 с»: запись ритма с версией, сборкой, устройством вывода, режимом задержки и
+    /// периодом отрисовки. Задержку, сдвиг и частоту берет сама запись у анализа.
+    func startRhythmRecording() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let latencyMode: String
+        switch settings.latencyMode {
+        case .auto: latencyMode = "авто"
+        case .manual(let milliseconds): latencyMode = "вручную, \(milliseconds) мс"
+        }
+        let meta = RhythmLog.Meta(
+            appVersion: info["CFBundleShortVersionString"] as? String ?? "?",
+            build: info["CFBundleVersion"] as? String ?? "?",
+            commit: Self.buildCommit,
+            swiftVersion: Self.buildSwiftVersion,
+            deviceName: output.deviceName,
+            deviceUID: output.deviceUID,
+            latencyMode: latencyMode,
+            renderPeriod: renderPeriod
+        )
+        rhythmRecording.start(meta: meta)
+    }
+
     /// Текст для буфера обмена: те же разделы, что в окне диагностики.
     func diagnosticsText() -> String {
         var lines = ["# Диагностика WaveFeels", "Время: \(Date().formatted(.iso8601))"]
@@ -1441,6 +1492,7 @@ extension AppModel {
         }
         return DiagnosticsSection(title: "Приложение", rows: [
             DiagnosticsRow(label: "Версия", value: Self.versionDescription),
+            DiagnosticsRow(label: "Сборка", value: Self.buildDescription),
             DiagnosticsRow(label: "macOS", value: ProcessInfo.processInfo.operatingSystemVersionString),
             DiagnosticsRow(label: "Подпись", value: signing),
             DiagnosticsRow(label: "Режим запуска", value: mode),
@@ -1568,7 +1620,7 @@ extension AppModel {
         let schedule = store.schedule
         let tempo = schedule.bpm.flatMap { $0.isFinite ? "\(Int($0.rounded())) BPM" : nil } ?? "нет"
         let lead = LatencyCalculator.presentationLead(refreshPeriod: renderPeriod)
-        return DiagnosticsSection(title: "Ритм", rows: [
+        return DiagnosticsSection(title: Self.rhythmSectionTitle, rows: [
             DiagnosticsRow(label: "Темп", value: tempo),
             DiagnosticsRow(label: "Уверенность", value: String(format: "%.2f", schedule.confidence)),
             DiagnosticsRow(label: "Захват ритма", value: Self.yesNo(schedule.locked)),

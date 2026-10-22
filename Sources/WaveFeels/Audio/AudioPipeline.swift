@@ -262,6 +262,12 @@ final class AudioPipeline {
         setStatus(.demo)
     }
 
+    /// Запись ритма в анализ (`nil` снимает): звук, онсеты и расписания идут в `session` с очереди
+    /// анализа. Остановка или новый запуск захвата, смена источника и простой острова кончают ее.
+    func recordRhythm(_ session: RhythmSession?) {
+        engine.recordRhythm(session)
+    }
+
     /// Ждет не дольше `timeout` секунд удаления tap и агрегата, уже поставленного `stop()`.
     /// Нужно при выходе: агрегатное устройство не должно пережить приложение.
     @discardableResult
