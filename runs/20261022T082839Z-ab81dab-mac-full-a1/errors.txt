@@ -1,0 +1,11 @@
+✘ Test idleEngineTicksAtFifteenHertz() recorded an issue at CoreAudioSmokeTests.swift:87:9: Expectation failed: (idleFrames → 477) <= 20
+✘ Test idleEngineTicksAtFifteenHertz() failed after 34.516 seconds with 1 issue.
+✘ Suite CoreAudioSmokeTests failed after 34.523 seconds with 1 issue.
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:81:9: Expectation failed: (adapter.lastTestExitCode → 0) == (SIGKILL → 9)
+✘ Test hungTestIsKilledAndStreamStillStarts() recorded an issue at MediaRemoteAdapterTests.swift:83:9: Expectation failed: (fake.defaults.integer(forKey: MediaRemoteAdapter.testExitCodeKey) → 0) == (Int(SIGKILL) → 9)
+✘ Test hungTestIsKilledAndStreamStillStarts() failed after 37.532 seconds with 2 issues.
+✘ Suite MediaRemoteAdapterTests failed after 40.189 seconds with 2 issues.
+✘ Test rendersAllSnapshotsWithVisibleWaves() recorded an issue at SnapshotRendererTests.swift:123:9: Expectation failed: (longest → 37.358735167000006 seconds) < (.seconds(5) → 5.0 seconds)
+✘ Test rendersAllSnapshotsWithVisibleWaves() failed after 44.061 seconds with 1 issue.
+✘ Suite SnapshotRendererTests failed after 44.063 seconds with 1 issue.
+✘ Test run with 249 tests in 26 suites failed after 46.019 seconds with 4 issues.
