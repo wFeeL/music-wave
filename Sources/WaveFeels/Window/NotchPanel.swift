@@ -25,6 +25,9 @@ final class NotchPanel: NSPanel {
         // Ключевой панель становится только для элементов, которым это нужно; кнопки
         // срабатывают с первого клика, приложение при этом не активируется.
         becomesKeyOnlyIfNeeded = true
+        // Приложение почти всегда неактивно, когда курсор над островом: без этого
+        // подсказка «Открыть <имя>» у кнопки источника не появится.
+        allowsToolTipsWhenApplicationIsInactive = true
     }
 
     override var canBecomeKey: Bool { true }

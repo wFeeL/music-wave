@@ -20,8 +20,7 @@ struct SourceButtonTests {
     @Test func noButtonForSystemWide() throws {
         let (model, cleanup) = try Self.makeModel(source: .systemWide)
         defer { cleanup() }
-        // Кортеж не Equatable: проверка через имя, оно есть у любого непустого значения.
-        #expect(model.sourceApp?.name == nil)
+        #expect(model.sourceApp == nil)
     }
 
     @Test func buttonNamesTheSource() throws {
