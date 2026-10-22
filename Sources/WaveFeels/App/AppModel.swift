@@ -646,8 +646,12 @@ final class AppModel {
     private func manageIdleCapture(audioActive: Bool, sourcePlaying: Bool, now: Double) {
         let source = effectiveSource
         let systemWide = source == .systemWide
-        // Флаг вывода читается заново, только когда он может что-то решить.
-        let outputting = !systemWide && !audioActive && !sourcePlaying && pipeline.sourceProcessOutputting()
+        // Флаг вывода читается, только когда он может что-то решить (приостановить захват можно
+        // лишь при работающем Now Playing, приславшем трек источника). В приостановке конвейер
+        // берет его из подписок, без опроса HAL.
+        let outputting = !systemWide && !audioActive && !sourcePlaying
+            && adapter.isAvailable && sourceTrackSeen
+            && pipeline.sourceProcessOutputting()
         let inputs = IdleCapturePolicy.Inputs(
             audioActive: audioActive,
             sourcePlaying: sourcePlaying,

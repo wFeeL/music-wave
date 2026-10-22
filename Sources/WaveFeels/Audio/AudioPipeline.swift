@@ -146,6 +146,10 @@ final class AudioPipeline {
     /// Процессы, на которые сейчас подписан `outputWatchTokens`.
     @ObservationIgnored private var outputWatchIDs: [AudioObjectID] = []
     @ObservationIgnored private var outputStart = OutputStartDetector(outputting: [])
+    /// В приостановке: выводит ли звук хотя бы один процесс источника. Ставится при входе в
+    /// приостановку, обновляют подписки на `kAudioProcessPropertyIsRunningOutput` и смена
+    /// списка процессов, а не опрос HAL на тике. Вне приостановки не используется.
+    @ObservationIgnored private var suspendedOutputting = false
 
     /// `timing` и `makeCapture` подставляют тесты: короткие сроки и свой захват вместо
     /// `ProcessTapCapture`.
@@ -196,7 +200,6 @@ final class AudioPipeline {
         output.start()
         volumeChanged()
         performRebuild(reason: "запуск")
-        startWatchdog()
     }
 
     /// Останавливает захват, демо, анализ и подписки. Главный поток не ждет удаления tap: оно
@@ -215,7 +218,7 @@ final class AudioPipeline {
         appliedProcessIDs = []
         if !matchedProcesses.isEmpty { matchedProcesses = [] }
         updateSourceOutputting()
-        status = .stopped
+        setStatus(.stopped)
     }
 
     /// Звук из файла вместо tap.
@@ -232,13 +235,13 @@ final class AudioPipeline {
         mode = .demo
         log("демо: \(file.lastPathComponent), \(Int(newDemo.sampleRate)) Гц")
         guard !paused else {
-            status = .paused
+            setStatus(.paused)
             return
         }
         newDemo.start()
         engine.start(sampleRate: newDemo.sampleRate)
         pushSettings()
-        status = .demo
+        setStatus(.demo)
     }
 
     /// Ждет не дольше `timeout` секунд удаления tap и агрегата, уже поставленного `stop()`.
@@ -298,7 +301,7 @@ final class AudioPipeline {
         cancelRebuildTasks()
         stopCaptureInBackground()
         engine.stop()
-        status = .suspended
+        setStatus(.suspended)
         startOutputWatch()
         log("захват приостановлен в тишине, жду вывода звука")
     }
@@ -347,7 +350,7 @@ final class AudioPipeline {
             demo?.stop()
             engine.stop()
         }
-        status = .paused
+        setStatus(.paused)
         log("визуализация на паузе: захват и анализ остановлены")
     }
 
@@ -362,7 +365,7 @@ final class AudioPipeline {
             demo.start()
             engine.start(sampleRate: demo.sampleRate)
             pushSettings()
-            status = .demo
+            setStatus(.demo)
             log("визуализация возобновлена: демо")
         }
     }
@@ -373,7 +376,7 @@ final class AudioPipeline {
     private func performRebuild(reason: String, attempt: Int = 0) {
         guard mode == .live else { return }
         guard !paused else {
-            status = .paused
+            setStatus(.paused)
             return
         }
         cancelRebuildTasks()
@@ -390,7 +393,7 @@ final class AudioPipeline {
         let systemWide = source == .systemWide
         guard systemWide || !ids.isEmpty else {
             stopCaptureInBackground()
-            status = .waitingForSource
+            setStatus(.waitingForSource)
             log("пересборка (\(reason)): источник \(source.displayName) не найден, жду")
             return
         }
@@ -398,7 +401,7 @@ final class AudioPipeline {
         startGeneration += 1
         let generation = startGeneration
         let summary = "\(source.displayName), процессов \(ids.count), вывод \(output.deviceName)"
-        status = .starting
+        setStatus(.starting)
         // Прежний tap удаляется в той же очереди до создания нового.
         capture.start(
             processObjectIDs: ids,
@@ -429,14 +432,14 @@ final class AudioPipeline {
             recovery.startSucceeded()
             engine.start(sampleRate: rate)
             pushSettings()
-            status = .capturing(capture.status)
+            setStatus(.capturing(capture.status))
             log("пересборка (\(reason)): \(summary)")
         case .failure(let error):
             noteCaptureError(error.message)
             let retries = recoveryTiming.startRetryPauses.count
             switch recovery.startFailed(attempt: attempt) {
             case .retry(let next, let pause):
-                status = .retrying(attempt: next, message: error.message)
+                setStatus(.retrying(attempt: next, message: error.message))
                 log("пересборка (\(reason)) не удалась: \(error.message); повтор \(next) из \(retries) через \(Self.seconds(pause)) с")
                 rebuildTask = Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(pause))
@@ -445,7 +448,7 @@ final class AudioPipeline {
                     self.performRebuild(reason: "повтор создания tap \(next)", attempt: next)
                 }
             case .slowRetry(let pause):
-                status = .capturing(.failed(error.message))
+                setStatus(.capturing(.failed(error.message)))
                 log("пересборка (\(reason)) не удалась: \(error.message); быстрых повторов было \(retries), следующий через \(Self.seconds(pause)) с")
                 let slowAttempt = recovery.slowRetryAttempt
                 slowRetryTask = Task { @MainActor [weak self] in
@@ -492,7 +495,9 @@ final class AudioPipeline {
 
     /// Запоминает, какие процессы выводят звук сейчас (они не будят), и начинает следить.
     private func startOutputWatch() {
-        outputStart = OutputStartDetector(outputting: outputtingProcessIDs())
+        let outputting = outputtingProcessIDs()
+        suspendedOutputting = !outputting.isEmpty
+        outputStart = OutputStartDetector(outputting: outputting)
         watchOutput()
     }
 
@@ -519,16 +524,20 @@ final class AudioPipeline {
 
     private func checkOutputStart() {
         guard mode == .suspended, !paused else { return }
-        guard outputStart.update(outputting: outputtingProcessIDs()) else { return }
+        let outputting = outputtingProcessIDs()
+        suspendedOutputting = !outputting.isEmpty
+        guard outputStart.update(outputting: outputting) else { return }
         log("в приостановке процесс начал выводить звук")
         resume(reason: "источник начал выводить звук")
     }
 
     /// Хотя бы один процесс источника сейчас сообщает `kAudioProcessPropertyIsRunningOutput`.
-    /// Значение читается заново, а не берется из снимка списка процессов. Для всего звука
-    /// системы `false`: процессы не отбираются.
+    /// Значение читается заново, а не берется из снимка списка процессов. В приостановке оно
+    /// берется из подписок (`suspendedOutputting`): HAL не опрашивается на каждом тике модели.
+    /// Для всего звука системы `false`: процессы не отбираются.
     func sourceProcessOutputting() -> Bool {
-        !outputtingProcessIDs().isEmpty
+        if mode == .suspended { return suspendedOutputting }
+        return !outputtingProcessIDs().isEmpty
     }
 
     /// Совпавшие процессы источника, которые сейчас выводят звук.
@@ -568,13 +577,26 @@ final class AudioPipeline {
 
     // MARK: - Сторож нулей
 
+    /// Новый статус. Сторож нулей проверяет только работающий tap, поэтому его цикл идет
+    /// только в `.capturing(.running)`: в приостановке, паузе, ожидании источника и между
+    /// пересборками он не будит приложение.
+    private func setStatus(_ new: PipelineStatus) {
+        if status != new { status = new }
+        if mode == .live, case .capturing(.running) = status {
+            startWatchdog()
+        } else {
+            watchdogTask?.cancel()
+            watchdogTask = nil
+        }
+    }
+
     private func startWatchdog() {
-        watchdogTask?.cancel()
+        guard watchdogTask == nil else { return }
         let interval = recoveryTiming.watchdogInterval
         watchdogTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(interval))
-                guard let self else { return }
+                guard !Task.isCancelled, let self else { return }
                 self.watchdogTick()
             }
         }
@@ -599,7 +621,7 @@ final class AudioPipeline {
             log("сторож нулей: \(zeros) с нулей при звучащем источнике, попытка \(attempt), пауза \(Self.seconds(pause)) с")
             engine.stop()
             stopCaptureInBackground()
-            status = .rebuilding(attempt: attempt)
+            setStatus(.rebuilding(attempt: attempt))
             rebuildTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(pause))
                 guard !Task.isCancelled, let self else { return }
