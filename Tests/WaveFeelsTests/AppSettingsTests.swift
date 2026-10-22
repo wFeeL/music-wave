@@ -17,6 +17,21 @@ struct AppSettingsTests {
         try body(defaults)
     }
 
+    /// Источники, о которых Now Playing сообщал, переживают перезапуск; пустой bundle ID не пишется.
+    @Test func nowPlayingSourceHistoryPersists() {
+        Self.withDefaults { defaults in
+            let history = NowPlayingSourceHistory(defaults: defaults)
+            #expect(history.bundleIDs.isEmpty)
+            history.insert("ru.yandex.desktop.music")
+            history.insert("ru.yandex.desktop.music")
+            history.insert("")
+            #expect(history.bundleIDs == ["ru.yandex.desktop.music"])
+            let reloaded = NowPlayingSourceHistory(defaults: defaults)
+            #expect(reloaded.bundleIDs == ["ru.yandex.desktop.music"])
+            #expect(defaults.stringArray(forKey: NowPlayingSourceHistory.key) == ["ru.yandex.desktop.music"])
+        }
+    }
+
     @Test func defaultsOnEmptyStore() {
         Self.withDefaults { defaults in
             let settings = AppSettings(defaults: defaults)

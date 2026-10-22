@@ -1,5 +1,5 @@
-/// «Тишина адаптера»: tap слышит выбранный источник, а Now Playing за все это время ни разу не
-/// прислал его трек. Когда такого звука набралось `limit` секунд (паузы между треками не
+/// «Тишина адаптера»: tap слышит выбранное приложение, о котором Now Playing раньше сообщал
+/// (`applies(to:reportedBundleIDs:)`), а теперь за все это время ни разу не прислал его трек. Когда такого звука набралось `limit` секунд (паузы между треками не
 /// обнуляют счет), адаптер для этого источника считается неработающим и приложение переходит
 /// в запасной режим (design.md, «Now Playing»).
 ///
@@ -31,6 +31,16 @@ public struct AdapterSilenceMonitor: Sendable {
         guard audibleTime >= limit - 1e-9 else { return false }
         fired = true
         return true
+    }
+
+    /// Считать ли для источника. Весь звук системы нет: там звучит что угодно, в том числе
+    /// приложения без Now Playing. Приложение только если Now Playing хоть раз (в любом запуске)
+    /// сообщал о нем: иначе молчание адаптера ничего не говорит, источник может вовсе не
+    /// публиковать Now Playing (Telegram, игры). Адаптер, сломанный с самого начала, ловит
+    /// проверка `test` на каждой сборке macOS.
+    public static func applies(to source: AudioSource, reportedBundleIDs: Set<String>) -> Bool {
+        guard case .application(let bundleID, _, _) = source, !bundleID.isEmpty else { return false }
+        return reportedBundleIDs.contains(bundleID)
     }
 
     public mutating func reset() {

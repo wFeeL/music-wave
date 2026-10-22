@@ -93,6 +93,8 @@ final class AppModel {
     /// С выбора источника (и с последнего пробуждения) Now Playing хотя бы раз прислал его трек.
     @ObservationIgnored private var sourceTrackSeen = false
     @ObservationIgnored private var adapterSilence = AdapterSilenceMonitor()
+    /// Приложения, о которых Now Playing хоть раз сообщал, за все запуски.
+    let nowPlayingSources: NowPlayingSourceHistory
     @ObservationIgnored private var watchdogExhausted = false
     @ObservationIgnored private var cachedSigning: String?
     @ObservationIgnored private var pulse = BeatPulse()
@@ -132,6 +134,7 @@ final class AppModel {
         self.output = output
         pipeline = AudioPipeline(store: store, processes: processList, output: output)
         adapter = MediaRemoteAdapter(bundle: bundle, defaults: defaults)
+        nowPlayingSources = NowPlayingSourceHistory(defaults: defaults)
     }
 
     // MARK: - Запуск и остановка
@@ -476,9 +479,10 @@ final class AppModel {
         let sourcePlaying = sourceInfo?.isPlaying ?? false
         if sourceInfo != nil {
             sourceTrackSeen = true
-            if adapter.availability == .silent {
-                adapter.clearSilence()
+            if case .application(let bundleID, _, _) = source {
+                nowPlayingSources.insert(bundleID)
             }
+            adapter.clearSilence()
         }
         if let sourceInfo, sourceInfo != lastTrack {
             lastTrack = sourceInfo
@@ -536,6 +540,8 @@ final class AppModel {
             appliedSource = source
             sourceTrackSeen = false
             adapterSilence.reset()
+            // «Тишина адаптера» относилась к прежнему источнику.
+            adapter.clearSilence()
             pipeline.source = source
             if let track = lastTrack, !Self.belongs(track, to: source) {
                 lastTrack = nil
@@ -584,16 +590,21 @@ final class AppModel {
         }
     }
 
-    /// «Тишина адаптера»: источник по tap звучит 2 минуты, а Now Playing ни разу не прислал его
-    /// трек. Адаптер помечается неработающим, приложение переходит в запасной режим; трек
-    /// источника, пробуждение или перезапуск приложения возвращают его. В демо tap не слышит
-    /// источник, поэтому там не считается.
+    /// «Тишина адаптера»: приложение-источник, о котором Now Playing раньше сообщал, по tap
+    /// звучит 2 минуты, а Now Playing ни разу не прислал его трек. Адаптер помечается
+    /// неработающим, приложение переходит в запасной режим; трек источника, смена источника,
+    /// пробуждение или перезапуск приложения возвращают его. Для всего звука системы и в демо
+    /// не считается.
     private func watchAdapterSilence(audioActive: Bool, now: Double) {
         guard arguments.demoFile == nil else { return }
+        let applies = AdapterSilenceMonitor.applies(
+            to: effectiveSource,
+            reportedBundleIDs: nowPlayingSources.bundleIDs
+        )
         let silent = adapterSilence.update(
             sourceAudible: audioActive,
             trackSeen: sourceTrackSeen,
-            adapterAvailable: adapter.isAvailable,
+            adapterAvailable: adapter.isAvailable && applies,
             now: now
         )
         guard silent else { return }

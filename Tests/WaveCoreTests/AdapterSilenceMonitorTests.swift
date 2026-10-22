@@ -80,4 +80,20 @@ struct AdapterSilenceMonitorTests {
         let second = Self.run(&monitor, audible: true, from: 1100.1, to: 1200)
         #expect(second != nil)
     }
+
+    /// Весь звук системы и приложения, о которых Now Playing никогда не сообщал, не считаются.
+    @Test func appliesOnlyToAppsSeenInNowPlaying() {
+        let yandex = AudioSource.application(
+            bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Яндекс Музыка.app", displayName: "Яндекс Музыка"
+        )
+        let telegram = AudioSource.application(
+            bundleID: "ru.keepcoder.Telegram", bundlePath: "/Applications/Telegram.app", displayName: "Telegram"
+        )
+        let noID = AudioSource.application(bundleID: "", bundlePath: "/Applications/X.app", displayName: "X")
+        let seen: Set<String> = ["ru.yandex.desktop.music", ""]
+        #expect(AdapterSilenceMonitor.applies(to: yandex, reportedBundleIDs: seen))
+        #expect(!AdapterSilenceMonitor.applies(to: telegram, reportedBundleIDs: seen))
+        #expect(!AdapterSilenceMonitor.applies(to: noID, reportedBundleIDs: seen))
+        #expect(!AdapterSilenceMonitor.applies(to: .systemWide, reportedBundleIDs: seen))
+    }
 }

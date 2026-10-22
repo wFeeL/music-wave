@@ -284,3 +284,25 @@ final class AppSettings {
         defaults.set(data, forKey: key)
     }
 }
+
+/// Bundle ID приложений-источников, о которых Now Playing хоть раз сообщал, за все запуски
+/// (`UserDefaults`, ключ `wf.nowPlayingSources`). По нему «тишина адаптера» считается только
+/// для источников, которые Now Playing вообще публикуют (`AdapterSilenceMonitor.applies`).
+@MainActor
+final class NowPlayingSourceHistory {
+    static let key = "wf.nowPlayingSources"
+
+    private let defaults: UserDefaults
+    private(set) var bundleIDs: Set<String>
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        bundleIDs = Set(defaults.stringArray(forKey: Self.key) ?? [])
+    }
+
+    /// Запоминает bundle ID; пишет в `UserDefaults`, только если его еще не было.
+    func insert(_ bundleID: String) {
+        guard !bundleID.isEmpty, bundleIDs.insert(bundleID).inserted else { return }
+        defaults.set(bundleIDs.sorted(), forKey: Self.key)
+    }
+}
