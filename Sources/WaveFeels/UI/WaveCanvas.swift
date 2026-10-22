@@ -156,6 +156,8 @@ nonisolated struct WaveDrawing: Sendable {
     static let panelEdgeMargin: CGFloat = 3
     /// Во сколько раз толще линии свечения.
     static let glowLineScale: CGFloat = 2.2
+    /// Половина волны ниже этого размаха, pt, не заливается: заливать нечего.
+    static let minimumFillExtent: CGFloat = 0.5
 
     let waves: WaveSet
     let mirrored: Bool
@@ -189,32 +191,9 @@ nonisolated struct WaveDrawing: Sendable {
         }
 
         if pass == .lines, waves.fill > 0, !lines.isEmpty {
-            // Заливка всех линий в одном слое, затем одна вертикальная маска: у ±swing
-            // `fillTopOpacity × fill`, у оси ноль. Маска симметрична, поэтому верхняя и нижняя
-            // половины спадают к оси каждая сама по себе.
-            let top = Double(WavePaint.fillTopOpacity) * waves.fill / Double(WavePaint.fullOpacity)
-            context.drawLayer { fills in
-                fills.blendMode = .plusLighter
-                for line in lines {
-                    var area = line.path
-                    area.addLine(to: CGPoint(x: end, y: middle))
-                    area.addLine(to: CGPoint(x: start, y: middle))
-                    area.closeSubpath()
-                    fills.fill(area, with: shading(line.layer.stops) { min(top * Double($0), 1) })
-                }
-                fills.blendMode = .destinationIn
-                fills.fill(
-                    Path(CGRect(origin: .zero, size: size)),
-                    with: .linearGradient(
-                        Gradient(stops: [
-                            Gradient.Stop(color: .white, location: 0),
-                            Gradient.Stop(color: Color(.sRGB, white: 1, opacity: 0), location: 0.5),
-                            Gradient.Stop(color: .white, location: 1),
-                        ]),
-                        startPoint: CGPoint(x: 0, y: middle - swing),
-                        endPoint: CGPoint(x: 0, y: middle + swing)
-                    )
-                )
+            drawFill(lines, in: context, size: size, start: start, end: end, middle: middle, swing: swing) { stops in
+                let top = Double(WavePaint.fillTopOpacity) * waves.fill
+                return shading(stops) { min(top * Double($0), 1) }
             }
         }
 
@@ -225,6 +204,49 @@ nonisolated struct WaveDrawing: Sendable {
                 with: shading(line.layer.stops) { Double($0) },
                 style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
             )
+        }
+    }
+
+    /// Заливка между каждой линией и осью. Цвет по горизонтали тот же, что у линии, с
+    /// прозрачностью `fillTopOpacity × fill` × ее собственная (`colors`). По вертикали одна маска
+    /// на холст (`clipToLayer`, единственный слой вне экрана, и только при заливке): у каждой
+    /// линии верхняя и нижняя половины обрезаются по оси отдельно, градиент маски от полной
+    /// у гребня линии в этой половине до нуля у оси. Так под гребнем видна вся заливка, сколько
+    /// бы ни был размах. Маски линий складываются обычным наложением.
+    private func drawFill(
+        _ lines: [(layer: WaveSet.Layer, path: Path)], in context: GraphicsContext, size: CGSize,
+        start: CGFloat, end: CGFloat, middle: CGFloat, swing: CGFloat,
+        colors: ([WavePaint.Stop]) -> GraphicsContext.Shading
+    ) {
+        let areas = lines.map { line in
+            var area = line.path
+            area.addLine(to: CGPoint(x: end, y: middle))
+            area.addLine(to: CGPoint(x: start, y: middle))
+            area.closeSubpath()
+            return area
+        }
+        let upper = CGRect(x: 0, y: 0, width: size.width, height: middle)
+        let lower = CGRect(x: 0, y: middle, width: size.width, height: max(size.height - middle, 0))
+        let fade = Gradient(colors: [.white, Color(.sRGB, white: 1, opacity: 0)])
+        var fills = context
+        fills.clipToLayer { mask in
+            mask.blendMode = .normal
+            for (line, area) in zip(lines, areas) {
+                let crest = swing * CGFloat(max(line.layer.samples.max() ?? 0, 0))
+                let trough = swing * CGFloat(max(-(line.layer.samples.min() ?? 0), 0))
+                for (half, edge, extent) in [(upper, middle - crest, crest), (lower, middle + trough, trough)]
+                where extent >= Self.minimumFillExtent {
+                    var clipped = mask
+                    clipped.clip(to: Path(half))
+                    clipped.fill(
+                        area,
+                        with: .linearGradient(fade, startPoint: CGPoint(x: 0, y: edge), endPoint: CGPoint(x: 0, y: middle))
+                    )
+                }
+            }
+        }
+        for (line, area) in zip(lines, areas) {
+            fills.fill(area, with: colors(line.layer.stops))
         }
     }
 
