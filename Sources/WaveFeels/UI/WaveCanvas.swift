@@ -37,7 +37,8 @@ nonisolated struct WaveSet: Sendable {
 
     /// Точек на крыло и на всю ширину панели.
     static let wingPoints = 64
-    static let panelPoints = 128
+    /// В панели около 2 pt между точками: гармоника на 436 pt рисуется без потери размаха.
+    static let panelPoints = 224
     /// Положения точек градиента: частые на проявлении у выреза и растворении у края.
     static let wingLocations = WavePaint.locations(for: .wing)
     static let panelLocations = WavePaint.locations(for: .panel)
@@ -46,6 +47,12 @@ nonisolated struct WaveSet: Sendable {
 
     let style: WaveStyle
     let layers: [Layer]
+
+    /// Пустой набор: холст ничего не рисует. Так стоит слой волн, которого сейчас не видно.
+    init(empty style: WaveStyle) {
+        self.style = style
+        layers = []
+    }
 
     init(frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle) {
         let points = style == .wing ? Self.wingPoints : Self.panelPoints

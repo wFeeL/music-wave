@@ -17,53 +17,25 @@ import WaveCore
 /// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет кадр анализа и свечение
 /// доли на момент показа кадра по часам хоста (`CACurrentMediaTime()` плюс два периода
 /// отрисовки), сглаживает уровни пружинами и двигает фазы волн, «вздох» и переход палитры
-/// (`AppModel.islandVisuals`); свечение под островом и точки у выреза идут от свечения доли,
-/// масштаб от «вздоха». Точки и цвета волн
-/// считаются один раз на кадр (`WaveSet`). Весь остров рисуется одной текстурой
-/// (`drawingGroup`). С `clock` остров рисуется один раз на момент `clock()`, без
-/// `TimelineView`: так его снимает `ImageRenderer`.
+/// (`AppModel.islandVisuals`). Сцена из трех слоев (`IslandScene.swift`): свечение под островом
+/// (`BeatGlowView`), черное тело (`IslandBodyView`, на кадрах не пересчитывается) и волны
+/// (`IslandWavesView`, каждый прямоугольник волн своей текстурой `drawingGroup`). «Вздох»
+/// масштабирует тело и волны вместе. Волны крыльев и панели сменяют друг друга прозрачностью,
+/// оба слоя считаются только в переходе (`IslandTransition`). С `clock` остров рисуется один
+/// раз на момент `clock()`, без `TimelineView`: так его снимает `ImageRenderer`.
 ///
-/// Содержимое панели живет отдельно от сцены: вне `TimelineView` и `drawingGroup`, поэтому
+/// Содержимое панели живет отдельно от сцены: вне `TimelineView` и текстур волн, поэтому
 /// не пересчитывается на каждом кадре, текст остается четким, а кнопки принимают клики (сама
 /// сцена клики пропускает). Оно обрезано той же формой острова, что и волны: пока панель
 /// раскрывается, содержимое открывается краем формы и проявляется с небольшой задержкой.
 ///
-/// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее.
+/// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее, содержимое
+/// панели появляется и уходит одной прозрачностью.
 struct IslandView: View {
     static let expandAnimation = Animation.spring(response: 0.42, dampingFraction: 0.78)
     static let collapseAnimation = Animation.spring(response: 0.35, dampingFraction: 0.9)
-    static let collapsedRadius: CGFloat = 10
-    static let expandedRadius: CGFloat = 28
     /// «Вздох»: насколько остров увеличивается на полном ударе.
     static let breathDepth: CGFloat = 0.03
-    /// Свечение линий: размытая копия волн.
-    static let glowBlur: CGFloat = 2
-    static let glowOpacity = 0.25
-    /// Свечение под островом на сильной доле.
-    static let beatGlowBlur: CGFloat = 14
-    static let beatGlowWidth: CGFloat = 0.7
-    static let beatGlowHeight: CGFloat = 16
-    /// На сколько центр свечения выше нижнего края острова.
-    static let beatGlowLift: CGFloat = 6
-    /// Яркость свечения на полном ударе при яркости по умолчанию: на темной и светлой строке меню.
-    static let beatGlowDark = 0.45
-    static let beatGlowLight = 0.25
-    /// У раскрытой панели свечение слабее.
-    static let beatGlowExpanded = 0.3
-    /// Точка удара у края выреза, где сходятся волны крыла.
-    static let accentSize: CGFloat = 3
-    static let accentOpacity = 0.6
-    /// Тень раскрытой панели.
-    static let expandedShadowOpacity = 0.25
-    static let expandedShadowRadius: CGFloat = 16
-    static let expandedShadowOffset: CGFloat = 4
-    /// Волны раскрытой панели на паузе: гаснут до этой яркости, когда затихли.
-    static let pausedWaveOpacity = 0.15
-    static let pausedWaveDelay = 1.0
-    static let pausedWaveFade = 0.5
-    /// Обводка свернутой капсулы.
-    static let pillStrokeWidth: CGFloat = 0.5
-    static let pillStrokeOpacity = 0.08
     /// Содержимое панели: появляется чуть позже формы, слегка вырастая от верха, исчезает быстро.
     static var panelContentTransition: AnyTransition {
         .asymmetric(
@@ -79,20 +51,21 @@ struct IslandView: View {
     var clock: (() -> Double)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let state = model.islandState
         let panel = layout.panelFrame
+        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(model.settings.wingWidth))
         ZStack(alignment: .topLeading) {
             Group {
                 if let clock {
                     let time = clock()
-                    scene(state: state, now: time, timelineTime: time)
+                    scene(state: state, geometry: geometry, now: time, timelineTime: time)
                 } else {
                     TimelineView(.animation(minimumInterval: model.lowPower ? 1.0 / 30 : nil, paused: state == .hidden)) { context in
                         scene(
                             state: state,
+                            geometry: geometry,
                             now: CACurrentMediaTime(),
                             timelineTime: context.date.timeIntervalSinceReferenceDate
                         )
@@ -100,7 +73,7 @@ struct IslandView: View {
                 }
             }
             .allowsHitTesting(false)
-            panelContent(state: state)
+            panelContent(state: state, geometry: geometry)
         }
         .frame(width: panel.width, height: panel.height, alignment: .topLeading)
         .ignoresSafeArea()
@@ -112,9 +85,7 @@ struct IslandView: View {
 
     /// `ExpandedPanelView` в `IslandGeometry.panelContent`, только у раскрытого острова,
     /// под маской формы острова в ее текущем (анимированном) положении.
-    private func panelContent(state: IslandState) -> some View {
-        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(model.settings.wingWidth))
-        let rect = geometry.island(for: state)
+    private func panelContent(state: IslandState, geometry: IslandGeometry) -> some View {
         let content = geometry.panelContent
         return ZStack(alignment: .topLeading) {
             if state == .expanded {
@@ -124,26 +95,12 @@ struct IslandView: View {
                 )
                     .frame(width: content.width, height: content.height)
                     .offset(x: content.minX, y: content.minY)
-                    .transition(Self.panelContentTransition)
+                    .transition(reduceMotion ? AnyTransition.opacity : Self.panelContentTransition)
             }
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .mask(alignment: .topLeading) {
-            Group {
-                if layout.hasNotch {
-                    IslandShape(
-                        bottomRadius: state == .expanded ? Self.expandedRadius : Self.collapsedRadius,
-                        shoulderRadius: IslandGeometry.shoulder(for: state)
-                    )
-                } else {
-                    RoundedRectangle(
-                        cornerRadius: state == .expanded ? Self.expandedRadius : rect.height / 2,
-                        style: .continuous
-                    )
-                }
-            }
-            .frame(width: rect.width, height: rect.height)
-            .offset(x: rect.minX, y: rect.minY)
+            IslandOutline(geometry: geometry, state: state)
         }
     }
 
@@ -151,174 +108,41 @@ struct IslandView: View {
 
     /// `now`: момент кадра по часам хоста (`CACurrentMediaTime()`), по нему берутся кадры анализа
     /// и идет анимация; `timelineTime`: дата `TimelineView`, только для замера отрисовки.
-    private func scene(state: IslandState, now: Double, timelineTime: Double) -> some View {
+    /// Здесь, и только здесь, сцена читает модель; слои получают готовые значения.
+    private func scene(state: IslandState, geometry: IslandGeometry, now: Double, timelineTime: Double) -> some View {
         let visuals = model.islandVisuals(now: now, timelineTime: timelineTime, reduceMotion: reduceMotion)
-        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(model.settings.wingWidth))
-        let rect = geometry.island(for: state)
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.
         let glow = reduceMotion ? 0 : model.settings.glowIntensity
         let breathes = state == .collapsed && model.settings.beatPulse && !reduceMotion
         let scale = breathes ? 1 + Self.breathDepth * CGFloat(visuals.pulse) : 1
         let anchor = geometry.anchor
-        let style: WaveStyle = state == .expanded || !layout.hasNotch ? .panel : .wing
-        let waves = WaveSet(
-            frame: visuals.frame, palette: visuals.palette, motion: visuals.motion, time: visuals.time, style: style
-        )
+        let layers = IslandTransition.waveLayers(state: state, sinceStateChange: now - model.islandStateChangedAt)
+        // На паузе волны панели сначала затихают в линию, затем полоса гаснет.
+        let paused = model.nowPlayingAvailable && model.lastTrack?.isPlaying == false
 
         return ZStack(alignment: .topLeading) {
-            beatGlow(below: rect, state: state, scale: scale, anchorY: geometry.notch.minY, visuals: visuals, intensity: glow)
-            Group {
-                if layout.hasNotch {
-                    island(
-                        IslandShape(
-                            bottomRadius: state == .expanded ? Self.expandedRadius : Self.collapsedRadius,
-                            shoulderRadius: IslandGeometry.shoulder(for: state)
-                        ),
-                        rect: rect, state: state, geometry: geometry, waves: waves, visuals: visuals, glow: glow
-                    )
-                } else {
-                    let capsule = RoundedRectangle(
-                        cornerRadius: state == .expanded ? Self.expandedRadius : rect.height / 2,
-                        style: .continuous
-                    )
-                    ZStack(alignment: .topLeading) {
-                        island(capsule, rect: rect, state: state, geometry: geometry, waves: waves, visuals: visuals, glow: glow)
-                        capsule
-                            .strokeBorder(Color.white.opacity(Self.pillStrokeOpacity), lineWidth: Self.pillStrokeWidth)
-                            .frame(width: rect.width, height: rect.height)
-                            .offset(x: rect.minX, y: rect.minY)
-                            .opacity(state == .expanded ? 0 : 1)
-                    }
-                }
+            if BeatGlowView.isVisible(glow: visuals.glow, intensity: glow) {
+                BeatGlowView(
+                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, intensity: glow,
+                    color: visuals.palette.first ?? PaletteExtractor.fallback[0]
+                )
+            }
+            ZStack(alignment: .topLeading) {
+                IslandBodyView(geometry: geometry, state: state)
+                    .equatable()
+                IslandWavesView(
+                    visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow, paused: paused
+                )
             }
             .scaleEffect(scale, anchor: UnitPoint(x: anchor.x / geometry.size.width, y: anchor.y / geometry.size.height))
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .opacity(state == .hidden ? 0 : 1)
-        .drawingGroup()
-    }
-
-    /// Черная форма острова (с тенью, когда он раскрыт) и волны, обрезанные по ней.
-    private func island<S: Shape>(
-        _ shape: S, rect: CGRect, state: IslandState, geometry: IslandGeometry,
-        waves: WaveSet, visuals: IslandVisuals, glow: Double
-    ) -> some View {
-        ZStack(alignment: .topLeading) {
-            shape
-                .fill(Color.black)
-                .frame(width: rect.width, height: rect.height)
-                .shadow(
-                    color: Color.black.opacity(state == .expanded ? Self.expandedShadowOpacity : 0),
-                    radius: Self.expandedShadowRadius, x: 0, y: Self.expandedShadowOffset
-                )
-                .offset(x: rect.minX, y: rect.minY)
-            content(state: state, geometry: geometry, waves: waves, visuals: visuals, glow: glow)
-                .mask(alignment: .topLeading) {
-                    shape
-                        .frame(width: rect.width, height: rect.height)
-                        .offset(x: rect.minX, y: rect.minY)
-                }
-        }
-        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-    }
-
-    /// Волны в координатах панели. В крыльях они стоят на своих местах, пока остров
-    /// раскрывается или прячется, и открываются или закрываются краем формы.
-    private func content(
-        state: IslandState, geometry: IslandGeometry, waves: WaveSet, visuals: IslandVisuals, glow: Double
-    ) -> some View {
-        ZStack(alignment: .topLeading) {
-            switch state {
-            case .expanded:
-                // На паузе волны сначала затихают в линию (около секунды), затем полоса гаснет.
-                let paused = model.nowPlayingAvailable && model.lastTrack?.isPlaying == false
-                waveLayer(waves, rect: geometry.panelWaves, mirrored: false, glow: glow)
-                    .opacity(paused ? Self.pausedWaveOpacity : 1)
-                    .animation(
-                        .easeInOut(duration: Self.pausedWaveFade).delay(paused ? Self.pausedWaveDelay : 0),
-                        value: paused
-                    )
-                    .transition(.opacity)
-            case .collapsed, .hidden:
-                if layout.hasNotch {
-                    Group {
-                        waveLayer(waves, rect: geometry.leftWing, mirrored: true, glow: glow)
-                        waveLayer(waves, rect: geometry.rightWing, mirrored: false, glow: glow)
-                        if glow > 0 {
-                            accent(at: CGPoint(x: geometry.notch.minX - Self.accentSize / 2, y: geometry.leftWing.midY), visuals: visuals)
-                            accent(at: CGPoint(x: geometry.notch.maxX + Self.accentSize / 2, y: geometry.rightWing.midY), visuals: visuals)
-                        }
-                    }
-                    .transition(.opacity)
-                } else {
-                    waveLayer(waves, rect: geometry.pillWaves, mirrored: false, glow: glow)
-                        .transition(.opacity)
-                }
-            }
-        }
-        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-    }
-
-    /// Волны и их свечение: размытая копия толстых линий под ними, обе складываются со всем,
-    /// что под ними, в режиме `.plusLighter`.
-    private func waveLayer(_ waves: WaveSet, rect: CGRect, mirrored: Bool, glow: Double) -> some View {
-        ZStack {
-            if glow > 0 {
-                WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
-                    .blur(radius: Self.glowBlur)
-                    .opacity(Self.glowOpacity * glow)
-                    .blendMode(.plusLighter)
-            }
-            WaveCanvas(waves: waves, mirrored: mirrored)
-                .blendMode(.plusLighter)
-        }
-        .frame(width: rect.width, height: rect.height)
-        .offset(x: rect.minX, y: rect.minY)
-    }
-
-    /// Мягкая точка у края выреза, где сходятся волны крыла, вспыхивает со свечением доли.
-    @ViewBuilder
-    private func accent(at center: CGPoint, visuals: IslandVisuals) -> some View {
-        let opacity = Self.accentOpacity * Double(visuals.glow)
-        if opacity > 0.005 {
-            let color = WavePaint.glowColor(visuals.palette.first ?? PaletteExtractor.fallback[0])
-            Circle()
-                .fill(Color(palette: color))
-                .frame(width: Self.accentSize, height: Self.accentSize)
-                .blur(radius: 1)
-                .opacity(opacity)
-                .blendMode(.plusLighter)
-                .offset(x: center.x - Self.accentSize / 2, y: center.y - Self.accentSize / 2)
-        }
-    }
-
-    /// Мягкое свечение цвета `palette[0]`, поднятого до светлого и насыщенного, под нижним
-    /// краем острова. Яркость по свечению доли `glow` с пиком 0.45 на темной строке меню и 0.25 на
-    /// светлой при яркости по умолчанию, у раскрытой панели втрое слабее.
-    @ViewBuilder
-    private func beatGlow(
-        below rect: CGRect, state: IslandState, scale: CGFloat, anchorY: CGFloat, visuals: IslandVisuals, intensity: Double
-    ) -> some View {
-        let peak = colorScheme == .dark ? Self.beatGlowDark : Self.beatGlowLight
-        let relative = intensity / AppSettings.Default.glowIntensity
-        let expanded = state == .expanded ? Self.beatGlowExpanded : 1
-        let opacity = min(Double(visuals.glow) * peak * relative * expanded, 1)
-        if Double(visuals.glow) * intensity >= 0.005, opacity > 0 {
-            let color = WavePaint.glowColor(visuals.palette.first ?? PaletteExtractor.fallback[0])
-            let width = rect.width * Self.beatGlowWidth
-            let bottom = anchorY + (rect.maxY - anchorY) * scale
-            Ellipse()
-                .fill(Color(palette: color))
-                .frame(width: width, height: Self.beatGlowHeight)
-                .blur(radius: Self.beatGlowBlur)
-                .opacity(opacity)
-                .offset(x: rect.midX - width / 2, y: bottom - Self.beatGlowLift - Self.beatGlowHeight / 2)
-        }
     }
 }
 
 /// Прямоугольники острова и волн в координатах панели (начало сверху слева, ось Y вниз).
-struct IslandGeometry {
+struct IslandGeometry: Equatable, Sendable {
     /// Вогнутые плечи формы у верхних углов (только у выреза), у свернутого острова.
     static let shoulderRadius: CGFloat = 6
     /// Плечи раскрытой панели шире, форма переходит к ним анимацией вместе с остальным.
