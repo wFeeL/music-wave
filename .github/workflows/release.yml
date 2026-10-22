@@ -22,7 +22,7 @@ jobs:
         # Шаг падает раньше лимита задачи, чтобы публикации результатов хватило времени.
         timeout-minutes: 12
         run: bash scripts/ci-mac.sh "$MODE"
-        env: {SIGNING_P12_BASE64: '${{ secrets.SIGNING_P12_BASE64 }}', SIGNING_P12_PASSWORD: '${{ secrets.SIGNING_P12_PASSWORD }}'}
+        env: {SIGNING_P12_BASE64: '${{ secrets.SIGNING_P12_BASE64 }}', SIGNING_P12_PASSWORD: '${{ secrets.SIGNING_P12_PASSWORD }}', SIGNING_EXPECTED_LEAF: '${{ vars.SIGNING_EXPECTED_LEAF }}'}
       - id: release
         uses: softprops/action-gh-release@v2
         with:

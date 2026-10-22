@@ -75,14 +75,27 @@ base64 -i signing/wavefeels-signing.p12 | pbcopy
 2. В репозитории на GitHub открыть Settings, Secrets and variables, Actions, и создать секрет SIGNING_P12_BASE64, вставив буфер обмена.
 3. Создать секрет SIGNING_P12_PASSWORD со значением из signing/password.txt.
 4. До удаления сохранить копию signing/wavefeels-signing.p12 и пароль из signing/password.txt вне репозитория (например, в менеджере паролей). Сертификат нельзя терять и менять: с новым сертификатом macOS посчитает приложение другим и снова спросит про доступ к звуку.
-5. Убедиться, что сборка проходит с секретами, и убрать каталог из репозитория, оставив локальные файлы на диске:
+5. Убедиться, что сборка проходит с секретами (в sign.txt строка `leaf hash: ...` с тем же хэшем, что ожидается), и убрать из репозитория сертификат и пароль, оставив локальные файлы на диске. Файл signing/expected-leaf.txt остается в репозитории:
 
 ```
-git rm -r --cached signing
+git rm --cached signing/wavefeels-signing.p12 signing/password.txt
 git commit -m "chore: remove signing files from repo"
 git push
 ```
 
-Сразу после этого добавить `signing/` в .gitignore репозитория, иначе следующий `git add -A` снова закоммитит эти файлы.
+Сразу после этого добавить в .gitignore репозитория строки `signing/wavefeels-signing.p12` и `signing/password.txt`, иначе следующий `git add -A` снова закоммитит эти файлы.
 
 Если заданы оба секрета, workflow берет их, иначе берет файлы из signing/. Если задан только один из двух, сборка падает.
+
+### Ожидаемый сертификат
+
+scripts/sign.sh после подписи сверяет хэш листового сертификата в designated requirement с ожидаемым и падает, если они разные. Так сборка не уйдет с чужим сертификатом, после которого macOS снова спросит доступ к звуку. Ожидаемый хэш (SHA-1 сертификата) лежит в signing/expected-leaf.txt, сейчас это `b141bc7c97bc1a6d3ecbf2a806c75cdf8d740508`. Переменная окружения `SIGNING_EXPECTED_LEAF` его перекрывает; workflow берут ее из переменной репозитория `SIGNING_EXPECTED_LEAF` (Settings, Secrets and variables, Actions, вкладка Variables), пустая переменная не мешает.
+
+При переносе сертификата в секреты хэш не меняется, обновлять ничего не нужно. Если сертификат все-таки заменили намеренно, новый хэш можно узнать так (на Linux с OpenSSL 3 к первой команде добавить `-legacy`):
+
+```
+openssl pkcs12 -in signing/wavefeels-signing.p12 -passin file:signing/password.txt -nokeys \
+  | openssl x509 -noout -fingerprint -sha1 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f'
+```
+
+Его нужно записать в signing/expected-leaf.txt или в переменную репозитория `SIGNING_EXPECTED_LEAF`. Если signing/ убрали из репозитория целиком, нужна переменная: без ожидаемого хэша подпись падает.

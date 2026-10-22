@@ -8,6 +8,10 @@
 # откат на ad-hoc запрещен, он сбрасывает разрешение на звук).
 # Шаг доверия (add-trusted-cert) не используется: codesign подписывает по SHA-1,
 # designated requirement задается явно.
+# Хэш листового сертификата в designated requirement сверяется с ожидаемым: значение из
+# переменной SIGNING_EXPECTED_LEAF, если она задана, иначе из signing/expected-leaf.txt.
+# Не совпал (в секреты попал другой сертификат) или ожидаемого нет: код 1, иначе macOS
+# сочтет сборку другим приложением и снова спросит доступ к звуку.
 # Вывод идет в stdout/stderr; ci-mac.sh сохраняет его в ci-out/sign.txt.
 set -euo pipefail
 
@@ -119,7 +123,32 @@ if [[ -z "$SHA" ]]; then
 fi
 echo "signing identity: $CERT_NAME ($SHA)"
 
+EXPECTED_LEAF=${SIGNING_EXPECTED_LEAF:-}
+if [[ -z "$EXPECTED_LEAF" && -f signing/expected-leaf.txt ]]; then
+    EXPECTED_LEAF=$(tr -d ' \r\n' < signing/expected-leaf.txt)
+fi
+if [[ -z "$EXPECTED_LEAF" ]]; then
+    echo "error: no expected leaf hash (SIGNING_EXPECTED_LEAF or signing/expected-leaf.txt)" >&2
+    exit 1
+fi
+EXPECTED_LEAF=$(printf '%s' "$EXPECTED_LEAF" | tr '[:upper:]' '[:lower:]')
+
 REQ="=designated => identifier \"$IDENTIFIER\" and certificate leaf = H\"$SHA\""
 sign_nested --keychain "$KC" --sign "$SHA"
 codesign --force --timestamp=none --keychain "$KC" --sign "$SHA" --identifier "$IDENTIFIER" -r "$REQ" "$APP"
 report
+
+# Хэш листа в подписанном designated requirement: H"<40 hex>".
+DR=$(codesign -dr - "$APP" 2>&1)
+LEAF=""
+LEAF_PATTERN='certificate leaf = H"([0-9A-Fa-f]+)"'
+if [[ $DR =~ $LEAF_PATTERN ]]; then
+    LEAF=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+fi
+echo "leaf hash: ${LEAF:-none}, expected: $EXPECTED_LEAF"
+if [[ "$LEAF" != "$EXPECTED_LEAF" ]]; then
+    echo "error: designated requirement leaf hash ${LEAF:-none} differs from expected $EXPECTED_LEAF" >&2
+    echo "error: a different certificate would reset the audio capture permission;" >&2
+    echo "error: if the change is intended, update signing/expected-leaf.txt or SIGNING_EXPECTED_LEAF" >&2
+    exit 1
+fi
