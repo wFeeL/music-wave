@@ -165,4 +165,13 @@ import Testing
         #expect(steady.wing == false)
         #expect(steady.panel == true)
     }
+
+    /// «Уменьшение движения»: входящее тело проявляется первым, уходящее гаснет следом; вне
+    /// свернутого острова тело меняется сразу.
+    @Test func reducedMotionBodiesNeverFadeTogether() {
+        #expect(IslandTransition.reducedBodyFade(incoming: true, collapsed: true) == .fadeIn)
+        #expect(IslandTransition.reducedBodyFade(incoming: false, collapsed: true) == .fadeOutDelayed)
+        #expect(IslandTransition.reducedBodyFade(incoming: true, collapsed: false) == .immediate)
+        #expect(IslandTransition.reducedBodyFade(incoming: false, collapsed: false) == .immediate)
+    }
 }

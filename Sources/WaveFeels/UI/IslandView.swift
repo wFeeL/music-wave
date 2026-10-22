@@ -38,13 +38,26 @@ import WaveCore
 ///
 /// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее, содержимое
 /// панели появляется и уходит одной прозрачностью. Баннер не перетекает из свернутого острова:
-/// тела, волны и содержимое меняются одной прозрачностью за 0.2 с.
+/// тела, волны и содержимое меняются одной прозрачностью за 0.2 с, а уходящее тело гаснет
+/// следом за проявившимся входящим (`IslandTransition.reducedBodyFade`).
 struct IslandView: View {
     static let expandAnimation = Animation.spring(response: 0.42, dampingFraction: 0.78)
     static let collapseAnimation = Animation.spring(response: 0.35, dampingFraction: 0.9)
     static let bannerOpenAnimation = Animation.spring(response: 0.42, dampingFraction: 0.82)
     static let bannerCloseAnimation = Animation.spring(response: 0.45, dampingFraction: 1.0)
-    static let bannerReducedAnimation = Animation.easeInOut(duration: 0.2)
+    static let bannerReducedDuration = 0.2
+    static let bannerReducedAnimation = Animation.easeInOut(duration: bannerReducedDuration)
+
+    /// «Уменьшение движения»: анимация прозрачности тела острова или баннера
+    /// (`IslandTransition.reducedBodyFade`); уходящее тело гаснет после того, как проявилось
+    /// входящее.
+    static func reducedBodyAnimation(_ fade: IslandTransition.BodyFade) -> Animation? {
+        switch fade {
+        case .immediate: nil
+        case .fadeIn: bannerReducedAnimation
+        case .fadeOutDelayed: bannerReducedAnimation.delay(bannerReducedDuration)
+        }
+    }
 
     /// Анимация смены `bannerVisible`.
     static func bannerAnimation(visible: Bool, reduceMotion: Bool) -> Animation {
@@ -214,14 +227,29 @@ struct IslandView: View {
             }
             ZStack(alignment: .topLeading) {
                 if reduceMotion {
-                    // Без перетекания: тело баннера проявляется поверх свернутого и гаснет.
+                    // Без перетекания: тело баннера сменяет свернутое прозрачностью, входящее
+                    // проявляется, пока уходящее еще непрозрачно, и остров нигде не просвечивает.
+                    // Тело баннера только у свернутого острова: у раскрытой панели оно было бы
+                    // второй такой же панелью. Форма тела острова идет своей пружиной, а не
+                    // анимацией прозрачности.
+                    let collapsed = state == .collapsed
+                    let bannerShown = collapsed && bannerVisible
                     IslandBodyView(geometry: geometry, state: state)
                         .equatable()
-                        .opacity(bannerVisible ? 0 : 1)
-                    if bannerVisible || bannerMoving {
+                        .animation(state == .expanded ? Self.expandAnimation : Self.collapseAnimation, value: state)
+                        .opacity(bannerShown ? 0 : 1)
+                        .animation(
+                            Self.reducedBodyAnimation(IslandTransition.reducedBodyFade(incoming: !bannerShown, collapsed: collapsed)),
+                            value: bannerShown
+                        )
+                    if collapsed && (bannerVisible || bannerMoving) {
                         IslandBodyView(geometry: geometry, state: state, banner: true)
                             .equatable()
                             .opacity(bannerVisible ? 1 : 0)
+                            .animation(
+                                Self.reducedBodyAnimation(IslandTransition.reducedBodyFade(incoming: bannerVisible, collapsed: true)),
+                                value: bannerVisible
+                            )
                     }
                 } else {
                     IslandBodyView(geometry: geometry, state: state, banner: bannerVisible)

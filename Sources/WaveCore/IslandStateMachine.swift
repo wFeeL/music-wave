@@ -144,4 +144,21 @@ public enum IslandTransition {
         case .expanded: return (false, true)
         }
     }
+
+    /// «Уменьшение движения»: как меняется прозрачность тела острова или тела баннера, когда
+    /// баннер открывается или закрывается. Входящее тело проявляется первым, уходящее остается
+    /// непрозрачным, пока входящее не проявится, и гаснет следом: две встречные прозрачности
+    /// дали бы в перекрытии около 75 %. Вне свернутого острова (наведение превратило баннер в
+    /// панель, остров скрылся) тело меняется сразу: тело баннера там не рисуется.
+    public enum BodyFade: Sendable, Equatable {
+        case immediate
+        case fadeIn
+        case fadeOutDelayed
+    }
+
+    /// `incoming`: тело становится видимым; `collapsed`: остров свернут.
+    public static func reducedBodyFade(incoming: Bool, collapsed: Bool) -> BodyFade {
+        guard collapsed else { return .immediate }
+        return incoming ? .fadeIn : .fadeOutDelayed
+    }
 }
