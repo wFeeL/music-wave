@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// запуска модели.
     private var settingsRequested = false
     private var diagnosticsRequested = false
-    /// Сон и пробуждение (`NSWorkspace`). Блокировка экрана подписана через селекторы
+    /// Сон и пробуждение системы и экранов (`NSWorkspace`). Блокировка экрана подписана через селекторы
     /// (`subscribedToScreenLock`).
     private var workspaceObservers: [any NSObjectProtocol] = []
     private var subscribedToScreenLock = false
@@ -114,6 +114,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated {
                         self?.model?.systemDidWake()
+                    }
+                },
+                workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.model?.screensSleepChanged(true)
+                    }
+                },
+                workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.model?.screensSleepChanged(false)
                     }
                 },
             ]

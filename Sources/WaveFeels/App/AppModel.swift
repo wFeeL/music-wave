@@ -76,6 +76,9 @@ final class AppModel {
     private(set) var pointerInHoverZone = false
     var fullscreenSuppressed = false
     var screenLocked = false
+    /// Экраны спят (`NSWorkspace.screensDidSleepNotification`): остров не виден, анализ идет
+    /// с частотой скрытого острова, даже если музыка играет.
+    private(set) var screensAsleep = false
     /// Режим энергосбережения: остров рисуется не чаще 30 кадров в секунду.
     var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     /// Фазы волн. Сдвигаются на каждом кадре отрисовки, поэтому не наблюдаются.
@@ -297,6 +300,21 @@ final class AppModel {
     /// полноэкранное окно при включенной настройке.
     var islandSuppressed: Bool {
         settings.paused || screenLocked || (fullscreenSuppressed && settings.hideInFullscreen)
+    }
+
+    /// `NSWorkspace.screensDidSleepNotification` и `screensDidWakeNotification`: пока экраны
+    /// спят, остров никто не видит (`TimelineView` не рисует), и анализ идет реже, как при
+    /// скрытом острове. Применяется сразу.
+    func screensSleepChanged(_ asleep: Bool) {
+        guard asleep != screensAsleep else { return }
+        screensAsleep = asleep
+        log(asleep ? "экраны уснули: анализ реже" : "экраны проснулись")
+        updateAnalysisRate()
+    }
+
+    /// Анализ реже (15 Гц), когда остров скрыт или экраны спят.
+    private func updateAnalysisRate() {
+        pipeline.islandHidden = islandState == .hidden || screensAsleep
     }
 
     /// «Приостановить визуализацию» и «Возобновить визуализацию»: на паузе захват и анализ
@@ -578,7 +596,7 @@ final class AppModel {
             islandState = state
             onIslandStateChange?()
         }
-        pipeline.islandHidden = state == .hidden
+        updateAnalysisRate()
         schedulePointerDeadline(now: now)
     }
 

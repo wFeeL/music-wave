@@ -31,6 +31,30 @@ struct AppModelIslandTests {
         #expect(changes == [.collapsed, .expanded, .collapsed])
     }
 
+    @Test func sleepingScreensSlowAnalysisWhileMusicPlays() async throws {
+        _ = NSApplication.shared
+        let suite = "com.wfeels.wavefeels.tests.screens-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let model = AppModel(defaults: defaults)
+        model.start(arguments: LaunchArguments(demoFile: Self.demo, noCapture: true))
+        defer { model.stop() }
+        #expect(await waitUntil(.seconds(10)) { model.islandState == .collapsed })
+        #expect(!model.pipeline.islandHidden)
+
+        model.screensSleepChanged(true)
+        #expect(model.screensAsleep)
+        #expect(model.pipeline.islandHidden)
+        // Тик модели не возвращает частый анализ, пока экраны спят.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(model.islandState == .collapsed)
+        #expect(model.pipeline.islandHidden)
+
+        model.screensSleepChanged(false)
+        #expect(!model.pipeline.islandHidden)
+    }
+
     /// `Resources/Demo/demo.wav` в корне репозитория.
     static var demo: URL {
         URL(fileURLWithPath: #filePath)
