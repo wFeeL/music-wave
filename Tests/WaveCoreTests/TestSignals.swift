@@ -44,7 +44,7 @@ enum TestSignals {
         }
     }
 
-    /// Клик: 20 мс затухающего синуса 60 Гц амплитуды 0.9 в моменты ударов.
+    /// Клик: 20 мс синуса 60 Гц амплитуды 0.9 с экспоненциальным затуханием 10 мс в моменты ударов.
     static func clickTrack(bpm: Double, sampleRate: Double, seconds: Double) -> (samples: [Float], beatTimes: [Double]) {
         let total = Int(sampleRate * seconds)
         var samples = [Float](repeating: 0, count: total)
@@ -57,7 +57,7 @@ enum TestSignals {
             let start = Int((t * sampleRate).rounded())
             for k in 0..<clickLength where start + k < total {
                 let time = Double(k) / sampleRate
-                let envelope = exp(-time / 0.005)
+                let envelope = exp(-time / 0.010)
                 samples[start + k] += 0.9 * Float(envelope * sin(2 * Double.pi * 60 * time))
             }
             t += interval
