@@ -12,11 +12,13 @@ import WaveCore
 /// за ней колонка текста, справа три кнопки; все на одной средней линии. Колонка: название,
 /// исполнитель, прогресс с прошедшим и оставшимся временем.
 ///
-/// Трек берется из `AppModel.lastTrack`, он держится и на паузе. Кнопки и прогресс видны, только
-/// если Now Playing работает и знает трек источника. Иначе слева значок приложения-источника,
-/// его название и «Нет данных о треке», а справа кнопка «Открыть», которая выводит источник
-/// вперед (у всего звука системы кнопки нет). Время обновляется раз в секунду
-/// (`TimelineView(.periodic)`), пока трек играет и панель раскрыта; на паузе и в снимках стоит.
+/// Трек берется из `AppModel.panelTrack`: последний трек источника, он держится и на паузе.
+/// Кнопки и прогресс видны, только если Now Playing работает и сейчас показывает именно
+/// выбранный источник: команды уходят тому, кого он показывает. В остальных случаях слева
+/// значок приложения-источника, его название и «Нет данных о треке», а справа кнопка
+/// «Открыть», которая выводит источник вперед (у всего звука системы кнопки нет). Время
+/// обновляется раз в секунду (`TimelineView(.periodic)`), пока трек играет и панель раскрыта;
+/// на паузе и в снимках стоит.
 struct ExpandedPanelView: View {
     static let artworkSize: CGFloat = IslandGeometry.panelContentHeight
     static let artworkRadius: CGFloat = 11
@@ -71,8 +73,9 @@ struct ExpandedPanelView: View {
     @State private var pendingPlaying: Bool? = nil
 
     var body: some View {
-        // Без Now Playing трека нет вовсе, даже если он остался с тех пор, когда адаптер работал.
-        let playback = model.nowPlayingAvailable ? model.lastTrack : nil
+        // Без Now Playing трека нет вовсе, даже если он остался с тех пор, когда адаптер работал;
+        // если Now Playing показывает другое приложение, тоже: кнопки управляли бы им.
+        let playback = model.panelTrack
         Group {
             if let playback {
                 trackRow(playback)
@@ -191,7 +194,7 @@ struct ExpandedPanelView: View {
     private func controls(isPlaying: Bool) -> some View {
         HStack(spacing: Self.buttonSpacing) {
             Button {
-                model.adapter.send(.previousTrack)
+                model.sendPanelCommand(.previousTrack)
             } label: {
                 Image(systemName: "backward.fill")
                     .font(.system(size: Self.skipSymbolSize, weight: .semibold))
@@ -200,7 +203,7 @@ struct ExpandedPanelView: View {
 
             Button {
                 pendingPlaying = !isPlaying
-                model.adapter.send(isPlaying ? .pause : .play)
+                model.sendPanelCommand(isPlaying ? .pause : .play)
             } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: Self.playSymbolSize, weight: .semibold))
@@ -210,7 +213,7 @@ struct ExpandedPanelView: View {
             .accessibilityLabel(isPlaying ? Text("Пауза") : Text("Играть"))
 
             Button {
-                model.adapter.send(.nextTrack)
+                model.sendPanelCommand(.nextTrack)
             } label: {
                 Image(systemName: "forward.fill")
                     .font(.system(size: Self.skipSymbolSize, weight: .semibold))

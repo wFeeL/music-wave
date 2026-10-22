@@ -651,6 +651,45 @@ final class AppModel {
         previewNowPlaying ?? adapter.isAvailable
     }
 
+    /// Трек для панели с прогрессом и кнопками (`ExpandedPanelView`), см. `panelTrack(...)`.
+    var panelTrack: NowPlayingInfo? {
+        // Снимки задают трек напрямую, адаптер в них не запущен.
+        if previewNowPlaying != nil {
+            return nowPlayingAvailable ? lastTrack : nil
+        }
+        return Self.panelTrack(
+            lastTrack: lastTrack,
+            current: adapter.info,
+            source: effectiveSource,
+            nowPlayingAvailable: nowPlayingAvailable
+        )
+    }
+
+    /// Команда кнопки панели. Уходит, только если Now Playing по-прежнему показывает источник:
+    /// между отрисовкой и нажатием он мог переключиться на другое приложение.
+    func sendPanelCommand(_ command: MediaCommand) {
+        guard panelTrack != nil else {
+            log("команда \(command.rawValue) не отправлена: Now Playing показывает не источник")
+            return
+        }
+        adapter.send(command)
+    }
+
+    /// Панель показывает трек и кнопки, только пока Now Playing работает и его текущая запись
+    /// относится к выбранному источнику (`belongs`, те же правила, что у процессов). Кнопки
+    /// отправляют команды тому, кого сейчас показывает Now Playing: если он переключился на
+    /// другое приложение, а у источника остался прежний трек, команды ушли бы не туда. Тогда
+    /// панель показывает источник и «Открыть», как без Now Playing.
+    nonisolated static func panelTrack(
+        lastTrack: NowPlayingInfo?,
+        current: NowPlayingInfo?,
+        source: AudioSource,
+        nowPlayingAvailable: Bool
+    ) -> NowPlayingInfo? {
+        guard nowPlayingAvailable, let current, current.belongs(to: source) else { return nil }
+        return lastTrack
+    }
+
     /// Обложка, по которой считаются картинка панели и палитра: только пока Now Playing
     /// работает. В запасном режиме (design.md, «Now Playing») обложки нет и палитра стандартная,
     /// даже если `lastTrack` остался с тех пор, когда адаптер работал.
