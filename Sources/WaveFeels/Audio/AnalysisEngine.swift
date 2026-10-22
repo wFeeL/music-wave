@@ -25,12 +25,18 @@ import WaveCore
 /// обрабатывается только самый новый шаг на пробуждение, уровни и сглаживание идут на время с
 /// прошлого пробуждения, трекер стоит, расписание пустое.
 ///
-/// `zeroRunDuration` растет на время с прошлого пробуждения, если поток встал, нового шага нет или
-/// все окна пробуждения из точных нулей; иначе он 0. По нему работает сторож нулей.
+/// `zeroRunDuration` растет, если поток встал или все окна пробуждения из точных нулей, и
+/// обнуляется на любом ненулевом окне; пробуждение без нового шага при живом потоке его не
+/// меняет (блоки IOProc приходят реже пробуждений). Прибавка это время с прошлого пробуждения,
+/// которое его меняло. По нему работает сторож нулей. Остров снова виден: состояние онсетов
+/// начинается заново (`StreamAnalyzer.resetOnsets()`), уровни остаются.
 /// `stop()` оставляет в хранилище один тихий кадр.
 nonisolated final class AnalysisEngine: @unchecked Sendable {
-    /// Самый большой шаг времени между пробуждениями, который получают уровни и `zeroRunDuration`.
+    /// Самый большой шаг времени между пробуждениями, который получают уровни.
     static let maxStep = 0.1
+    /// Самая большая прибавка `zeroRunDuration` за одно пробуждение, с: больше паузы между
+    /// пробуждениями, которые его меняют, при живом потоке не бывает (поток встает через 250 мс).
+    static let maxZeroRunStep = 0.5
     /// Частота пробуждений, пока остров виден, Гц.
     static let visibleRate = 120.0
     /// Частота пробуждений в режиме энергосбережения, Гц.
@@ -70,6 +76,8 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     /// Линия часов стоит по `(totalWritten, сейчас)`, а не по метке: первая метка ставит ее заново.
     private var fallbackAnchored = false
     private var lastWake: Double?
+    /// Последнее пробуждение, которое меняло `zeroRun`.
+    private var lastZeroRunWake: Double?
     private var feedStalled = false
     private var active = false
     private var interval = 1 / AnalysisEngine.visibleRate
@@ -107,6 +115,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             }
             self.restartStream()
             self.lastWake = nil
+            self.lastZeroRunWake = nil
             self.active = true
             self.shared.withLock {
                 $0.zeroRun = 0
@@ -130,6 +139,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             self.timer?.cancel()
             self.timer = nil
             self.lastWake = nil
+            self.lastZeroRunWake = nil
             self.active = false
             if let observer = self.powerObserver {
                 NotificationCenter.default.removeObserver(observer)
@@ -159,6 +169,10 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             if idle {
                 self.tracker.reset()
                 self.store.publishSchedule(.empty)
+            } else {
+                // В простое следящие пики онсетов спадали за пробуждение 15 Гц и могли остаться
+                // завышенными: без сброса бочки терялись бы еще секунды после появления острова.
+                self.analyzer.resetOnsets()
             }
             self.applyInterval()
         }
@@ -235,7 +249,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         }
 
         let offset = latency + syncOffset
-        let isZero: Bool
+        let windows: Windows
         if feed.update(totalWritten: total, now: now) {
             // Новых сэмплов нет: волны гаснут, а не застывают на последнем окне.
             if !feedStalled {
@@ -247,28 +261,39 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             let time = (hostClock.hostTime(ofSample: total) ?? now) + offset
             store.publish(.silent, at: time)
             observer?(.silent, time)
-            isZero = true
+            windows = .zero
         } else {
             feedStalled = false
-            isZero = processHops(
+            windows = processHops(
                 total: total, dt: dt, settings: settings, offset: offset, observer: observer
             )
         }
-        shared.withLock { $0.zeroRun = isZero ? $0.zeroRun + dt : 0 }
+        guard windows != .noHop else { return }
+        var step = interval
+        if let lastZeroRunWake {
+            step = max(now - lastZeroRunWake, 0)
+        }
+        step = min(step, Self.maxZeroRunStep)
+        lastZeroRunWake = now
+        shared.withLock { $0.zeroRun = windows == .zero ? $0.zeroRun + step : 0 }
     }
 
-    /// Все полные шаги до `total` (скрытый остров: только самый новый). Возвращает `true`, если
-    /// шагов не было или все окна из точных нулей.
+    /// Что дали окна пробуждения: нового шага нет, все из точных нулей (или поток встал), есть звук.
+    private enum Windows {
+        case noHop, zero, sound
+    }
+
+    /// Все полные шаги до `total` (скрытый остров: только самый новый).
     private func processHops(
         total: Int,
         dt: Double,
         settings: LevelSettings,
         offset: Double,
         observer: (@Sendable (WaveFrame, Double) -> Void)?
-    ) -> Bool {
+    ) -> Windows {
         let config = analyzer.config
         let hop = config.hopSize
-        guard total >= config.fftSize else { return true }
+        guard total >= config.fftSize else { return .noHop }
         var end = nextHopEnd ?? total
         if idle {
             if end < total {
@@ -311,7 +336,8 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             let shift = host - Double(lastEnd) / config.sampleRate + offset
             store.publishSchedule(tracker.schedule.shifted(by: shift))
         }
-        return processed == 0 || allZero
+        if processed == 0 { return .noHop }
+        return allZero ? .zero : .sound
     }
 
     private func applyInterval() {

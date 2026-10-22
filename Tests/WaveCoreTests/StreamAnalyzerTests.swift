@@ -79,6 +79,34 @@ struct StreamAnalyzerTests {
         }
     }
 
+    /// Остров снова виден: `resetOnsets()` начинает заново историю функций онсетов и выбор пиков
+    /// (со следящими пиками), а уровни остаются. Дальше онсеты те же, что у свежего анализатора,
+    /// уровни нет: автоуровень помнит громкое начало.
+    @Test func resetOnsetsKeepsLevels() {
+        let rate = Self.rate
+        let loud = TestSignals.clickTrack(bpm: 120, sampleRate: rate, seconds: 3).samples.map { $0 * 1.1 }
+        let quiet = TestSignals.clickTrack(bpm: 120, sampleRate: rate, seconds: 3).samples.map { $0 * 0.3 }
+        let used = StreamAnalyzer(sampleRate: rate)
+        _ = used.processSignal(loud)
+        used.resetOnsets()
+        let fresh = StreamAnalyzer(sampleRate: rate)
+        let afterReset = used.processSignal(quiet, firstSample: loud.count)
+        let fromFresh = fresh.processSignal(quiet, firstSample: loud.count)
+        #expect(afterReset.count == fromFresh.count)
+        var onsetMismatches = 0
+        var levelDifference: Float = 0
+        for (a, b) in zip(afterReset, fromFresh) {
+            if a.kickODF != b.kickODF || a.broadbandODF != b.broadbandODF
+                || a.kickOnset != b.kickOnset || a.broadbandOnset != b.broadbandOnset {
+                onsetMismatches += 1
+            }
+            levelDifference = max(levelDifference, abs(a.frame.level - b.frame.level))
+        }
+        #expect(onsetMismatches == 0)
+        #expect(fromFresh.contains { $0.kickOnset != nil })
+        #expect(levelDifference > 0.1, "уровни не должны сброситься: \(levelDifference)")
+    }
+
     @Test func noNaNOnZerosAndDenormals() {
         let analyzer = StreamAnalyzer(sampleRate: Self.rate)
         let denormal = Float(sign: .plus, exponentBitPattern: 0, significandBitPattern: 1_000)

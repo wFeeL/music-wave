@@ -140,9 +140,9 @@ struct AnalysisEngineTimingTests {
 
         let schedule = store.schedule
         #expect(!schedule.events.isEmpty)
-        if let bpm = schedule.bpm {
-            #expect(abs(bpm - 120) < 5, "темп \(bpm)")
-        }
+        #expect(schedule.locked, "уверенность \(schedule.confidence)")
+        let bpm = try #require(schedule.bpm)
+        #expect(abs(bpm - 120) < 5, "темп \(bpm)")
         for event in schedule.events {
             let stream = event.time - offset - Self.hostStart
             #expect(Self.gridDistance(stream) < 0.010, "событие \(event.id) в \(stream) с потока")
@@ -228,18 +228,38 @@ struct AnalysisEngineTimingTests {
         #expect(abs(last - expected) < 0.001, "последний кадр \(last - expected) с от ожидаемого")
     }
 
-    /// 1 с нулей наращивает `zeroRunDuration` примерно до 1 с, клик сбрасывает его в 0.
+    /// Нули наращивают `zeroRunDuration` по времени от первого полного окна (около 1 с за 1 с),
+    /// пробуждение без нового шага его не меняет, клик сбрасывает в 0.
     @Test func zeroRunGrowsOnZerosAndResetsOnClick() {
         let (engine, ring, _, _) = Self.makeEngine()
         var feeder = Feeder(ring: ring)
         feeder.signal = { _ in 0 }
         var now = Self.hostStart
+        var firstHopWake: Double?
+        var lastHopWake: Double?
         for _ in 0..<120 {
             now += 1.0 / 120
             feeder.feed(until: now)
+            let hops = engine.hopsProcessedForTesting
             engine.processPendingForTesting(now: now)
+            guard engine.hopsProcessedForTesting > hops else { continue }
+            lastHopWake = now
+            if firstHopWake == nil {
+                firstHopWake = now
+                // Первое пробуждение с окном прибавляет один период пробуждений.
+                #expect(abs(engine.zeroRunDuration - 1.0 / 120) < 1e-9, "zeroRunDuration: \(engine.zeroRunDuration)")
+            }
         }
-        #expect(abs(engine.zeroRunDuration - 1) < 0.05, "zeroRunDuration: \(engine.zeroRunDuration)")
+        // Пробуждения без нового шага не прибавляют, но следующее с шагом считает время от
+        // прошлого, которое меняло значение: сумма равна времени от первого окна.
+        let expected = (lastHopWake ?? now) - (firstHopWake ?? now) + 1.0 / 120
+        #expect(abs(engine.zeroRunDuration - expected) < 1e-6, "zeroRunDuration: \(engine.zeroRunDuration), ожидалось \(expected)")
+        #expect(engine.zeroRunDuration > 0.95)
+
+        // Новых блоков нет, поток жив (меньше 250 мс): значение не меняется.
+        let steady = engine.zeroRunDuration
+        engine.processPendingForTesting(now: now + 0.001)
+        #expect(engine.zeroRunDuration == steady)
 
         // Клик в начале следующего блока.
         let clickStart = feeder.written

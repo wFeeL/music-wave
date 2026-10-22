@@ -97,12 +97,10 @@ final class AppModel {
     /// `NotchWindowController.relayout()`.
     @ObservationIgnored var refreshPeriod = 1.0 / 60
     /// Период отрисовки R, с: медиана последних 60 интервалов кадров в пределах 1/120...1/30
-    /// (энергосбережение 30 Гц, ProMotion), до 60 кадров `refreshPeriod`.
+    /// (энергосбережение 30 Гц, ProMotion), до 60 кадров `refreshPeriod`. Медиана считается
+    /// при записи кадра в замер (`recordRender`), а не на каждом чтении.
     var renderPeriod: Double {
-        guard let median = renderPacing.medianInterval(last: Self.renderPeriodSamples), median.isFinite else {
-            return refreshPeriod
-        }
-        return min(max(median, Self.renderPeriodRange.lowerBound), Self.renderPeriodRange.upperBound)
+        measuredRenderPeriod ?? refreshPeriod
     }
     /// Когда последний раз сменился `islandState`, секунды хоста (`CACurrentMediaTime()`).
     @ObservationIgnored private(set) var islandStateChangedAt: Double = 0
@@ -159,6 +157,9 @@ final class AppModel {
     /// Шкала `TimelineView` последнего записанного кадра: SwiftUI пересчитывает сцену и между
     /// тиками, такие пересчеты в замер не идут.
     @ObservationIgnored private var lastRecordedTimeline: Double?
+    /// Медиана последних интервалов отрисовки в пределах `renderPeriodRange`; `nil`, пока их
+    /// меньше `renderPeriodSamples`.
+    @ObservationIgnored private var measuredRenderPeriod: Double?
     /// Обложка, из которой получены `artwork` и `palette` (или ждут разбора).
     @ObservationIgnored private var artworkData: Data?
     @ObservationIgnored private var artworkTask: Task<Void, Never>?
@@ -1025,6 +1026,9 @@ final class AppModel {
         lastRecordedTimeline = timelineTime
         let bucket = RenderBucket.classify(state: islandState, sinceStateChange: now - islandStateChangedAt)
         renderPacing.record(now: now, timelineTime: timelineTime, bucket: bucket, analysisSequence: store.sequence)
+        if let median = renderPacing.medianInterval(last: Self.renderPeriodSamples), median.isFinite {
+            measuredRenderPeriod = min(max(median, Self.renderPeriodRange.lowerBound), Self.renderPeriodRange.upperBound)
+        }
         guard islandState == .expanded, now.isFinite else {
             lastRenderLog = nil
             return
