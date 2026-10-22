@@ -250,6 +250,35 @@ struct BeatTrackerTests {
         #expect(abs(published.time - next - 0.012) < 1e-9)
     }
 
+    /// Захват с нуля на третьем попадании подряд (уверенность 0.58 ≥ 0.55), отпускание, когда уверенность
+    /// падает ниже 0.25.
+    @Test func locksOnTheThirdHitAndReleasesBelowAQuarter() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        var hitsAtLock: Int?
+        var confidenceAtLock = 0.0
+        hops.feed(&tracker, until: 10) { tracker in
+            if hitsAtLock == nil, tracker.locked {
+                hitsAtLock = tracker.hits
+                confidenceAtLock = tracker.confidence
+            }
+        }
+        #expect(hitsAtLock == 3)
+        #expect((0.55..<0.6).contains(confidenceAtLock), "confidence at lock \(confidenceAtLock)")
+        try #require(tracker.locked)
+        var before = tracker.confidence
+        var released: (before: Double, after: Double)?
+        var end = hops.endTime
+        while released == nil, end < 20 {
+            end += 0.05
+            hops.feedSilence(&tracker, until: end)
+            if !tracker.locked { released = (before, tracker.confidence) }
+            before = tracker.confidence
+        }
+        let release = try #require(released)
+        #expect(release.before >= 0.25 && release.after < 0.25, "\(release)")
+    }
+
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
     @Test func nonFiniteKickLevelCountsAsFloor() {
         var tracker = BeatTracker(framesPerSecond: Self.fps)

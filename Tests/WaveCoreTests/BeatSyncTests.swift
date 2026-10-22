@@ -67,10 +67,6 @@ struct BeatSyncTests {
     }
 
     /// Сдвиги вспышек от слышимых долей после захвата и конца перехода смеси (`crossfadeBeats` долей).
-    private static func lockedOffsets(_ result: SyncResult, beats: [Double], period: Double) -> (mean: Double, sd: Double)? {
-        lockedFrom(result, period: period).map { result.offsets(reference: result.audible(beats), from: $0) }
-    }
-
     private static func describe(_ result: SyncResult, f: Double?, offsets: (mean: Double, sd: Double)?) -> String {
         let lock = result.lockTime.map { String(format: "%.2f", $0) } ?? "none"
         let tempo = result.tempoBPM.map { String(format: "%.1f", $0) } ?? "none"
@@ -147,11 +143,15 @@ struct BeatSyncTests {
         #expect((-0.010...0.045).contains(offsets.mean), "\(Self.describe(result, f: f, offsets: offsets))")
     }
 
+    /// Разброс в установившемся режиме, через `settle` после захвата и перехода смеси, как в
+    /// `steadyBeatLocksOnTime`: с 1.1 захват наступает раньше, пока ФАПЧ еще сходится.
     @Test func jitterSmallerAt120Hz() async {
         var config = SyncHarness.Config()
         config.renderRate = 120
         let (scene, result) = await Self.run({ SharedScenes.steady120 }, config)
-        let offsets = Self.lockedOffsets(result, beats: scene.beats, period: 0.5)
+        let offsets = Self.lockedFrom(result, period: 0.5).map {
+            result.offsets(reference: result.audible(scene.beats), from: $0 + Self.settle)
+        }
         let f = result.fMeasure(reference: result.audible(scene.beats), tolerance: 0.05, from: Self.from)
         #expect(offsets.map { $0.sd <= 0.004 } == true, "\(Self.describe(result, f: f, offsets: offsets))")
     }
