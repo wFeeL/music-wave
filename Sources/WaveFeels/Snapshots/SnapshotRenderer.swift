@@ -18,12 +18,15 @@ enum SnapshotError: Error, CustomStringConvertible {
 }
 
 /// Снимки острова для CI: PNG в масштабе 2 на фоне строки меню macOS. После них снимки окна
-/// настроек в размере настоящего окна: светлый, темный и самый высокий (ручная задержка и
-/// подсказка о доступе к звуку), на котором видно, если содержимое не помещается.
+/// настроек в размере настоящего окна: вкладка «Основные» светлая, темная и самая высокая (ручная
+/// задержка и подсказка о доступе к звуку), на которой видно, если содержимое не помещается, и
+/// вкладка «Вид» с предпросмотром острова, светлая и темная. Все, что зависит от машины (список
+/// источников, запуск при входе, экран острова), у снимков настроек задано.
 ///
 /// Кадры анализа не задаются руками: `demo.wav` прогоняется по шагам через `StreamAnalyzer` и
-/// `BeatTracker` вне реального времени до нужного момента, с шагом 1/60 с вместе с ним двигаются
-/// фазы волн, свечение доли и «вздох».
+/// `BeatTracker` вне реального времени до нужного момента (`DemoTimeline`), с шагом 1/60 с вместе
+/// с ним двигаются фазы волн, свечение доли и «вздох». Тот же прогон во всю длину демо получает
+/// предпросмотр вкладки «Вид» (`PreviewPlayer.seed`), поэтому и на ее снимке идут волны.
 /// Тишина получается так же: после 6 с звук обнуляется, и волны затихают 2 с.
 /// Снимки 14-19 показывают вид волн из вкладки «Вид»: широкие крылья, готовые палитры, свой
 /// цвет, полную заливку (обычную и с толщиной и размахом), одну и шесть волн, свечение радиусом 3×.
@@ -122,11 +125,13 @@ enum SnapshotRenderer {
         return NotchGeometry.layout(for: [screen])!
     }
 
-    /// Снимки окна настроек: имя, темное ли оформление и самое ли высокое состояние.
-    static let settingsScenes: [(name: String, dark: Bool, tall: Bool)] = [
-        ("13-settings", false, false),
-        ("13-settings-dark", true, false),
-        ("13-settings-tall", false, true),
+    /// Снимки окна настроек: имя, темное ли оформление, самое ли высокое состояние и вкладка.
+    static let settingsScenes: [(name: String, dark: Bool, tall: Bool, tab: SettingsView.Tab)] = [
+        ("13-settings", false, false, .general),
+        ("13-settings-dark", true, false, .general),
+        ("13-settings-tall", false, true, .general),
+        ("13-settings-appearance", false, false, .appearance),
+        ("13-settings-appearance-dark", true, false, .appearance),
     ]
 
     /// Внешний монитор без выреза: капсула под строкой меню.
@@ -298,9 +303,12 @@ enum SnapshotRenderer {
             await Task.yield()
         }
         apply(.standard, to: model.settings)
+        PreviewPlayer.seed(moments.preview)
         for scene in settingsScenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
-            try renderSettings(name: scene.name, dark: scene.dark, tall: scene.tall, model: model, to: url)
+            try renderSettings(
+                name: scene.name, dark: scene.dark, tall: scene.tall, tab: scene.tab, model: model, to: url
+            )
             written.append(url)
             await Task.yield()
         }
@@ -395,12 +403,14 @@ extension SnapshotRenderer {
     /// Окно настроек через `NSHostingView` в невидимом окне: `ImageRenderer` не рисует
     /// элементы `Form`, за которыми стоят AppKit-контролы. Окно не выводится на экран,
     /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана. Размер тот же, что у окна
-    /// настроек. `tall`: ручная задержка 120 мс и подсказка о доступе к звуку.
+    /// настроек. `tall`: ручная задержка 120 мс и подсказка о доступе к звуку. Окно считается
+    /// закрытым, поэтому предпросмотр вкладки «Вид» рисует один кадр и стоит.
     @MainActor
     fileprivate static func renderSettings(
         name: String,
         dark: Bool,
         tall: Bool,
+        tab: SettingsView.Tab,
         model: AppModel,
         to url: URL
     ) throws {
@@ -419,7 +429,10 @@ extension SnapshotRenderer {
         }
         let size = SettingsView.windowSize
         let frame = NSRect(origin: .zero, size: size)
-        let content = SettingsView(model: model, presence: WindowPresence(), catalog: settingsCatalog) {}
+        let content = SettingsView(
+            model: model, presence: WindowPresence(), catalog: settingsCatalog,
+            login: (status: .notRegistered, inApplications: false), screen: notchLayout, tab: tab
+        ) {}
             .frame(width: size.width, height: size.height)
             .background(Color(nsColor: .windowBackgroundColor))
         let hosting = NSHostingView(rootView: content)
@@ -490,96 +503,27 @@ private struct SnapshotScene {
 }
 
 /// Моменты демо для снимков: удар и спокойный миг громкой музыки, удар в конце и тишина после
-/// обнуления звука. Считаются вне главного актора.
+/// обнуления звука, плюс прогон во всю длину для предпросмотра вкладки «Вид» (тот же, что
+/// `DemoTimeline.load`). Считаются вне главного актора.
 nonisolated private struct DemoMoments: Sendable {
     let loudBeat: DemoMoment
     let loudCalm: DemoMoment
     let groove: DemoMoment
     let silent: DemoMoment
+    let preview: DemoTimeline
 
     init(demo: URL) throws {
         let audio = try DemoAudioSource.loadMono(demo)
-        let music = DemoRun(samples: audio.samples, sampleRate: audio.sampleRate, duration: 12.7, mutedFrom: nil)
-        let fading = DemoRun(samples: audio.samples, sampleRate: audio.sampleRate, duration: 8, mutedFrom: 6)
+        let music = DemoTimeline(
+            samples: audio.samples, sampleRate: audio.sampleRate,
+            duration: Double(audio.samples.count) / audio.sampleRate, mutedFrom: nil
+        )
+        let fading = DemoTimeline(samples: audio.samples, sampleRate: audio.sampleRate, duration: 8, mutedFrom: 6)
         loudBeat = music.strongestBeat(in: 8.0...8.7)
         loudCalm = music.calmest(in: 8.25...8.5)
         groove = music.strongestBeat(in: 12.0...12.7)
         silent = fading.last
-    }
-}
-
-/// Состояние острова на момент `time` прогона демо.
-nonisolated private struct DemoMoment: Sendable {
-    let time: Double
-    let frame: WaveFrame
-    let motion: WaveMotion
-    /// Свечение доли 0...1.
-    let glow: Float
-    /// «Вздох» 0...1.
-    let pulse: Float
-}
-
-/// Прогон демо по шагам через `StreamAnalyzer` и `BeatTracker` вне реального времени, момент
-/// каждые 1/60 с: последний кадр анализа, свечение доли по расписанию трекера на этот момент
-/// (ось потока, без задержек вывода и показа) и «вздох» как у острова: при захвате ритма пружина
-/// со свечением на 50 мс раньше, без захвата само свечение. После `mutedFrom` секунд звук обнуляется.
-nonisolated private struct DemoRun {
-    static let frameStep = 1.0 / 60
-
-    let moments: [DemoMoment]
-
-    init(samples: [Float], sampleRate: Double, duration: Double, mutedFrom: Double?) {
-        let analyzer = StreamAnalyzer(sampleRate: sampleRate)
-        var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
-        let size = analyzer.config.fftSize
-        let hop = analyzer.config.hopSize
-        let mutedIndex = mutedFrom.map { Int($0 * sampleRate) } ?? Int.max
-        var motion = WaveMotion()
-        var pulse = BeatPulse()
-        var frame = WaveFrame.silent
-        var window = [Float](repeating: 0, count: size)
-        var nextEnd = size
-        var moments: [DemoMoment] = []
-        let count = Int((duration / Self.frameStep).rounded())
-        moments.reserveCapacity(count)
-
-        for step in 1...max(count, 1) {
-            let time = Double(step) * Self.frameStep
-            let end = Int(time * sampleRate)
-            while nextEnd <= end {
-                for offset in 0..<size {
-                    let index = nextEnd - size + offset
-                    window[offset] = index >= 0 && index < samples.count && index < mutedIndex ? samples[index] : 0
-                }
-                let result = window.withUnsafeBufferPointer {
-                    analyzer.processHop(window: $0, endSample: nextEnd, settings: LevelSettings())
-                }
-                tracker.process(result)
-                frame = result.frame
-                nextEnd += hop
-            }
-            let schedule = tracker.schedule
-            let glow = BeatGlow.value(at: time, schedule: schedule, refreshPeriod: Self.frameStep)
-            let early = BeatGlow.value(at: time + AppModel.breathLead, schedule: schedule, refreshPeriod: Self.frameStep)
-            let spring = pulse.step(beat: early, dt: Self.frameStep)
-            motion.advance(layers: frame.layers, dt: Self.frameStep)
-            moments.append(DemoMoment(
-                time: time, frame: frame, motion: motion, glow: glow, pulse: schedule.locked ? spring : glow
-            ))
-        }
-        self.moments = moments
-    }
-
-    var last: DemoMoment { moments[moments.count - 1] }
-
-    /// Пик свечения доли в промежутке: вспышка на сильной доле.
-    func strongestBeat(in range: ClosedRange<Double>) -> DemoMoment {
-        moments.filter { range.contains($0.time) }.max { $0.glow < $1.glow } ?? last
-    }
-
-    /// Самое слабое свечение в промежутке: музыка играет, вспышки нет.
-    func calmest(in range: ClosedRange<Double>) -> DemoMoment {
-        moments.filter { range.contains($0.time) }.min { $0.glow < $1.glow } ?? last
+        preview = music
     }
 }
 
@@ -590,8 +534,8 @@ enum SnapshotBackdropAppearance {
 }
 
 /// Экран вокруг острова: обои, прозрачная строка меню macOS 26 с пунктами и часами, аппаратный
-/// вырез. Остров стоит на своем месте из `NotchLayout`.
-private struct SnapshotBackdrop<Island: View>: View {
+/// вырез. Остров стоит на своем месте из `NotchLayout`. Его же рисует предпросмотр вкладки «Вид».
+struct SnapshotBackdrop<Island: View>: View {
     let layout: NotchLayout
     let screenSize: CGSize
     let menuBarHeight: CGFloat

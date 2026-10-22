@@ -273,7 +273,8 @@ final class NotchWindowController {
 
     // MARK: - Экраны
 
-    private static func descriptor(for screen: NSScreen) -> ScreenDescriptor {
+    /// Описание экрана для `NotchGeometry`; им же вкладка «Вид» узнает предел крыла.
+    static func descriptor(for screen: NSScreen) -> ScreenDescriptor {
         let key = NSDeviceDescriptionKey("NSScreenNumber")
         let id: CGDirectDisplayID = (screen.deviceDescription[key] as? NSNumber)?.uint32Value ?? 0
         return ScreenDescriptor(

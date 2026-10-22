@@ -5,15 +5,23 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WaveCore
 
-/// Окно настроек: `Form` в стиле Системных настроек, изменения применяются сразу.
+/// Окно настроек: две вкладки, «Основные» и «Вид» (`AppearanceSettingsView`), каждая `Form` в
+/// стиле Системных настроек, изменения применяются сразу. Живой предпросмотр острова во вкладке
+/// «Вид» идет, только пока окно открыто, видно и выбрана она (`PreviewPlayer.isActive`).
 ///
 /// Пока окно открыто и не свернуто, задержка «Авто», статус запуска при входе и доступ к звуку
 /// обновляются раз в 3 с. Список источников (поиск Яндекс Музыки, браузеры, приложения со звуком)
 /// дороже: он обновляется при открытии окна, при запуске и закрытии приложений и не чаще раза
 /// в 10 с.
 struct SettingsView: View {
-    /// Размер окна: все разделы в самом высоком состоянии (ручная задержка, подсказка о доступе
-    /// к звуку и кнопка настроек конфиденциальности под ней) помещаются без прокрутки.
+    /// Вкладки окна.
+    enum Tab: Hashable, CaseIterable {
+        case general, appearance
+    }
+
+    /// Размер окна: «Основные» в самом высоком состоянии (ручная задержка, подсказка о доступе
+    /// к звуку и кнопка настроек конфиденциальности под ней) помещаются без прокрутки. На
+    /// маленьком экране окно ужимается до его видимой области (`WindowsController`).
     static let windowSize = CGSize(width: 520, height: 880)
     static let minSize = CGSize(width: 480, height: 420)
     static let statusInterval: Duration = .seconds(3)
@@ -26,7 +34,12 @@ struct SettingsView: View {
     let model: AppModel
     let presence: WindowPresence
     let openDiagnostics: @MainActor () -> Void
+    /// Приложение лежит в `/Applications` (у снимков задано).
+    private let inApplications: Bool
+    /// Снимки: экран острова для предела крыла задан.
+    private let fixedScreen: NotchLayout?
 
+    @State private var tab: Tab
     @State private var catalog: SourceCatalog
     @State private var icons: AppIconCache
     @State private var autoLatency: Int
@@ -38,23 +51,72 @@ struct SettingsView: View {
     /// Меняется, чтобы меню источника вернулось к выбранному пункту после «Выбрать приложение…».
     @State private var pickerID = 0
 
-    /// `catalog`: готовый список источников (снимки); без него список собирается сейчас.
+    /// Снимки задают все, что зависит от машины: `catalog` (готовый список источников; без него
+    /// список собирается сейчас), `login` (статус запуска при входе и лежит ли приложение в
+    /// `/Applications`), `screen` (экран острова) и вкладку `tab`.
     init(
         model: AppModel,
         presence: WindowPresence,
         catalog: SourceCatalog? = nil,
+        login: (status: SMAppService.Status, inApplications: Bool)? = nil,
+        screen: NotchLayout? = nil,
+        tab: Tab = .general,
         openDiagnostics: @escaping @MainActor () -> Void
     ) {
         self.model = model
         self.presence = presence
         self.openDiagnostics = openDiagnostics
+        inApplications = login?.inApplications ?? LaunchAtLogin.isInApplications
+        fixedScreen = screen
+        _tab = State(initialValue: tab)
         _catalog = State(initialValue: catalog ?? SourceCatalog.current(model: model))
         _icons = State(initialValue: AppIconCache())
         _autoLatency = State(initialValue: Self.autoLatencyMilliseconds(model))
-        _loginStatus = State(initialValue: LaunchAtLogin.status)
+        _loginStatus = State(initialValue: login?.status ?? LaunchAtLogin.status)
     }
 
     var body: some View {
+        TabView(selection: $tab) {
+            SwiftUI.Tab(value: Tab.general) {
+                generalForm
+            } label: {
+                Text("Основные")
+            }
+            SwiftUI.Tab(value: Tab.appearance) {
+                AppearanceSettingsView(
+                    model: model,
+                    active: PreviewPlayer.isActive(
+                        windowOpen: presence.isOpen, windowVisible: presence.isVisible, tab: tab
+                    ),
+                    fixedScreen: fixedScreen
+                )
+            } label: {
+                Text("Вид")
+            }
+        }
+        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
+        .task(id: presence.isOpen) {
+            guard presence.isOpen else { return }
+            var step = 0
+            while !Task.isCancelled {
+                if step % Self.catalogEvery == 0 {
+                    refreshCatalog()
+                }
+                refreshStatus()
+                step += 1
+                try? await Task.sleep(for: Self.statusInterval)
+            }
+        }
+        .onReceive(workspaceCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            scheduleCatalogRefresh()
+        }
+        .onReceive(workspaceCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
+            scheduleCatalogRefresh()
+        }
+    }
+
+    /// «Основные»: звук, волны, остров, система.
+    private var generalForm: some View {
         Form {
             Section("Звук") {
                 sourcePicker
@@ -80,25 +142,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
-        .task(id: presence.isOpen) {
-            guard presence.isOpen else { return }
-            var step = 0
-            while !Task.isCancelled {
-                if step % Self.catalogEvery == 0 {
-                    refreshCatalog()
-                }
-                refreshStatus()
-                step += 1
-                try? await Task.sleep(for: Self.statusInterval)
-            }
-        }
-        .onReceive(workspaceCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
-            scheduleCatalogRefresh()
-        }
-        .onReceive(workspaceCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
-            scheduleCatalogRefresh()
-        }
     }
 
     /// Приложения часто запускаются и закрываются пачкой: список обновляется один раз, через
@@ -226,7 +269,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var wavesRows: some View {
         let settings = model.settings
-        sliderRow(
+        SettingsSliderRow(
             "Чувствительность",
             value: Binding(
                 get: { Double(settings.sensitivity) },
@@ -259,7 +302,7 @@ struct SettingsView: View {
         }
         .pickerStyle(.segmented)
         if case .manual(let milliseconds) = settings.latencyMode {
-            sliderRow(
+            SettingsSliderRow(
                 "Задержка вручную",
                 value: Binding(
                     get: { Double(milliseconds) },
@@ -269,7 +312,7 @@ struct SettingsView: View {
                 text: "\(milliseconds) мс"
             )
         }
-        sliderRow(
+        SettingsSliderRow(
             "Сдвиг синхронизации",
             subtitle: "Меньше: свечение раньше звука, больше: позже",
             value: Binding(
@@ -303,20 +346,8 @@ struct SettingsView: View {
     @ViewBuilder
     private var islandRows: some View {
         let settings = model.settings
-        sliderRow(
-            "Ширина крыльев",
-            value: Binding(get: { settings.wingWidth }, set: { settings.wingWidth = $0.rounded() }),
-            in: AppSettings.Limits.wingWidth,
-            text: "\(Int(settings.wingWidth.rounded())) pt"
-        )
-        sliderRow(
-            "Яркость свечения",
-            value: Binding(get: { settings.glowIntensity }, set: { settings.glowIntensity = ($0 * 100).rounded() / 100 }),
-            in: AppSettings.Limits.glowIntensity,
-            text: "\(Int((settings.glowIntensity * 100).rounded())) %"
-        )
         Toggle("Вздох на битах", isOn: Binding(get: { settings.beatPulse }, set: { settings.beatPulse = $0 }))
-        sliderRow(
+        SettingsSliderRow(
             "Скрывать через",
             value: Binding(get: { settings.hideDelay }, set: { settings.hideDelay = $0.rounded() }),
             in: AppSettings.Limits.hideDelay,
@@ -339,7 +370,7 @@ struct SettingsView: View {
             }
         }
         // Вне /Applications включить нельзя, а уже включенное можно выключить.
-        .disabled(!LaunchAtLogin.isInApplications && !LaunchAtLogin.isOn(loginStatus))
+        .disabled(!inApplications && !LaunchAtLogin.isOn(loginStatus))
         HStack(spacing: 8) {
             if copied {
                 Text("Скопировано")
@@ -373,37 +404,11 @@ struct SettingsView: View {
 
     private var loginHint: String? {
         if let loginMessage { return loginMessage }
-        if !LaunchAtLogin.isInApplications { return LaunchAtLogin.moveHint }
+        if !inApplications { return LaunchAtLogin.moveHint }
         return loginStatus == .requiresApproval ? LaunchAtLogin.approvalHint : nil
     }
 
     // MARK: - Строки
-
-    /// Подпись (и пояснение под ней) слева, ползунок и его значение справа.
-    private func sliderRow(
-        _ title: String,
-        subtitle: String? = nil,
-        value: Binding<Double>,
-        in range: ClosedRange<Double>,
-        text: String
-    ) -> some View {
-        LabeledContent {
-            HStack(spacing: 10) {
-                Slider(value: value, in: range)
-                    .labelsHidden()
-                    .frame(width: Self.sliderWidth)
-                Text(text)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: Self.valueWidth, alignment: .trailing)
-            }
-        } label: {
-            Text(title)
-            if let subtitle {
-                Text(subtitle)
-            }
-        }
-    }
 
     /// «1.0×», «0.25×», «2.35×»: одна цифра после точки, если второй нет.
     static func multiplier(_ value: Float) -> String {
@@ -433,6 +438,42 @@ struct SettingsView: View {
             loginMessage = nil
         }
         model.checkAudioPermission()
+    }
+}
+
+/// Строка с ползунком: подпись (и пояснение под ней) слева, ползунок и его значение справа.
+struct SettingsSliderRow: View {
+    let title: String
+    let subtitle: String?
+    let value: Binding<Double>
+    let range: ClosedRange<Double>
+    let text: String
+
+    init(_ title: String, subtitle: String? = nil, value: Binding<Double>, in range: ClosedRange<Double>, text: String) {
+        self.title = title
+        self.subtitle = subtitle
+        self.value = value
+        self.range = range
+        self.text = text
+    }
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 10) {
+                Slider(value: value, in: range)
+                    .labelsHidden()
+                    .frame(width: SettingsView.sliderWidth)
+                Text(text)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: SettingsView.valueWidth, alignment: .trailing)
+            }
+        } label: {
+            Text(title)
+            if let subtitle {
+                Text(subtitle)
+            }
+        }
     }
 }
 

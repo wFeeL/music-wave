@@ -10,11 +10,22 @@ struct SnapshotRendererTests {
         "01-silent", "02-loud-beat", "03-loud-no-beat", "04-expanded", "05-expanded-paused",
         "06-long-title", "07-palette-warm", "08-palette-cold", "09-pill-external",
         "10-expanded-no-artwork", "11-expanded-no-adapter", "12-pill-expanded",
-        "13-settings", "13-settings-dark", "13-settings-tall",
+        "13-settings", "13-settings-dark", "13-settings-tall", "13-settings-appearance", "13-settings-appearance-dark",
         "14-wings-wide", "15-preset-aurora", "15-preset-sunset", "15-preset-ocean", "15-preset-neon",
         "15-preset-fire", "15-preset-mono", "16-custom-color", "17-fill-thick-tall", "17-fill-normal", "18-one-line",
         "18-six-lines", "19-glow-radius-3x",
     ]
+
+    /// Вкладка «Вид» снимается светлой и темной, прежние снимки «Основных» на месте.
+    @Test func settingsScenesIncludeAppearanceTab() {
+        let scenes = SnapshotRenderer.settingsScenes
+        let names = scenes.map(\.name)
+        #expect(names.contains("13-settings-appearance"))
+        #expect(names.contains("13-settings-appearance-dark"))
+        #expect(scenes.filter { $0.tab == .appearance }.map(\.name) == ["13-settings-appearance", "13-settings-appearance-dark"])
+        #expect(scenes.filter { $0.tab == .general }.map(\.name) == ["13-settings", "13-settings-dark", "13-settings-tall"])
+        #expect(scenes.first { $0.name == "13-settings-appearance-dark" }?.dark == true)
+    }
 
     @Test func rendersAllSnapshotsWithVisibleWaves() async throws {
         _ = NSApplication.shared

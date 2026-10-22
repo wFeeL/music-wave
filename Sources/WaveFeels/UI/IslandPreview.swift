@@ -1,0 +1,234 @@
+import Observation
+import SwiftUI
+import WaveCore
+
+/// Демо для предпросмотра, одно на запуск: читается один раз, все `PreviewPlayer` берут его
+/// отсюда. Снимки кладут сюда готовое (`PreviewPlayer.seed`).
+@MainActor
+final class PreviewTimelineCache {
+    static let shared = PreviewTimelineCache()
+
+    var timeline: DemoTimeline?
+    /// Идущее чтение: второй игрок ждет его, а не читает файл заново.
+    private var loading: Task<DemoTimeline?, Never>?
+
+    func load(from url: URL?) async -> DemoTimeline? {
+        if let timeline { return timeline }
+        guard let url else { return nil }
+        let task = loading ?? Task { try? await DemoTimeline.load(url) }
+        loading = task
+        let loaded = await task.value
+        if timeline == nil {
+            timeline = loaded
+        }
+        if timeline == nil {
+            // Не прочиталось: следующий показ вкладки попробует снова.
+            loading = nil
+        }
+        return timeline
+    }
+}
+
+/// Живой предпросмотр острова во вкладке «Вид»: демо по кругу, вне реального времени.
+///
+/// Свои часы, пружины уровней и фазы волн, как у острова (`AppModel.islandVisuals`), но
+/// ничего из модели острова не трогает: кадры идут только из `DemoTimeline`. Играет отрезок
+/// после `loopStart`, где ритм уже захвачен: он длится целое число тактов, и шов круга
+/// приходится на ту же долю того же аккорда.
+@MainActor
+@Observable
+final class PreviewPlayer {
+    /// С этой секунды демо ритм захвачен (захват не дольше 8 с), дальше 4 такта по 2 с до конца.
+    static let loopStart = 12.0
+
+    static var demoURL: URL? {
+        Bundle.main.url(forResource: "demo", withExtension: "wav", subdirectory: "Demo")
+    }
+
+    private(set) var timeline: DemoTimeline?
+
+    private let cache: PreviewTimelineCache
+    /// Время первого кадра и прошлого кадра, с.
+    @ObservationIgnored private var startTime: Double?
+    @ObservationIgnored private var lastTime: Double?
+    @ObservationIgnored private var motion = WaveMotion()
+    @ObservationIgnored private var layerSprings = [LevelSpring](repeating: LevelSpring(), count: WaveLayer.allCases.count)
+    @ObservationIgnored private var levelSpring = LevelSpring()
+
+    init(cache: PreviewTimelineCache = .shared) {
+        self.cache = cache
+        timeline = cache.timeline
+    }
+
+    /// Снимки: готовое демо вместо чтения файла, чтобы на снимке вкладки «Вид» шли волны.
+    static func seed(_ timeline: DemoTimeline) {
+        PreviewTimelineCache.shared.timeline = timeline
+    }
+
+    /// Предпросмотр идет только в открытом, видимом окне на вкладке «Вид». Иначе
+    /// `TimelineView` стоит и не тратит процессор.
+    static func isActive(windowOpen: Bool, windowVisible: Bool, tab: SettingsView.Tab) -> Bool {
+        windowOpen && windowVisible && tab == .appearance
+    }
+
+    /// Демо из `url` (по умолчанию из ресурсов приложения), если его еще нет.
+    func load(from url: URL? = PreviewPlayer.demoURL) async {
+        guard timeline == nil else { return }
+        let loaded = await cache.load(from: url)
+        if timeline == nil, let loaded {
+            timeline = loaded
+        }
+    }
+
+    /// Кадр предпросмотра на `now` секунд. Первый кадр встает на `loopStart` с пружинами на его
+    /// уровнях; дальше шаг не длиннее `AppModel.maxVisualStep`. Без демо: тихий остров.
+    /// «Уменьшение движения»: ни свечения, ни «вздоха», волны вдвое медленнее.
+    func visuals(now: Double, palette: [PaletteColor], reduceMotion: Bool) -> IslandVisuals {
+        guard let timeline, now.isFinite else {
+            return IslandVisuals(
+                frame: .silent, sampled: .silent, motion: motion, palette: palette, glow: 0, pulse: 0, time: 0
+            )
+        }
+        let start = startTime ?? now
+        startTime = start
+        // Демо короче `loopStart` (снимки могли положить свое) играет по кругу целиком.
+        let loopStart = timeline.duration > Self.loopStart + DemoTimeline.step ? Self.loopStart : 0
+        let loop = max(timeline.duration - loopStart, DemoTimeline.step)
+        let moment = timeline.moment(at: loopStart + (now - start).truncatingRemainder(dividingBy: loop))
+        let sampled = moment.frame
+
+        if let lastTime {
+            let dt = min(max(now - lastTime, 0), AppModel.maxVisualStep)
+            for index in layerSprings.indices {
+                layerSprings[index].step(toward: index < sampled.layers.count ? sampled.layers[index] : 0, dt: dt)
+            }
+            levelSpring.step(toward: sampled.level, dt: dt)
+            motion.advance(layers: layerSprings.map(\.value), dt: reduceMotion ? dt / 2 : dt)
+        } else {
+            for index in layerSprings.indices {
+                layerSprings[index].reset(to: index < sampled.layers.count ? sampled.layers[index] : 0)
+            }
+            levelSpring.reset(to: sampled.level)
+            motion = moment.motion
+        }
+        lastTime = now
+
+        let glow = reduceMotion ? 0 : moment.glow
+        var frame = sampled
+        frame.layers = BeatGlow.accented(layerSprings.map(\.value), glow: glow)
+        frame.level = levelSpring.value
+        return IslandVisuals(
+            frame: frame, sampled: sampled, motion: motion, palette: palette,
+            glow: glow, pulse: reduceMotion ? 0 : moment.pulse, time: now
+        )
+    }
+}
+
+/// Свернутый остров на фоне строки меню, как на снимках (`SnapshotBackdrop`): условный вырез
+/// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн, яркость
+/// свечения и «вздох» из настроек, крыло не шире, чем позволит экран острова (`wingLimit`).
+/// Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`. Пока
+/// предпросмотр не активен (`PreviewPlayer.isActive`), `TimelineView` стоит.
+struct IslandPreview: View {
+    static let stripSize = CGSize(width: 640, height: 150)
+    static let notchSize = SnapshotRenderer.notchSize
+    static let cornerRadius: CGFloat = 8
+
+    let model: AppModel
+    let player: PreviewPlayer
+    let active: Bool
+    /// Самое широкое крыло на экране острова; `nil`: экран неизвестен.
+    let wingLimit: CGFloat?
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Полоса с условным вырезом посередине, крыло и запас под свечение по `appearance`.
+    static func layout(appearance: WaveAppearance, wingLimit: CGFloat?) -> NotchLayout {
+        let notch = CGRect(
+            x: (stripSize.width - notchSize.width) / 2, y: stripSize.height - notchSize.height,
+            width: notchSize.width, height: notchSize.height
+        )
+        let free = notch.minX - NotchGeometry.wingAuxMargin
+        return NotchLayout(
+            screenID: 0, screenFrame: CGRect(origin: .zero, size: stripSize), hasNotch: true, notch: notch,
+            wingLimit: min(free, wingLimit ?? NotchGeometry.maxWingWidth, NotchGeometry.maxWingWidth),
+            wingWidth: CGFloat(appearance.wingWidth), glowRadius: appearance.glowRadius
+        )
+    }
+
+    var body: some View {
+        // Настройки читаются здесь, а не на каждом кадре: тело пересчитывается при их смене.
+        let settings = model.settings
+        let appearance = settings.appearance
+        let palette = appearance.palette(artwork: model.palette)
+        let glow = reduceMotion ? 0 : settings.glowIntensity
+        let breathes = settings.beatPulse && !reduceMotion
+        let layout = Self.layout(appearance: appearance, wingLimit: wingLimit)
+        let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
+        let size = Self.stripSize
+
+        Color.clear
+            .aspectRatio(size.width / size.height, contentMode: .fit)
+            .overlay(alignment: .topLeading) {
+                GeometryReader { proxy in
+                    SnapshotBackdrop(
+                        layout: layout, screenSize: size, menuBarHeight: Self.notchSize.height,
+                        appearance: colorScheme == .dark ? .dark : .light
+                    ) {
+                        TimelineView(.animation(paused: !active)) { context in
+                            let visuals = player.visuals(
+                                now: context.date.timeIntervalSinceReferenceDate, palette: palette,
+                                reduceMotion: reduceMotion
+                            )
+                            PreviewScene(
+                                visuals: visuals, geometry: geometry, glow: glow, appearance: appearance,
+                                scale: breathes ? 1 + IslandView.breathDepth * CGFloat(visuals.pulse) : 1
+                            )
+                        }
+                    }
+                    .scaleEffect(proxy.size.width / size.width, anchor: .topLeading)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityLabel("Предпросмотр острова")
+            .task(id: active) {
+                guard active else { return }
+                await player.load()
+            }
+    }
+}
+
+/// Свернутый остров на один кадр: свечение под ним, тело и волны крыльев, как в `IslandView`.
+private struct PreviewScene: View {
+    let visuals: IslandVisuals
+    let geometry: IslandGeometry
+    let glow: Double
+    let appearance: WaveAppearance
+    let scale: CGFloat
+
+    var body: some View {
+        let state = IslandState.collapsed
+        let anchor = geometry.anchor
+        ZStack(alignment: .topLeading) {
+            if BeatGlowView.isVisible(glow: visuals.glow, intensity: glow) {
+                BeatGlowView(
+                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, intensity: glow,
+                    radius: appearance.glowRadius, color: visuals.palette.first ?? PaletteExtractor.fallback[0]
+                )
+            }
+            ZStack(alignment: .topLeading) {
+                IslandBodyView(geometry: geometry, state: state)
+                    .equatable()
+                IslandWavesView(
+                    visuals: visuals, geometry: geometry, state: state, layers: (wing: true, panel: false),
+                    glow: glow, appearance: appearance, paused: false
+                )
+            }
+            .scaleEffect(scale, anchor: UnitPoint(x: anchor.x / geometry.size.width, y: anchor.y / geometry.size.height))
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+    }
+}
