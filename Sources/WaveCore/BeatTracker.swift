@@ -71,6 +71,10 @@ public struct BeatTracker: Sendable {
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
         public var gateFallNoTempoDB: Float
+        /// На столько секунд позже фазы ФАПЧ публикуются предсказанные доли. Широкополосные онсеты, за
+        /// которыми идет ФАПЧ, на GTZAN лежат в среднем на 12 мс раньше аннотированных долей, и
+        /// захваченные вспышки опережали долю на 28 мс вместо задуманных `BeatGlow.lead` (15 мс).
+        public var beatDelay: Double
 
         public init(
             alpha: Double = 0.25,
@@ -88,7 +92,8 @@ public struct BeatTracker: Sendable {
             onsetFloor: Float = 0.4,
             crossfadeBeats: Double = 2.0,
             gateFallPerBeatDB: Float = 14,
-            gateFallNoTempoDB: Float = 6
+            gateFallNoTempoDB: Float = 6,
+            beatDelay: Double = 0.012
         ) {
             self.alpha = alpha
             self.beta = beta
@@ -106,6 +111,7 @@ public struct BeatTracker: Sendable {
             self.crossfadeBeats = crossfadeBeats
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
+            self.beatDelay = beatDelay
         }
     }
 
@@ -199,11 +205,15 @@ public struct BeatTracker: Sendable {
     }
 
     /// Расписание в секундах потока: до 8 прошедших событий и две следующие предсказанные доли.
+    /// Предсказанные доли сдвинуты на `beatDelay` от фазы ФАПЧ.
     public var schedule: BeatSchedule {
         var events = past
         if let nextBeat, let period {
             events.append(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
             events.append(GlowEvent(id: beatCounter + 1, time: nextBeat + period, amplitude: predictedAmplitude, predicted: true))
+        }
+        for index in events.indices where events[index].predicted {
+            events[index].time += parameters.beatDelay
         }
         events.sort { $0.time < $1.time }
         return BeatSchedule(
