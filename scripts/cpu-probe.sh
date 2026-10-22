@@ -3,18 +3,21 @@
 #
 # Два прогона, каждый со своим процессом приложения:
 #   play:    --demo Demo/demo.wav --fake-notch --exit-after <секунды+10>; среднее выше 15 % одного
-#            ядра считается провалом. Остров обязан появиться (строка «остров: скрыт -> свернут»
-#            в логе приложения), иначе замер ничего не говорит и тоже считается провалом.
+#            ядра считается провалом. Остров обязан появиться (строка «остров: скрыт -> ...» в логе
+#            приложения), иначе замер ничего не говорит и тоже считается провалом.
 #   silence: --demo Demo/silence.wav --fake-notch --no-capture --exit-after <секунды+10>; среднее
-#            должно быть меньше 1 %. Остров обязан остаться скрытым: в тишине анализ идет с частотой
-#            15 Гц вместо 60 и ничего не рисуется, иначе замер не про простой.
+#            должно быть меньше 1 %. Остров обязан остаться скрытым (ни одного перехода из «скрыт»):
+#            в тишине анализ идет с частотой 15 Гц вместо 60 и ничего не рисуется, иначе замер не про
+#            простой.
 # Демо никогда не создает tap, поэтому захват звука в CI не запускается.
 #
 # CPU считается как прирост накопленного процессорного времени (`ps -o time=`) за окно в
 # <секунды> (по умолчанию 30) после прогрева 5 с, деленный на прошедшее время. `%cpu` из `ps` не
 # годится: это затухающее среднее. Внутри окна раз в секунду пишется загрузка за эту секунду и RSS
-# (`ps -o rss=`). В середине окна прогона play `sample <pid> 3 -mayDie` снимает стеки всех потоков,
-# в cpu-sample.txt идут итоги по потокам и самые частые функции на вершине стека. Фоновый сторож убивает приложение через <секунды+20> (в macOS нет timeout).
+# (`ps -o rss=`). В середине окна каждого прогона `sample <pid> 3` снимает стеки всех потоков: итоги
+# по потокам и самые частые функции на вершине стека идут в cpu-sample.txt (play) и
+# cpu-sample-silence.txt, полный вывод в cpu-sample.raw.txt и cpu-sample-silence.raw.txt. Фоновый
+# сторож убивает приложение вместе с потомками через <секунды+20> (в macOS нет timeout).
 #
 # Итог в $OUT/cpu.txt (по умолчанию ci-out/cpu.txt), он же печатается в stdout. Код 0, если оба
 # прогона в пределах, 1 при провале, 2 при ошибке вызова. Рассчитан на bash 3.2 и BSD-утилиты.
@@ -40,7 +43,6 @@ cd "$(dirname "$0")/.." || exit 2
 OUT=${OUT:-$PWD/ci-out}
 mkdir -p "$OUT"
 REPORT="$OUT/cpu.txt"
-SAMPLE_REPORT="$OUT/cpu-sample.txt"
 BIN="$APP/Contents/MacOS/WaveFeels"
 DEMO_DIR="$APP/Contents/Resources/Demo"
 APP_LOG="$HOME/Library/Logs/WaveFeels/wavefeels.log"
@@ -116,13 +118,17 @@ log_lines() {
 }
 
 watchdog() { # pid, лимит в секундах
-    local deadline=$((SECONDS + $2))
+    local deadline=$((SECONDS + $2)) tree
     while kill -0 "$1" 2>/dev/null; do
         if [[ $SECONDS -ge $deadline ]]; then
-            echo "watchdog: pid $1 exceeded $2 s, terminating" >&2
-            kill -TERM "$1" 2>/dev/null
+            echo "watchdog: pid $1 exceeded $2 s, terminating it and its children" >&2
+            # Дерево собирается до TERM: после смерти родителя потомки (perl адаптера) уходят к launchd.
+            tree="$1 $(descendants "$1" | tr '\n' ' ')"
+            # shellcheck disable=SC2086 # список pid нужно разбить на отдельные аргументы
+            kill -TERM $tree 2>/dev/null
             sleep 5
-            kill -KILL "$1" 2>/dev/null
+            # shellcheck disable=SC2086 # то же
+            kill -KILL $tree 2>/dev/null
             return 0
         fi
         sleep 1
@@ -145,31 +151,52 @@ trim_sample() { # файл sample
 }
 
 # Запускает sample в фоне, pid в SAMPLE_PID и SAMPLE_WD (не через $(...): подстановка ждала бы
-# фоновые процессы, а wait не видит внуков).
+# фоновые процессы, а wait не видит внуков). Приложение в это время живо еще минимум 15 с, поэтому
+# -mayDie не нужен: с ним sample на раннере отдавал заголовок без стеков.
 SAMPLE_PID=""
 SAMPLE_WD=""
 take_sample() { # pid
-    sample "$1" "$SAMPLE_SECONDS" -mayDie -file "$TMP/sample.txt" > "$TMP/sample.log" 2>&1 &
+    sample "$1" "$SAMPLE_SECONDS" -file "$TMP/sample.txt" > "$TMP/sample.log" 2>&1 &
     SAMPLE_PID=$!
     watchdog "$SAMPLE_PID" "$SAMPLE_LIMIT" > /dev/null 2>&1 &
     SAMPLE_WD=$!
 }
 
-finish_sample() {
+finish_sample() { # имя прогона
+    local rc report raw
     wait "$SAMPLE_PID" 2>/dev/null
-    local rc=$?
+    rc=$?
     kill "$SAMPLE_WD" 2>/dev/null
     wait "$SAMPLE_WD" 2>/dev/null
+    SAMPLE_PID=""
+    SAMPLE_WD=""
+    if [[ $1 == play ]]; then
+        report="$OUT/cpu-sample.txt"
+        raw="$OUT/cpu-sample.raw.txt"
+    else
+        report="$OUT/cpu-sample-$1.txt"
+        raw="$OUT/cpu-sample-$1.raw.txt"
+    fi
+    if [[ -f "$TMP/sample.txt" ]]; then
+        mv "$TMP/sample.txt" "$raw"
+    else
+        : > "$raw"
+    fi
     {
-        echo "# sample <pid> $SAMPLE_SECONDS -mayDie of the play run: samples per thread and heaviest top-of-stack frames"
+        echo "# sample <pid> $SAMPLE_SECONDS of the $1 run: samples per thread and heaviest top-of-stack frames"
         echo
-        if [[ $rc -eq 0 && -s "$TMP/sample.txt" ]]; then
-            trim_sample "$TMP/sample.txt"
+        if grep -q 'Thread_' "$raw"; then
+            trim_sample "$raw"
         else
-            echo "sample failed with exit $rc:"
+            echo "no stacks in sample output (sample exit $rc)"
+            echo
+            echo "first 60 lines of $(basename "$raw"):"
+            head -n 60 "$raw"
+            echo
+            echo "sample stdout/stderr:"
             cat "$TMP/sample.log"
         fi
-    } > "$SAMPLE_REPORT"
+    } > "$report"
 }
 
 # Один прогон: имя, предел среднего в процентах, сравнение (max: не больше предела, below: строго
@@ -178,7 +205,7 @@ probe() {
     local name=$1 limit=$2 compare=$3 expect_island=$4
     shift 4
     local log_start pid wd rc t0 c0 k0 t1 c1 k1 t c r prev_t prev_c sec
-    local per_second="" max_sec=0 rss_first="" rss_last=0 rss_max=0 alive=1
+    local per_second="" max_sec=0 rss_first="" rss_last=0 rss_max=0 alive=1 sampled=0
     local average children verdict=ok reasons="" app_log="$TMP/$name.log"
 
     report ""
@@ -228,7 +255,8 @@ probe() {
         c1=$c
         prev_t=$t
         prev_c=$c
-        if [[ "$name" == play && -z "$SAMPLE_PID" && $((t - t0)) -ge $((DURATION * 500)) ]]; then
+        if [[ -z "$SAMPLE_PID" && $sampled -eq 0 && $((t - t0)) -ge $((DURATION * 500)) ]]; then
+            sampled=1
             take_sample "$pid"
         fi
     done
@@ -237,8 +265,8 @@ probe() {
     rc=$?
     kill "$wd" 2>/dev/null
     wait "$wd" 2>/dev/null
-    if [[ "$name" == play && -n "$SAMPLE_PID" ]]; then
-        finish_sample
+    if [[ $sampled -eq 1 ]]; then
+        finish_sample "$name"
     fi
     if [[ -f "$APP_LOG" ]]; then
         tail -n +"$((log_start + 1))" "$APP_LOG" > "$app_log"
@@ -269,7 +297,8 @@ probe() {
     if awk -v a="$average" -v l="$limit" -v c="$compare" 'BEGIN { exit !(c == "max" ? a > l : a >= l) }'; then
         reasons="$reasons; average $average % is over the limit of $limit %"
     fi
-    if grep -q 'остров: скрыт -> свернут' "$app_log"; then
+    # Любой переход из «скрыт» (в «свернут» или «раскрыт») значит, что остров показан.
+    if grep -q 'остров: скрыт -> ' "$app_log"; then
         report "island: shown (expected $expect_island)"
         if [[ $expect_island == hidden ]]; then
             reasons="$reasons; island appeared in silence"
