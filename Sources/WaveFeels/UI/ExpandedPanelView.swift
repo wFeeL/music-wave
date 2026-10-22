@@ -10,7 +10,9 @@ import WaveCore
 /// рамки панели, ниже выреза на `NotchGeometry.notchClearance` (у капсулы на 16 pt от верха).
 /// `inset`: от края рамки до линии содержимого, 16 pt от видимого края тела. Слева обложка,
 /// за ней колонка текста, справа три кнопки; все на одной средней линии. Колонка: название,
-/// исполнитель, прогресс с прошедшим и оставшимся временем.
+/// исполнитель, прогресс с прошедшим и оставшимся временем. В конце строки с названием
+/// кнопка источника (`SourceAppButton`): значок приложения, из которого играет музыка; нажатие
+/// выводит его вперед. У всего звука системы ее нет, название тогда во всю ширину колонки.
 ///
 /// Трек берется из `AppModel.panelTrack`: последний трек источника, он держится и на паузе.
 /// Кнопки и прогресс видны, только если Now Playing работает и сейчас показывает именно
@@ -48,6 +50,13 @@ struct ExpandedPanelView: View {
     static let controlsWidth: CGFloat = 3 * buttonSize + 2 * buttonSpacing
     static let missingTrackText = "Нет данных о треке"
     static let openSourceText = "Открыть"
+    /// Кнопка источника в конце строки с названием: значок 26 pt со скруглением 6 pt, от
+    /// названия на 8 pt; при наведении значок увеличивается до 1.08 за 0.15 с.
+    static let sourceButtonSize: CGFloat = 26
+    static let sourceButtonInset: CGFloat = 8
+    static let sourceButtonRadius: CGFloat = 6
+    static let sourceButtonHoverScale: CGFloat = 1.08
+    static let sourceButtonHoverAnimation = Animation.easeOut(duration: 0.15)
 
     /// Ширина колонки текста рядом с кнопками: все, что осталось в рамке шириной `width`
     /// после отступов, обложки и кнопок. Задается явно, чтобы длинное название не раздвигало панель.
@@ -55,6 +64,13 @@ struct ExpandedPanelView: View {
         let leading = inset + artworkSize + artworkSpacing
         let trailing = controlsSpacing + controlsWidth + inset - skipSymbolBearing
         return max(width - leading - trailing, 0)
+    }
+
+    /// Ширина названия в колонке шириной `column`: с кнопкой источника меньше на кнопку и
+    /// отступ до нее, чтобы бегущая строка и ее затухание справа кончались до кнопки.
+    static func titleWidth(column: CGFloat, hasSourceButton: Bool) -> CGFloat {
+        guard hasSourceButton else { return column }
+        return max(column - sourceButtonSize - sourceButtonInset, 0)
     }
 
     /// Сколько ждать подтверждения паузы или игры от Now Playing, прежде чем вернуть значок.
@@ -107,12 +123,26 @@ struct ExpandedPanelView: View {
     private func trackRow(_ track: NowPlayingInfo) -> some View {
         let title = track.title.isEmpty ? model.effectiveSource.displayName : track.title
         let artist = track.artist.flatMap { $0.isEmpty ? nil : $0 }
+        let column = Self.textColumnWidth(width: width, inset: inset)
+        let source = model.sourceApp
         return HStack(spacing: 0) {
             PanelArtworkView(artwork: model.artwork)
                 .padding(.trailing, Self.artworkSpacing)
             VStack(alignment: .leading, spacing: 0) {
-                MarqueeText(text: title, font: .system(size: Self.titleSize, weight: .semibold))
-                    .foregroundStyle(Color.white)
+                HStack(spacing: 0) {
+                    MarqueeText(text: title, font: .system(size: Self.titleSize, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .frame(
+                            width: Self.titleWidth(column: column, hasSourceButton: source != nil),
+                            alignment: .leading
+                        )
+                    if let source {
+                        SourceAppButton(name: source.name, icon: source.icon) {
+                            model.openSource()
+                        }
+                        .padding(.leading, Self.sourceButtonInset)
+                    }
+                }
                 if let artist {
                     MarqueeText(text: artist, font: .system(size: Self.artistSize))
                         .foregroundStyle(Color.white.opacity(Self.artistOpacity))
@@ -123,7 +153,7 @@ struct ExpandedPanelView: View {
                         .padding(.top, Self.progressSpacing)
                 }
             }
-            .frame(width: Self.textColumnWidth(width: width, inset: inset), alignment: .leading)
+            .frame(width: column, alignment: .leading)
             controls(isPlaying: pendingPlaying ?? track.isPlaying)
                 .fixedSize()
                 .padding(.leading, Self.controlsSpacing)
@@ -317,6 +347,61 @@ private struct SourceIconView: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Кнопка источника
+
+/// Значок приложения-источника в конце строки с названием: нажатие выводит приложение вперед
+/// или запускает его. Значок рисуется крупнее кнопки, как `SourceIconView`, чтобы его видимое
+/// тело заняло все 26 pt, и обрезается по скруглению 6 pt. Подсказка и метка доступности
+/// «Открыть <имя>».
+struct SourceAppButton: View {
+    let name: String
+    let icon: NSImage
+    let action: @MainActor () -> Void
+
+    static func tooltip(for name: String) -> String {
+        "Открыть \(name)"
+    }
+
+    var body: some View {
+        let tooltip = Self.tooltip(for: name)
+        Button(action: action) {
+            let size = ExpandedPanelView.sourceButtonSize
+            let drawn = (size / SourceIconView.iconBodyFraction).rounded()
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: drawn, height: drawn)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: ExpandedPanelView.sourceButtonRadius, style: .continuous))
+        }
+        .buttonStyle(SourceAppButtonStyle())
+        .help(Text(verbatim: tooltip))
+        .accessibilityLabel(tooltip)
+    }
+}
+
+/// Значок без рамки и подложки; при наведении увеличивается. Без системных стилей, как
+/// `IslandButtonStyle`.
+private struct SourceAppButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        SourceAppButtonBody(configuration: configuration)
+    }
+}
+
+private struct SourceAppButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    @State private var hovering = false
+
+    var body: some View {
+        configuration.label
+            .contentShape(RoundedRectangle(cornerRadius: ExpandedPanelView.sourceButtonRadius, style: .continuous))
+            .scaleEffect(hovering ? ExpandedPanelView.sourceButtonHoverScale : 1)
+            .onHover { hovering = $0 }
+            .animation(ExpandedPanelView.sourceButtonHoverAnimation, value: hovering)
     }
 }
 

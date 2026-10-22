@@ -918,8 +918,9 @@ final class AppModel {
 
     // MARK: - Источник в панели
 
-    /// Значок приложения-источника для панели без трека; у всего звука системы значка нет.
-    /// Если приложения по пути нет, значок обычного приложения.
+    /// Значок приложения-источника для панели: на месте обложки, когда трека нет, и на кнопке
+    /// источника рядом с названием. У всего звука системы значка нет. Если приложения по пути
+    /// нет, значок обычного приложения.
     func sourceIcon() -> NSImage? {
         guard case .application(_, let path, _) = effectiveSource else { return nil }
         if let cached = sourceIconCache, cached.path == path { return cached.icon }
@@ -931,7 +932,15 @@ final class AppModel {
         return icon
     }
 
-    /// Кнопка «Открыть» в панели без трека: запускает приложение-источник или выводит его вперед.
+    /// Кнопка источника в строке трека: имя и значок приложения, из которого играет музыка.
+    /// У браузера это сам браузер (вкладку выбрать нельзя); у всего звука системы `nil`, кнопки нет.
+    var sourceApp: (name: String, icon: NSImage)? {
+        guard let icon = sourceIcon() else { return nil }
+        return (effectiveSource.displayName, icon)
+    }
+
+    /// Кнопка «Открыть» в панели без трека и кнопка источника в строке трека: запускает
+    /// приложение-источник или выводит его вперед.
     func openSource() {
         guard case .application(let bundleID, let path, let name) = effectiveSource else { return }
         var url: URL?
