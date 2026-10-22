@@ -54,6 +54,30 @@ struct WaveAppearanceTests {
         #expect(decoded.colorMode == .artwork && decoded.glowRadius == 1 && decoded.fill == 0)
     }
 
+    /// Неизвестная готовая палитра дает «Из обложки», остальные поля сохраняются.
+    @Test func unknownPresetFallsBackToArtwork() throws {
+        let appearance = WaveAppearance(
+            wingWidth: 120, colorMode: .preset(.neon), glowRadius: 2, lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.8
+        )
+        let json = String(decoding: try JSONEncoder().encode(appearance), as: UTF8.self)
+        #expect(json.contains("\"neon\""))
+        let stored = Data(json.replacingOccurrences(of: "\"neon\"", with: "\"rainbow\"").utf8)
+        let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
+        var expected = appearance
+        expected.colorMode = .artwork
+        #expect(decoded == expected)
+    }
+
+    /// Поле не того типа берется по умолчанию, остальные сохраняются.
+    @Test func wrongTypedFieldTakesDefault() throws {
+        let stored = Data(#"{"wingWidth": "wide", "lineCount": 5, "fill": 0.4, "glowRadius": [2]}"#.utf8)
+        let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
+        #expect(decoded.wingWidth == WaveAppearance.standard.wingWidth)
+        #expect(decoded.glowRadius == WaveAppearance.standard.glowRadius)
+        #expect(decoded.lineCount == 5)
+        #expect(decoded.fill == 0.4)
+    }
+
     @Test func lineTable() {
         func main(_ layer: WaveLayer) -> WaveLine {
             WaveLine(source: .layer(layer), shape: layer, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
@@ -102,6 +126,25 @@ struct WaveAppearanceTests {
         #expect(gray.allSatisfy { $0.chroma < 1e-3 })
         let broken = WaveAppearance.customPalette(RGBColor(r: .nan, g: 0, b: 1))
         #expect(broken.count == 3 && broken.allSatisfy(\.isFinite))
+    }
+
+    /// Чистый синий после подъема светлоты выходит за гамму sRGB: все три цвета вписываются в
+    /// нее, теряя насыщенность, но не оттенок.
+    @Test func customPaletteFitsPureBlueIntoGamut() {
+        let blue = RGBColor(hex: 0x0000FF)
+        let colors = WaveAppearance.customPalette(blue)
+        let lifted = OKLab(l: 0.55, a: blue.oklab.a, b: blue.oklab.b)
+        #expect(!lifted.isInSRGBGamut)
+        for color in colors {
+            #expect([color.r, color.g, color.b].allSatisfy { $0 >= 0 && $0 <= 1 }, "\(color)")
+            #expect(color.oklab.isInSRGBGamut, "\(color)")
+            #expect(abs(color.oklab.l - 0.55) < 1e-3, "\(color.oklab)")
+        }
+        let labs = colors.map(\.oklab)
+        #expect(abs(hueDelta(labs[0], blue.oklab)) <= 0.5, "\(hueDelta(labs[0], blue.oklab))")
+        #expect(abs(hueDelta(labs[1], labs[0]) - 25) <= 0.5, "\(hueDelta(labs[1], labs[0]))")
+        #expect(abs(hueDelta(labs[2], labs[0]) + 25) <= 0.5, "\(hueDelta(labs[2], labs[0]))")
+        #expect(labs[0].chroma < blue.oklab.chroma)
     }
 
     @Test func presetsAreDistinct() {
