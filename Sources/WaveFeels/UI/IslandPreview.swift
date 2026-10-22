@@ -1,4 +1,5 @@
 import Observation
+import QuartzCore
 import SwiftUI
 import WaveCore
 
@@ -35,6 +36,10 @@ final class PreviewTimelineCache {
 /// ничего из модели острова не трогает: кадры идут только из `DemoTimeline`. Играет отрезок
 /// после `loopStart`, где ритм уже захвачен: он длится целое число тактов, и шов круга
 /// приходится на ту же долю того же аккорда.
+///
+/// Калибровка (`CalibrationView`) дает игроку расписание свечения (`glowSchedule`): тогда демо не
+/// играет, остров тихий, а свечение считается по этому расписанию так же, как у острова
+/// (`calibrationVisuals`).
 @MainActor
 @Observable
 final class PreviewPlayer {
@@ -48,6 +53,10 @@ final class PreviewPlayer {
     private(set) var timeline: DemoTimeline?
 
     private let cache: PreviewTimelineCache
+    /// Калибровка: расписание свечения на момент показа кадра (секунды хоста).
+    private let glowSchedule: (@MainActor (Double) -> BeatSchedule)?
+    /// Калибровка: свечение с памятью о вспышках прошлых кадров, как `AppModel.glowState`.
+    @ObservationIgnored private var glowState = BeatGlow()
     /// Время первого кадра и прошлого кадра, с.
     @ObservationIgnored private var startTime: Double?
     @ObservationIgnored private var lastTime: Double?
@@ -55,9 +64,15 @@ final class PreviewPlayer {
     @ObservationIgnored private var layerSprings = [LevelSpring](repeating: LevelSpring(), count: WaveLayer.allCases.count)
     @ObservationIgnored private var levelSpring = LevelSpring()
 
-    init(cache: PreviewTimelineCache = .shared) {
+    init(cache: PreviewTimelineCache = .shared, glowSchedule: (@MainActor (Double) -> BeatSchedule)? = nil) {
         self.cache = cache
+        self.glowSchedule = glowSchedule
         timeline = cache.timeline
+    }
+
+    /// Игрок калибровки: свечение по внешнему расписанию, без демо.
+    var isCalibrating: Bool {
+        glowSchedule != nil
     }
 
     /// Снимки: готовое демо вместо чтения файла, чтобы на снимке вкладки «Вид» шли волны.
@@ -71,9 +86,10 @@ final class PreviewPlayer {
         windowOpen && windowVisible && tab == .appearance
     }
 
-    /// Демо из `url` (по умолчанию из ресурсов приложения), если его еще нет.
+    /// Демо из `url` (по умолчанию из ресурсов приложения), если его еще нет. Игроку калибровки
+    /// демо не нужно.
     func load(from url: URL? = PreviewPlayer.demoURL) async {
-        guard timeline == nil else { return }
+        guard timeline == nil, !isCalibrating else { return }
         let loaded = await cache.load(from: url)
         if timeline == nil, let loaded {
             timeline = loaded
@@ -124,11 +140,37 @@ final class PreviewPlayer {
     }
 }
 
+extension PreviewPlayer {
+    /// Кадр калибровки на `now` секунд хоста (`CACurrentMediaTime()`), по тем же правилам, что
+    /// у острова (`AppModel.islandVisuals`): кадр будет на экране в `now + presentationLead(R)`,
+    /// на этот момент свечение по расписанию `glowSchedule` через `BeatGlow` с памятью, `R` это
+    /// `refreshPeriod`. Волны тихие, к басу прибавляется акцент доли. «Вздоха» нет: он опережает
+    /// свечение и мешал бы сравнивать вспышку со щелчком. «Уменьшение движения» свечение здесь не
+    /// гасит: без вспышки калибровать нечего.
+    func calibrationVisuals(now: Double, refreshPeriod: Double, palette: [PaletteColor]) -> IslandVisuals {
+        var glow: Float = 0
+        if let glowSchedule, now.isFinite {
+            let presented = now + LatencyCalculator.presentationLead(refreshPeriod: refreshPeriod)
+            glow = glowState.value(at: presented, schedule: glowSchedule(presented), refreshPeriod: refreshPeriod)
+        }
+        var frame = WaveFrame.silent
+        frame.layers = BeatGlow.accented(frame.layers, glow: glow)
+        return IslandVisuals(
+            frame: frame, sampled: .silent, motion: WaveMotion(), palette: palette, glow: glow, pulse: 0,
+            time: now.isFinite ? now : 0
+        )
+    }
+}
+
 /// Свернутый остров на фоне строки меню, как на снимках (`SnapshotBackdrop`): условный вырез
 /// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн, яркость
 /// свечения и «вздох» из настроек, крыло не шире, чем позволит экран острова (`wingLimit`).
 /// Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`. Пока
 /// предпросмотр не активен (`PreviewPlayer.isActive`), `TimelineView` стоит.
+///
+/// С игроком калибровки (`PreviewPlayer.isCalibrating`) часы кадров это часы хоста, как у острова,
+/// период обновления берется у экрана острова (`AppModel.refreshPeriod`), а яркость свечения не
+/// ниже яркости по умолчанию, чтобы вспышку было видно и при слабом свечении в настройках.
 struct IslandPreview: View {
     static let stripSize = CGSize(width: 640, height: 150)
     static let notchSize = SnapshotRenderer.notchSize
@@ -162,8 +204,11 @@ struct IslandPreview: View {
         let settings = model.settings
         let appearance = settings.appearance
         let palette = appearance.palette(artwork: model.palette)
-        let glow = reduceMotion ? 0 : settings.glowIntensity
-        let breathes = settings.beatPulse && !reduceMotion
+        let calibrating = player.isCalibrating
+        let glow = calibrating
+            ? max(settings.glowIntensity, AppSettings.Default.glowIntensity)
+            : reduceMotion ? 0 : settings.glowIntensity
+        let breathes = settings.beatPulse && !reduceMotion && !calibrating
         let layout = Self.layout(appearance: appearance, wingLimit: wingLimit)
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         let size = Self.stripSize
@@ -177,10 +222,14 @@ struct IslandPreview: View {
                         appearance: colorScheme == .dark ? .dark : .light
                     ) {
                         TimelineView(.animation(paused: !active)) { context in
-                            let visuals = player.visuals(
-                                now: context.date.timeIntervalSinceReferenceDate, palette: palette,
-                                reduceMotion: reduceMotion
-                            )
+                            let visuals = calibrating
+                                ? player.calibrationVisuals(
+                                    now: CACurrentMediaTime(), refreshPeriod: model.refreshPeriod, palette: palette
+                                )
+                                : player.visuals(
+                                    now: context.date.timeIntervalSinceReferenceDate, palette: palette,
+                                    reduceMotion: reduceMotion
+                                )
                             PreviewScene(
                                 visuals: visuals, geometry: geometry, glow: glow, appearance: appearance,
                                 scale: breathes ? 1 + IslandView.breathDepth * CGFloat(visuals.pulse) : 1
