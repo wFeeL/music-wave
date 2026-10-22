@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// Описание экрана для расчета геометрии. Координаты AppKit: начало снизу слева, ось Y вверх.
 public struct ScreenDescriptor: Sendable, Equatable {
