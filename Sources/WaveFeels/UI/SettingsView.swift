@@ -9,10 +9,11 @@ import WaveCore
 /// стиле Системных настроек, изменения применяются сразу. Живой предпросмотр острова во вкладке
 /// «Вид» идет, только пока окно открыто, видно и выбрана она (`PreviewPlayer.isActive`).
 ///
-/// Пока окно открыто и не свернуто, задержка «Авто», устройство вывода (для сдвига
-/// синхронизации), статус запуска при входе и доступ к звуку обновляются раз в 3 с. Список
-/// источников (поиск Яндекс Музыки, браузеры, приложения со звуком) дороже: он обновляется при
-/// открытии окна, при запуске и закрытии приложений и не чаще раза в 10 с.
+/// Пока окно открыто и не свернуто, задержка «Авто», статус запуска при входе и доступ к звуку
+/// обновляются раз в 3 с. Список источников (поиск Яндекс Музыки, браузеры, приложения со звуком)
+/// дороже: он обновляется при открытии окна, при запуске и закрытии приложений и не чаще раза
+/// в 10 с. Устройство вывода для «Сдвига синхронизации» берется из `AudioPipeline` и меняется
+/// сразу.
 struct SettingsView: View {
     /// Вкладки окна.
     enum Tab: Hashable, CaseIterable {
@@ -20,9 +21,10 @@ struct SettingsView: View {
     }
 
     /// Размер окна: «Основные» в самом высоком состоянии (ручная задержка, подсказка о доступе
-    /// к звуку и кнопка настроек конфиденциальности под ней) помещаются без прокрутки. На
-    /// маленьком экране окно ужимается до его видимой области (`WindowsController`).
-    static let windowSize = CGSize(width: 520, height: 880)
+    /// к звуку и кнопка настроек конфиденциальности под ней, строка устройства с «Сбросить» под
+    /// сдвигом синхронизации) помещаются без прокрутки. На маленьком экране окно ужимается до его
+    /// видимой области (`WindowsController`).
+    static let windowSize = CGSize(width: 520, height: 916)
     static let minSize = CGSize(width: 480, height: 420)
     static let statusInterval: Duration = .seconds(3)
     /// Список источников обновляется раз в столько обновлений статуса, то есть раз в 12 с.
@@ -38,6 +40,8 @@ struct SettingsView: View {
     private let inApplications: Bool
     /// Снимки: экран острова для предела крыла задан.
     private let fixedScreen: NotchLayout?
+    /// Снимки: устройство вывода для сдвига синхронизации задано, а не берется у машины.
+    private let fixedDevice: (uid: String, name: String)?
 
     @State private var tab: Tab
     /// Игрок предпросмотра вкладки «Вид», один на окно.
@@ -45,10 +49,6 @@ struct SettingsView: View {
     @State private var catalog: SourceCatalog
     @State private var icons: AppIconCache
     @State private var autoLatency: Int
-    /// UID и имя устройства вывода: ползунок «Сдвиг синхронизации» правит его сдвиг. Пустой UID
-    /// (устройство неизвестно) значит общий сдвиг.
-    @State private var deviceUID: String
-    @State private var deviceName: String
     @State private var loginStatus: SMAppService.Status
     @State private var loginMessage: String?
     @State private var copied = false
@@ -59,13 +59,15 @@ struct SettingsView: View {
 
     /// Снимки задают все, что зависит от машины: `catalog` (готовый список источников; без него
     /// список собирается сейчас), `login` (статус запуска при входе и лежит ли приложение в
-    /// `/Applications`), `screen` (экран острова) и вкладку `tab`.
+    /// `/Applications`), `screen` (экран острова), `device` (UID и имя устройства вывода) и
+    /// вкладку `tab`.
     init(
         model: AppModel,
         presence: WindowPresence,
         catalog: SourceCatalog? = nil,
         login: (status: SMAppService.Status, inApplications: Bool)? = nil,
         screen: NotchLayout? = nil,
+        device: (uid: String, name: String)? = nil,
         tab: Tab = .general,
         openDiagnostics: @escaping @MainActor () -> Void
     ) {
@@ -74,13 +76,12 @@ struct SettingsView: View {
         self.openDiagnostics = openDiagnostics
         inApplications = login?.inApplications ?? LaunchAtLogin.isInApplications
         fixedScreen = screen
+        fixedDevice = device
         _tab = State(initialValue: tab)
         _player = State(initialValue: PreviewPlayer())
         _catalog = State(initialValue: catalog ?? SourceCatalog.current(model: model))
         _icons = State(initialValue: AppIconCache())
         _autoLatency = State(initialValue: Self.autoLatencyMilliseconds(model))
-        _deviceUID = State(initialValue: model.output.deviceUID)
-        _deviceName = State(initialValue: model.output.deviceName)
         _loginStatus = State(initialValue: login?.status ?? LaunchAtLogin.status)
     }
 
@@ -326,12 +327,14 @@ struct SettingsView: View {
     }
 
     /// «Сдвиг синхронизации» текущего устройства вывода. Под ползунком его имя и «Сбросить», если
-    /// у устройства свой сдвиг; без UID ползунок правит общий сдвиг, подписи нет.
+    /// у устройства свой сдвиг; без UID (устройство неизвестно) ползунок правит общий сдвиг,
+    /// подписи нет.
     @ViewBuilder
     private var syncOffsetRows: some View {
         let settings = model.settings
-        let uid = deviceUID
-        let name = deviceName.isEmpty ? deviceUID : deviceName
+        let uid = fixedDevice?.uid ?? model.pipeline.outputDeviceUID
+        let deviceName = fixedDevice?.name ?? model.pipeline.outputDeviceName
+        let name = deviceName.isEmpty ? uid : deviceName
         SettingsSliderRow(
             "Сдвиг синхронизации",
             subtitle: "Меньше: свечение раньше звука, больше: позже",
@@ -469,9 +472,6 @@ struct SettingsView: View {
     private func refreshStatus() {
         let latency = Self.autoLatencyMilliseconds(model)
         if latency != autoLatency { autoLatency = latency }
-        let output = model.output
-        if output.deviceUID != deviceUID { deviceUID = output.deviceUID }
-        if output.deviceName != deviceName { deviceName = output.deviceName }
         let status = LaunchAtLogin.status
         if status != loginStatus {
             loginStatus = status

@@ -111,6 +111,11 @@ final class AudioPipeline {
     /// Сдвиг синхронизации текущего устройства вывода, миллисекунды.
     var syncOffsetMs: Int { syncOffsets.offset(forDeviceUID: output.deviceUID) }
 
+    /// UID и имя текущего устройства вывода, наблюдаемая копия из `OutputDeviceMonitor` (сам он
+    /// не наблюдаем). По ним настройки сразу после смены устройства показывают его сдвиг.
+    private(set) var outputDeviceUID = ""
+    private(set) var outputDeviceName = ""
+
     /// «Приостановить визуализацию»: захват или демо и анализ стоят, подписки работают,
     /// пересборок нет. Выставляет `AppModel`. Снятие паузы возвращает прежний режим, из
     /// приостановки в тишине сразу в захват. Действует и до `start()`.
@@ -186,6 +191,7 @@ final class AudioPipeline {
             self?.processesChanged()
         }
         output.onDeviceChange = { [weak self] in
+            self?.refreshOutputDevice()
             self?.pushSettings()
             self?.rebuild(reason: "устройство вывода")
         }
@@ -193,8 +199,10 @@ final class AudioPipeline {
             self?.volumeChanged()
         }
         output.onServiceRestart = { [weak self] in
+            self?.refreshOutputDevice()
             self?.serviceRestarted()
         }
+        refreshOutputDevice()
     }
 
     // MARK: - Управление
@@ -207,6 +215,7 @@ final class AudioPipeline {
         recovery.reset()
         processes.start()
         output.start()
+        refreshOutputDevice()
         volumeChanged()
         performRebuild(reason: "запуск")
     }
@@ -563,6 +572,13 @@ final class AudioPipeline {
             result.insert(process.objectID)
         }
         return result
+    }
+
+    /// Копирует UID и имя устройства из монитора; одинаковые значения не присваиваются, чтобы
+    /// не будить наблюдателей.
+    private func refreshOutputDevice() {
+        if outputDeviceUID != output.deviceUID { outputDeviceUID = output.deviceUID }
+        if outputDeviceName != output.deviceName { outputDeviceName = output.deviceName }
     }
 
     private func volumeChanged() {

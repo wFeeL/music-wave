@@ -427,6 +427,10 @@ enum SnapshotRenderer {
 // MARK: - Настройки
 
 extension SnapshotRenderer {
+    /// Устройство вывода на снимке настроек: подпись под сдвигом синхронизации не зависит от
+    /// машины.
+    static let settingsDevice = (uid: "BuiltInSpeakerDevice", name: "Динамики MacBook Air")
+
     /// Источники на снимке настроек: Яндекс Музыка и Safari.
     static var settingsCatalog: SourceCatalog {
         SourceCatalog(
@@ -441,8 +445,10 @@ extension SnapshotRenderer {
     /// Окно настроек через `NSHostingView` в невидимом окне: `ImageRenderer` не рисует
     /// элементы `Form`, за которыми стоят AppKit-контролы. Окно не выводится на экран,
     /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана. Размер тот же, что у окна
-    /// настроек. `tall`: ручная задержка 120 мс и подсказка о доступе к звуку. Окно считается
-    /// закрытым, поэтому предпросмотр вкладки «Вид» рисует один кадр и стоит.
+    /// настроек. Устройство вывода задано (`settingsDevice`), а не берется у машины. `tall`:
+    /// ручная задержка 120 мс, подсказка о доступе к звуку и свой сдвиг синхронизации устройства
+    /// (видна «Сбросить»), самое высокое состояние «Основных». Окно считается закрытым, поэтому
+    /// предпросмотр вкладки «Вид» рисует один кадр и стоит.
     ///
     /// Переключатель вкладок `cacheDisplay` кладет в битмап полупрозрачным (альфа около 0.1 у
     /// подложки), а не поверх фона окна. Просмотрщик кладет такой PNG на белое, и в темном
@@ -457,14 +463,17 @@ extension SnapshotRenderer {
         model: AppModel,
         to url: URL
     ) throws {
+        let device = settingsDevice
         if tall {
             model.settings.latencyMode = .manual(milliseconds: 120)
             model.previewPermissionHint(true)
+            model.settings.syncOffsets.set(-15, deviceUID: device.uid, name: device.name)
         }
         defer {
             if tall {
                 model.settings.latencyMode = .auto
                 model.previewPermissionHint(false)
+                model.settings.syncOffsets.reset(deviceUID: device.uid)
             }
         }
         guard let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) else {
@@ -474,7 +483,8 @@ extension SnapshotRenderer {
         let frame = NSRect(origin: .zero, size: size)
         let content = SettingsView(
             model: model, presence: WindowPresence(), catalog: settingsCatalog,
-            login: (status: .notRegistered, inApplications: false), screen: notchLayout, tab: tab
+            login: (status: .notRegistered, inApplications: false), screen: notchLayout, device: device,
+            tab: tab
         ) {}
             .frame(width: size.width, height: size.height)
             .background(Color(nsColor: .windowBackgroundColor))

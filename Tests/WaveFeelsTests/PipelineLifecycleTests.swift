@@ -117,6 +117,21 @@ struct PipelineLifecycleTests {
         #expect(pipeline.ringForTesting.activeWriters == 0)
     }
 
+    /// Настройки берут устройство вывода у конвейера: его наблюдаемая копия совпадает с монитором
+    /// сразу после создания, сдвиг синхронизации берется для этого устройства. Без устройства
+    /// (UID пустой) `set` пишет общий сдвиг, ожидание то же.
+    @Test func pipelineMirrorsOutputDeviceForSyncOffset() {
+        let output = OutputDeviceMonitor()
+        let pipeline = AudioPipeline(store: FrameStore(), processes: AudioProcessList(), output: output)
+        #expect(pipeline.outputDeviceUID == output.deviceUID)
+        #expect(pipeline.outputDeviceName == output.deviceName)
+        var offsets = SyncOffsets()
+        offsets.set(-20, deviceUID: "", name: "")
+        offsets.set(35, deviceUID: output.deviceUID, name: output.deviceName)
+        pipeline.syncOffsets = offsets
+        #expect(pipeline.syncOffsetMs == 35)
+    }
+
     @Test func modelSleepStopsDemoAndWakeRestoresIt() async throws {
         _ = NSApplication.shared
         let suite = "com.wfeels.wavefeels.tests.sleep-\(UUID().uuidString)"
