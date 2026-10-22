@@ -13,7 +13,8 @@ import WaveCore
 /// Капсула на экране без выреза (ровно `NotchGeometry.pillSize`, без крыльев): волны идут
 /// через нее одной линией от середины, по краю свернутой капсулы тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
 ///
-/// Кадры идут от `TimelineView(.animation)`, на паузе, пока остров скрыт; в режиме
+/// Кадры идут от `TimelineView(.animation)`, на паузе, пока остров скрыт (после скрытия еще
+/// `IslandTransition.overlap`, чтобы волны двигались, пока остров гаснет); в режиме
 /// энергосбережения не чаще 30 в секунду. На каждом кадре модель берет кадр анализа и свечение
 /// доли на момент показа кадра по часам хоста (`CACurrentMediaTime()` плюс два периода
 /// отрисовки), сглаживает уровни пружинами и двигает фазы волн, «вздох» и переход палитры
@@ -67,6 +68,8 @@ struct IslandView: View {
     var clock: (() -> Double)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Остров скрыт дольше `IslandTransition.overlap`: гаснуть уже нечему, кадры стоят.
+    @State private var hideSettled = true
 
     var body: some View {
         let state = model.islandState
@@ -79,7 +82,10 @@ struct IslandView: View {
                     let time = clock()
                     scene(state: state, geometry: geometry, now: time, timelineTime: time)
                 } else {
-                    TimelineView(.animation(minimumInterval: model.lowPower ? 1.0 / 30 : nil, paused: state == .hidden)) { context in
+                    TimelineView(.animation(
+                        minimumInterval: model.lowPower ? 1.0 / 30 : nil,
+                        paused: state == .hidden && hideSettled
+                    )) { context in
                         scene(
                             state: state,
                             geometry: geometry,
@@ -102,6 +108,21 @@ struct IslandView: View {
         .animation(state == .expanded ? Self.expandAnimation : Self.collapseAnimation, value: state)
         .animation(Self.bannerAnimation(visible: bannerVisible, reduceMotion: reduceMotion), value: bannerVisible)
         .animation(Self.collapseAnimation, value: layout.wingWidth)
+        .task(id: state) {
+            // Скрытие (полноэкранный режим, пауза при громкой музыке): кадры идут, пока остров
+            // гаснет, и встают через `overlap`.
+            guard state == .hidden else {
+                hideSettled = false
+                return
+            }
+            guard !hideSettled else { return }
+            do {
+                try await Task.sleep(for: .seconds(IslandTransition.overlap))
+                hideSettled = true
+            } catch {
+                // Остров снова показан.
+            }
+        }
     }
 
     // MARK: - Баннер
