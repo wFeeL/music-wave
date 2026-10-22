@@ -39,6 +39,17 @@ public struct NowPlayingInfo: Sendable, Equatable {
         self.artworkData = artworkData
     }
 
+    /// bundle ID приложений, чей значок можно показать для записи: сначала родитель (помощник
+    /// браузера сообщает свой bundle ID, а пользователь знает сам браузер), затем свой. Пустые
+    /// и повторы пропускаются.
+    public var appBundleIDs: [String] {
+        var result: [String] = []
+        for id in [parentBundleIdentifier, bundleIdentifier].compactMap({ $0 }) where !id.isEmpty && !result.contains(id) {
+            result.append(id)
+        }
+        return result
+    }
+
     /// Позиция воспроизведения на момент `now`: `elapsedTime` плюс время с `timestamp`,
     /// пока трек играет, в пределах `0...duration`.
     public func elapsed(at now: Date) -> Double? {

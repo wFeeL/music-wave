@@ -157,7 +157,7 @@ struct IslandView: View {
     }
 
     /// Что показывает баннер сейчас: трек `AppModel.bannerTrack` (без него ключ из фазы),
-    /// обложка или значок источника, виден ли текст.
+    /// обложка или значок (`AppModel.bannerIcon()`), виден ли текст.
     private func currentBanner() -> TrackBannerContent? {
         guard case .showing(let key, let textVisible) = model.bannerPhase else { return nil }
         let track = model.bannerTrack
@@ -167,7 +167,7 @@ struct IslandView: View {
             title: track?.title ?? key.title,
             artist: artist.flatMap { $0.isEmpty ? nil : $0 },
             artwork: artwork,
-            icon: artwork == nil ? model.sourceIcon() : nil,
+            icon: artwork == nil ? model.bannerIcon() : nil,
             textVisible: textVisible
         )
     }

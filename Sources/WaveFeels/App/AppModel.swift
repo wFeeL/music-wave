@@ -201,6 +201,8 @@ final class AppModel {
     @ObservationIgnored private var shownArtworkData: Data?
     /// Значок приложения-источника для панели без трека, по пути бандла.
     @ObservationIgnored private var sourceIconCache: (path: String, icon: NSImage)?
+    /// Значок приложения, приславшего трек баннера, по его bundle ID (`nil`: не нашлось).
+    @ObservationIgnored private var bannerIconCache: (bundleIDs: [String], icon: NSImage?)?
     /// Последний просмотр `/Applications`: Яндекс Музыка по имени бандла или `nil`. Первый раз
     /// при запуске, дальше вне главного потока после запуска или закрытия приложений.
     @ObservationIgnored private var scannedYandexMusic: AudioSource?
@@ -1119,6 +1121,25 @@ final class AppModel {
             ? workspace.icon(forFile: path)
             : workspace.icon(for: .applicationBundle)
         sourceIconCache = (path, icon)
+        return icon
+    }
+
+    /// Значок для баннера без обложки: значок источника, а у всего звука системы значок
+    /// приложения, приславшего трек (`NowPlayingInfo.appBundleIDs`). Без него баннер рисует
+    /// плитку с нотой.
+    func bannerIcon() -> NSImage? {
+        if let icon = sourceIcon() { return icon }
+        guard let ids = bannerTrack?.appBundleIDs, !ids.isEmpty else { return nil }
+        if let cached = bannerIconCache, cached.bundleIDs == ids { return cached.icon }
+        let workspace = NSWorkspace.shared
+        var icon: NSImage?
+        for id in ids {
+            if let url = workspace.urlForApplication(withBundleIdentifier: id) {
+                icon = workspace.icon(forFile: url.path(percentEncoded: false))
+                break
+            }
+        }
+        bannerIconCache = (ids, icon)
         return icon
     }
 

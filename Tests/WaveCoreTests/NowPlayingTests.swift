@@ -237,4 +237,14 @@ struct NowPlayingTests {
             #"{"type":"data","diff":false,"payload":{"bundleIdentifier":"a","title":"t","playing":true}}"#))
         #expect(noElapsed.elapsed(at: Date()) == nil)
     }
+
+    /// Значок баннера у всего звука системы: сначала приложение-родитель, затем само.
+    @Test func appBundleIDsPreferParent() {
+        let helper = NowPlayingInfo(bundleIdentifier: "com.google.Chrome.helper", parentBundleIdentifier: "com.google.Chrome", title: "x")
+        #expect(helper.appBundleIDs == ["com.google.Chrome", "com.google.Chrome.helper"])
+        #expect(NowPlayingInfo(bundleIdentifier: "com.apple.Music", title: "x").appBundleIDs == ["com.apple.Music"])
+        #expect(NowPlayingInfo(bundleIdentifier: "", parentBundleIdentifier: "", title: "x").appBundleIDs.isEmpty)
+        let same = NowPlayingInfo(bundleIdentifier: "com.apple.Music", parentBundleIdentifier: "com.apple.Music", title: "x")
+        #expect(same.appBundleIDs == ["com.apple.Music"])
+    }
 }
