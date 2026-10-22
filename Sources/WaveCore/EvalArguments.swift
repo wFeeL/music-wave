@@ -237,7 +237,7 @@ extension BeatTracker.Parameters {
     /// Имена полей, которые можно менять по имени (`--tracker name=value`).
     public static let names: [String] = [
         "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
-        "phaseJump", "phaseJumpChecks", "dropWindow", "offGridScale", "onsetFloor", "crossfadeBeats",
+        "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "crossfadeBeats",
         "gateFallPerBeatDB", "gateFallNoTempoDB",
     ]
 
@@ -253,6 +253,7 @@ extension BeatTracker.Parameters {
         case "lockConfidence": lockConfidence = value
         case "unlockConfidence": unlockConfidence = value
         case "phaseJump": phaseJump = value
+        case "phaseJumpMargin": phaseJumpMargin = value
         case "dropWindow": dropWindow = value
         case "crossfadeBeats": crossfadeBeats = value
         case "offGridScale": offGridScale = Float(value)

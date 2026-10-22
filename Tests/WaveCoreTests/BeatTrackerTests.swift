@@ -215,6 +215,28 @@ struct BeatTrackerTests {
         #expect(glow.amplitude >= 0.15)
     }
 
+    /// «И» без онсетов, которую видит только гребенка фазы: чуть сильнее доли (60 против 50) фазу не
+    /// перебрасывает и захват держится, вдвое сильнее перебрасывает на «и».
+    @Test(arguments: [(Float(60), false), (Float(100), true)])
+    func phaseJumpNeedsAClearlyStrongerComb(offbeat: Float, jumps: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.offbeatODF = offbeat
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        hops.feed(&tracker, until: 16)
+        let next = try #require(tracker.nextBeat)
+        // Доли сцены на 0.25 + k · 0.5 с.
+        let distance = abs(BeatTracker.circularDifference(next - 0.25, period: 0.5))
+        if jumps {
+            #expect(abs(distance - 0.25) < 0.02, "next beat \(next)")
+        } else {
+            #expect(distance < 0.02, "next beat \(next)")
+            #expect(tracker.locked)
+        }
+    }
+
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
     @Test func nonFiniteKickLevelCountsAsFloor() {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
@@ -268,6 +290,9 @@ struct SyntheticBeats {
     var endTime = 0.0
     var nextBeatTime = 0.25
     let hop = 256.0 / 48_000
+    /// Широкополосная функция на «и» (без онсета): ее видит только гребенка фазы. 0 выключает.
+    var offbeatODF: Float = 0
+    var nextOffbeatTime = 0.0
 
     init(bpm: Double) {
         self.bpm = bpm
@@ -281,7 +306,12 @@ struct SyntheticBeats {
                 onset = OnsetEvent(time: nextBeatTime, strength: 1)
                 nextBeatTime += 60 / bpm
             }
-            tracker.process(Self.hop(endTime: endTime, broadband: onset, kick: onset))
+            var hop = Self.hop(endTime: endTime, broadband: onset, kick: onset)
+            if offbeatODF > 0, nextOffbeatTime <= endTime {
+                hop.broadbandODF = max(hop.broadbandODF, offbeatODF)
+                nextOffbeatTime += 60 / bpm
+            }
+            tracker.process(hop)
             each(tracker)
         }
     }

@@ -10,8 +10,9 @@ import Foundation
 /// 2. при каждой оценке гребенка ищет задержку последней доли
 ///    `d* = argmax_{d ∈ [0, T)} Σ_{k=0..5} 0.75^k · max(ODF[n − d − kT ± 1 шаг])`, кандидат
 ///    `now − d* − StreamAnalyzer.onsetLag` лежит на оси онсетов. Если он расходится с ФАПЧ (разность по
-///    кругу в `(−T/2, T/2]`) больше чем на `phaseJump · T` на `phaseJumpChecks` проверках подряд, ФАПЧ
-///    прыгает на него с теми же последствиями, что и смена темпа;
+///    кругу в `(−T/2, T/2]`) больше чем на `phaseJump · T`, а его оценка выше оценки гребенки у фазы
+///    ФАПЧ больше чем на `phaseJumpMargin`, на `phaseJumpChecks` проверках подряд, ФАПЧ прыгает на него
+///    с теми же последствиями, что и смена темпа;
 /// 3. широкополосный онсет у ближайшей доли (в пределах `matchWindow · T`) подстраивает фазу
 ///    (`alpha`) и период (`beta`) и засчитывает долю. Онсеты бочки ФАПЧ не трогают, они дают только
 ///    события свечения;
@@ -52,6 +53,10 @@ public struct BeatTracker: Sendable {
         public var phaseJump: Double
         /// Сколько проверок подряд расхождение должно держаться.
         public var phaseJumpChecks: Int
+        /// Расхождение засчитывается, только когда оценка гребенки у кандидата выше оценки у фазы ФАПЧ
+        /// больше чем на эту долю: почти равные фазы (доля и «и» с громким хэтом) не перебрасывают ФАПЧ.
+        /// Без запаса на GTZAN скачки чаще уводили верную фазу, чем исправляли неверную.
+        public var phaseJumpMargin: Double
         /// Онсет бочки ближе этой доли периода к предсказанной доле не светится отдельно.
         public var dropWindow: Double
         /// Яркость онсета бочки вне сетки при захвате. Не выше порога вспышки `OfflineBeatChain.eventRise`
@@ -77,6 +82,7 @@ public struct BeatTracker: Sendable {
             unlockConfidence: Double = 0.35,
             phaseJump: Double = 0.12,
             phaseJumpChecks: Int = 2,
+            phaseJumpMargin: Double = 0.35,
             dropWindow: Double = 0.2,
             offGridScale: Float = 0.2,
             onsetFloor: Float = 0.4,
@@ -93,6 +99,7 @@ public struct BeatTracker: Sendable {
             self.unlockConfidence = unlockConfidence
             self.phaseJump = phaseJump
             self.phaseJumpChecks = phaseJumpChecks
+            self.phaseJumpMargin = phaseJumpMargin
             self.dropWindow = dropWindow
             self.offGridScale = offGridScale
             self.onsetFloor = onsetFloor
@@ -291,19 +298,20 @@ public struct BeatTracker: Sendable {
         // среднего сдвига; если понадобится убрать смещение, оценка должна подтягивать T, а не
         // заменять его (`beat-sync.md` 2.5).
         period = estimate.period
-        let candidate = phaseCandidate(period: estimate.period)
+        let comb = phaseCandidate(period: estimate.period, current: estimate.switched ? nil : nextBeat)
         guard let nextBeat, !estimate.switched else {
             if nextBeat != nil { resetConfidence() }
-            if let candidate { rephase(to: candidate) }
+            if let comb { rephase(to: comb.time) }
             return
         }
-        guard let candidate else { return }
-        let diff = Self.circularDifference(candidate - nextBeat, period: estimate.period)
-        if abs(diff) > parameters.phaseJump * estimate.period {
+        guard let comb else { return }
+        let diff = Self.circularDifference(comb.time - nextBeat, period: estimate.period)
+        let stronger = comb.score > (1 + parameters.phaseJumpMargin) * comb.currentScore
+        if abs(diff) > parameters.phaseJump * estimate.period, stronger {
             disagreements += 1
             if disagreements >= parameters.phaseJumpChecks {
                 resetConfidence()
-                rephase(to: candidate)
+                rephase(to: comb.time)
             }
         } else {
             disagreements = 0
@@ -333,31 +341,49 @@ public struct BeatTracker: Sendable {
         beatCounter += 2
     }
 
-    /// Время последней доли по гребенке на оси онсетов, `nil` без энергии в истории.
-    private func phaseCandidate(period: Double) -> Double? {
+    /// Время последней доли по гребенке на оси онсетов и ее оценка, `nil` без энергии в истории.
+    /// `currentScore` это оценка гребенки у фазы доли `current` (0 без нее).
+    private func phaseCandidate(period: Double, current: Double?) -> (time: Double, score: Double, currentScore: Double)? {
         let periodHops = period * framesPerSecond
         let delays = max(Int(periodHops.rounded()), 1)
         var best = -1.0
         var bestDelay = 0
         for delay in 0..<delays {
-            var score = 0.0
-            var weight = 1.0
-            for tooth in 0...Self.phaseTeeth {
-                let center = delay + Int((Double(tooth) * periodHops).rounded())
-                var peak: Float = 0
-                for age in max(center - 1, 0)...(center + 1) {
-                    peak = max(peak, odf(age: age))
-                }
-                score += weight * Double(peak)
-                weight *= Self.phaseToothWeight
-            }
+            let score = combScore(delay: delay, periodHops: periodHops)
             if score > best {
                 best = score
                 bestDelay = delay
             }
         }
         guard best > 0 else { return nil }
-        return now - Double(bestDelay) * hopDuration - StreamAnalyzer.onsetLag
+        var currentScore = 0.0
+        if let current {
+            // Задержка доли ФАПЧ от «сейчас» на оси онсетов, по кругу периода. Шаг онсета лежит от доли
+            // ФАПЧ до шага в любую сторону, поэтому берется лучшая из трех соседних задержек.
+            let age = (now - StreamAnalyzer.onsetLag - current) / hopDuration
+            let wrapped = Int((age - (age / periodHops).rounded(.down) * periodHops).rounded())
+            for delay in (wrapped - 1)...(wrapped + 1) {
+                currentScore = max(currentScore, combScore(delay: (delay + delays) % delays, periodHops: periodHops))
+            }
+        }
+        return (now - Double(bestDelay) * hopDuration - StreamAnalyzer.onsetLag, best, currentScore)
+    }
+
+    /// Оценка гребенки фазы для задержки `delay` шагов: зубцы через `periodHops`, у каждого максимум
+    /// функции онсетов в ±1 шаге, вес каждого следующего зубца `phaseToothWeight` от предыдущего.
+    private func combScore(delay: Int, periodHops: Double) -> Double {
+        var score = 0.0
+        var weight = 1.0
+        for tooth in 0...Self.phaseTeeth {
+            let center = delay + Int((Double(tooth) * periodHops).rounded())
+            var peak: Float = 0
+            for age in max(center - 1, 0)...(center + 1) {
+                peak = max(peak, odf(age: age))
+            }
+            score += weight * Double(peak)
+            weight *= Self.phaseToothWeight
+        }
+        return score
     }
 
     /// Широкополосная функция онсетов `age` шагов назад (0 это последний шаг), 0 вне истории.
