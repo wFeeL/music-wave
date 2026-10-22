@@ -12,7 +12,7 @@ struct SnapshotRendererTests {
         "10-expanded-no-artwork", "11-expanded-no-adapter", "12-pill-expanded",
         "13-settings", "13-settings-dark", "13-settings-tall",
         "14-wings-wide", "15-preset-aurora", "15-preset-sunset", "15-preset-ocean", "15-preset-neon",
-        "15-preset-fire", "15-preset-mono", "16-custom-color", "17-fill-thick-tall", "18-one-line",
+        "15-preset-fire", "15-preset-mono", "16-custom-color", "17-fill-thick-tall", "17-fill-normal", "18-one-line",
         "18-six-lines", "19-glow-radius-3x",
     ]
 

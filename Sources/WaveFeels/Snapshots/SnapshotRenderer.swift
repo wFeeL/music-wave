@@ -26,7 +26,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// фазы волн, свечение доли и «вздох».
 /// Тишина получается так же: после 6 с звук обнуляется, и волны затихают 2 с.
 /// Снимки 14-19 показывают вид волн из вкладки «Вид»: широкие крылья, готовые палитры, свой
-/// цвет, заливку с толщиной и размахом, одну и шесть волн, свечение радиусом 3×.
+/// цвет, полную заливку (обычную и с толщиной и размахом), одну и шесть волн, свечение радиусом 3×.
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
     /// Размер экрана снимка, pt: панель с крыльями 200 pt и свечением радиусом 3× целиком.
@@ -245,6 +245,10 @@ enum SnapshotRenderer {
                     $0.thickness = 2
                     $0.amplitude = 2
                 }
+            ),
+            SnapshotScene(
+                name: "17-fill-normal", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.fill = 1 }
             ),
             SnapshotScene(
                 name: "18-one-line", state: .collapsed, moment: groove, palette: fallback,

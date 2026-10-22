@@ -192,8 +192,8 @@ nonisolated struct WaveDrawing: Sendable {
 
         if pass == .lines, waves.fill > 0, !lines.isEmpty {
             drawFill(lines, in: context, size: size, start: start, end: end, middle: middle, swing: swing) { stops in
-                let top = Double(WavePaint.fillTopOpacity) * waves.fill
-                return shading(stops) { min(top * Double($0), 1) }
+                let top = min(Double(WavePaint.fillTopOpacity) * waves.fill, 1)
+                return shading(stops) { _ in top }
             }
         }
 
@@ -207,8 +207,9 @@ nonisolated struct WaveDrawing: Sendable {
         }
     }
 
-    /// Заливка между каждой линией и осью. Цвет по горизонтали тот же, что у линии, с
-    /// прозрачностью `fillTopOpacity × fill` × ее собственная (`colors`). По вертикали одна маска
+    /// Заливка между каждой линией и осью. Цвет по горизонтали тот же, что у линии, прозрачность
+    /// у линии `fillTopOpacity × fill` без учета прозрачности самой линии (`colors`): к краям
+    /// крыла и в тишине заливка сходит на нет вместе с размахом. По вертикали одна маска
     /// на холст (`clipToLayer`, единственный слой вне экрана, и только при заливке): у каждой
     /// линии верхняя и нижняя половины обрезаются по оси отдельно, градиент маски от полной
     /// у гребня линии в этой половине до нуля у оси. Так под гребнем видна вся заливка, сколько

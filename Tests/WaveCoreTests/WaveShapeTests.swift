@@ -633,7 +633,7 @@ struct WaveShapeTests {
         }
         let bad = WaveShape.samples(layer: .mid, amplitude: 1, phase: legacyPhase(1), count: 33, gain: .nan)
         #expect(bad.allSatisfy { $0.isFinite && abs($0) <= 1 })
-        #expect(WavePaint.fillTopOpacity == 0.35)
+        #expect(WavePaint.fillTopOpacity == 0.55)
     }
 
     @Test func paintSurvivesBadInput() {
