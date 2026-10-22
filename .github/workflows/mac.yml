@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: ci
+        # Шаг падает раньше лимита задачи, чтобы публикации результатов хватило времени.
+        timeout-minutes: 12
         run: bash scripts/ci-mac.sh "$MODE"
         env: {SIGNING_P12_BASE64: '${{ secrets.SIGNING_P12_BASE64 }}', SIGNING_P12_PASSWORD: '${{ secrets.SIGNING_P12_PASSWORD }}'}
       - if: always()

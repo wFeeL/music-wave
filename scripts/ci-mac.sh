@@ -65,23 +65,41 @@ skip() { # шаг, причина
     record "$1" skipped - "$2"
 }
 
-kill_tree() { # pid, сигнал
+descendants() { # pid: печатает всех потомков процесса
     local child
     for child in $(pgrep -P "$1" 2>/dev/null); do
-        kill_tree "$child" "$2"
+        echo "$child"
+        descendants "$child"
     done
-    kill "-$2" "$1" 2>/dev/null
+}
+
+any_alive() { # pid...
+    local p
+    for p in "$@"; do
+        if kill -0 "$p" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 watchdog() { # pid, лимит, файл-отметка, лог
-    local deadline=$((SECONDS + $2))
+    local deadline=$((SECONDS + $2)) tree grace=0
     while kill -0 "$1" 2>/dev/null; do
         if [[ $SECONDS -ge $deadline ]]; then
             echo "watchdog: step exceeded $2 s, terminating" >> "$4"
             : > "$3"
-            kill_tree "$1" TERM
-            sleep 10
-            kill_tree "$1" KILL
+            # Дерево собирается до TERM: после смерти родителя потомки уходят к launchd.
+            tree="$1 $(descendants "$1" | tr '\n' ' ')"
+            # shellcheck disable=SC2086 # список pid нужно разбить на отдельные аргументы
+            kill -TERM $tree 2>/dev/null
+            # shellcheck disable=SC2086 # то же
+            while [[ $grace -lt 10 ]] && any_alive $tree; do
+                sleep 1
+                grace=$((grace + 1))
+            done
+            # shellcheck disable=SC2086 # то же
+            kill -KILL $tree 2>/dev/null
             return 0
         fi
         sleep 1
@@ -99,8 +117,13 @@ run_step() { # имя, лимит, лог, команда...
     wd=$!
     wait "$pid"
     rc=$?
-    kill "$wd" 2>/dev/null
-    wait "$wd" 2>/dev/null
+    if [[ -f "$marker" ]]; then
+        # Сторож уже сработал: ждем, пока он добьет выживших потомков через KILL.
+        wait "$wd" 2>/dev/null
+    else
+        kill "$wd" 2>/dev/null
+        wait "$wd" 2>/dev/null
+    fi
     dt=$((SECONDS - t0))
     if [[ -f "$marker" ]]; then
         record "$name" timeout "$dt" "limit ${limit}s"
@@ -122,7 +145,10 @@ toolchain_info() {
 }
 
 smoke_launch() {
-    rm -f "$APP_LOG"
+    # Лог удаляется только на CI, чтобы не стереть настоящий лог разработчика.
+    if [[ -n "${CI:-}" ]]; then
+        rm -f "$APP_LOG"
+    fi
     "$APP/Contents/MacOS/WaveFeels" --exit-after 3 --no-capture
 }
 

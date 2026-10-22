@@ -19,8 +19,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(seconds))
                 Log.file("выход по --exit-after")
+                Log.flush()
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Log.flush()
     }
 }

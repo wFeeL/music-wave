@@ -47,7 +47,12 @@ trap cleanup EXIT
 
 P12=""
 PW=""
-if [[ -n "${SIGNING_P12_BASE64:-}" && -n "${SIGNING_P12_PASSWORD:-}" ]]; then
+if [[ -n "${SIGNING_P12_BASE64:-}" && -z "${SIGNING_P12_PASSWORD:-}" ]] ||
+    [[ -z "${SIGNING_P12_BASE64:-}" && -n "${SIGNING_P12_PASSWORD:-}" ]]; then
+    echo "error: set both SIGNING_P12_BASE64 and SIGNING_P12_PASSWORD, or neither" >&2
+    exit 1
+fi
+if [[ -n "${SIGNING_P12_BASE64:-}" ]]; then
     echo "certificate source: repository secrets"
     P12="$WORK/signing.p12"
     printf '%s' "$SIGNING_P12_BASE64" | base64 --decode > "$P12"

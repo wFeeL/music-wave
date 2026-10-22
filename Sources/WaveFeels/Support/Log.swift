@@ -16,6 +16,11 @@ nonisolated enum Log {
         fileWriter.append(message)
     }
 
+    /// Синхронно дожидается записи всех строк, поставленных в очередь. Вызывать перед выходом.
+    static func flush() {
+        fileWriter.flush()
+    }
+
     private static let fileWriter = LogFileWriter()
 }
 
@@ -40,6 +45,10 @@ private final class LogFileWriter: Sendable {
         queue.async {
             self.write(line)
         }
+    }
+
+    func flush() {
+        queue.sync {}
     }
 
     private func write(_ line: String) {
