@@ -6,20 +6,35 @@ import WaveCore
 enum PipelineStatus: Equatable, Sendable {
     case stopped
     case demo
+    /// Tap создается на очереди управления; анализ стоит до конца создания.
+    case starting
     case capturing(TapStatus)
     case waitingForSource
+    /// Пересборка сторожем нулей.
     case rebuilding(attempt: Int)
+    /// Tap не создался, повтор номер `attempt` из `AudioPipeline.startRetryPauses.count` после паузы.
+    case retrying(attempt: Int, message: String)
     /// Долгая тишина: IOProc и анализ остановлены, подписки работают.
     case suspended
     /// «Приостановить визуализацию»: IOProc, демо и анализ остановлены, подписки работают.
     case paused
 }
 
+/// Последняя ошибка создания или удаления tap: ее показывает диагностика, даже когда статус
+/// уже другой (например, приостановка в тишине).
+struct CaptureErrorNote: Equatable, Sendable {
+    var message: String
+    var date: Date
+}
+
 /// Выбор источника, сборка и пересборка захвата, сторож нулей.
 ///
 /// Пересобирает tap при смене совпавших процессов, устройства вывода, его частоты, источника,
 /// после перезапуска coreaudiod (через `OutputDeviceMonitor`) и по явному `rebuild(reason:)`.
-/// Пересборки не чаще раза в 250 мс.
+/// Пересборки не чаще раза в 250 мс. Tap создается вне главного потока (`ProcessTapCapture`),
+/// результат применяется здесь, если после него не было новой пересборки или остановки
+/// (`startGeneration`). Если создать tap не вышло, повторы через 1, 2 и 4 с, затем статус
+/// `failed` до следующего события.
 @MainActor
 @Observable
 final class AudioPipeline {
@@ -28,12 +43,15 @@ final class AudioPipeline {
     static let zeroRunLimit = 2.5
     static let maxWatchdogRebuilds = 5
     static let watchdogPauses: [Double] = [1, 2, 4]
+    /// Паузы перед повторами, если tap не создался.
+    static let startRetryPauses: [Double] = [1, 2, 4]
 
     private(set) var status: PipelineStatus = .stopped
     private(set) var matchedProcesses: [AudioProcessInfo] = []
     private(set) var sourceOutputting = false
     /// Сколько пересборок подряд сделал сторож нулей; сбрасывается, когда пошел ненулевой звук.
     private(set) var watchdogRebuilds = 0
+    private(set) var lastCaptureError: CaptureErrorNote?
 
     /// Источник по Now Playing «играет». Выставляет `AppModel`.
     @ObservationIgnored var adapterSaysPlaying = false {
@@ -93,6 +111,8 @@ final class AudioPipeline {
     @ObservationIgnored private var lastRebuildAt = -Double.infinity
     @ObservationIgnored private var rebuildTask: Task<Void, Never>?
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
+    /// Растет при каждом запуске и остановке tap: результат устаревшего запуска не применяется.
+    @ObservationIgnored private var startGeneration = 0
 
     init(store: FrameStore, processes: AudioProcessList, output: OutputDeviceMonitor) {
         self.processes = processes
@@ -130,10 +150,11 @@ final class AudioPipeline {
     }
 
     /// Останавливает захват, демо, анализ и подписки.
+    /// Удаление tap синхронное: после возврата агрегата и IOProc нет.
     func stop() {
         mode = .stopped
         cancelTasks()
-        capture.stop()
+        stopCapture()
         stopDemo()
         engine.stop()
         processes.stop()
@@ -169,7 +190,7 @@ final class AudioPipeline {
         mode = .suspended
         rebuildTask?.cancel()
         rebuildTask = nil
-        capture.stop()
+        stopCaptureInBackground()
         engine.stop()
         status = .suspended
         log("захват приостановлен в тишине")
@@ -209,7 +230,7 @@ final class AudioPipeline {
         case .live, .suspended:
             rebuildTask?.cancel()
             rebuildTask = nil
-            capture.stop()
+            stopCaptureInBackground()
             engine.stop()
             // После паузы сразу захват: тишину AppModel отсчитает заново.
             mode = .live
@@ -239,7 +260,8 @@ final class AudioPipeline {
 
     // MARK: - Пересборка
 
-    private func performRebuild(reason: String) {
+    /// `attempt`: номер повтора после неудачного создания tap, 0 для обычной пересборки.
+    private func performRebuild(reason: String, attempt: Int = 0) {
         guard mode == .live else { return }
         guard !paused else {
             status = .paused
@@ -249,8 +271,8 @@ final class AudioPipeline {
         rebuildTask = nil
         lastRebuildAt = Self.now()
 
+        // Читатель кольца стоит, пока tap пересоздается: кольцо обнуляется на очереди управления.
         engine.stop()
-        capture.stop()
 
         let snapshot = processes.snapshot()
         let ids = ProcessMatcher.matches(source, in: snapshot)
@@ -259,26 +281,63 @@ final class AudioPipeline {
 
         let systemWide = source == .systemWide
         guard systemWide || !ids.isEmpty else {
+            stopCaptureInBackground()
             status = .waitingForSource
             log("пересборка (\(reason)): источник \(source.displayName) не найден, жду")
             return
         }
 
-        // Писатель и читатель остановлены.
-        ring.reset()
-        do {
-            try capture.start(
-                processObjectIDs: ids,
-                systemWide: systemWide,
-                outputDeviceUID: output.deviceUID
-            )
-            engine.start(sampleRate: capture.sampleRate)
-            pushSettings()
-            log("пересборка (\(reason)): \(source.displayName), процессов \(ids.count), вывод \(output.deviceName)")
-        } catch {
-            log("пересборка (\(reason)) не удалась: \(error)")
+        startGeneration += 1
+        let generation = startGeneration
+        let summary = "\(source.displayName), процессов \(ids.count), вывод \(output.deviceName)"
+        status = .starting
+        // Прежний tap удаляется в той же очереди до создания нового.
+        capture.start(
+            processObjectIDs: ids,
+            systemWide: systemWide,
+            outputDeviceUID: output.deviceUID
+        ) { @Sendable result in
+            Task { @MainActor in
+                self.finishStart(result, generation: generation, reason: reason, attempt: attempt, summary: summary)
+            }
         }
-        status = .capturing(capture.status)
+    }
+
+    private func finishStart(
+        _ result: Result<Double, TapError>,
+        generation: Int,
+        reason: String,
+        attempt: Int,
+        summary: String
+    ) {
+        // После этого запуска была новая пересборка или остановка: tap удалит следующая
+        // операция в очереди управления.
+        guard generation == startGeneration, mode == .live, !paused else { return }
+        switch result {
+        case .success(let rate):
+            engine.start(sampleRate: rate)
+            pushSettings()
+            status = .capturing(capture.status)
+            log("пересборка (\(reason)): \(summary)")
+        case .failure(let error):
+            noteCaptureError(error.message)
+            let retries = Self.startRetryPauses.count
+            guard attempt < retries else {
+                status = .capturing(.failed(error.message))
+                log("пересборка (\(reason)) не удалась: \(error.message); повторов было \(retries), жду следующего события")
+                return
+            }
+            let pause = Self.startRetryPauses[attempt]
+            let next = attempt + 1
+            status = .retrying(attempt: next, message: error.message)
+            log("пересборка (\(reason)) не удалась: \(error.message); повтор \(next) из \(retries) через \(Int(pause)) с")
+            rebuildTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(pause))
+                guard !Task.isCancelled, let self else { return }
+                self.rebuildTask = nil
+                self.performRebuild(reason: "повтор создания tap \(next)", attempt: next)
+            }
+        }
     }
 
     private func processesChanged() {
@@ -346,7 +405,7 @@ final class AudioPipeline {
         let pause = Self.watchdogPauses[min(attempt - 1, Self.watchdogPauses.count - 1)]
         log("сторож нулей: \(String(format: "%.1f", zeroRun)) с нулей при звучащем источнике, попытка \(attempt), пауза \(Int(pause)) с")
         engine.stop()
-        capture.stop()
+        stopCaptureInBackground()
         status = .rebuilding(attempt: attempt)
         rebuildTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(pause))
@@ -396,6 +455,30 @@ final class AudioPipeline {
         demo = nil
     }
 
+    /// Удаляет tap и ждет этого: после возврата писателя в кольце нет.
+    private func stopCapture() {
+        startGeneration += 1
+        if let error = capture.stop() {
+            noteCaptureError("остановка tap: \(error)")
+        }
+    }
+
+    /// Удаляет tap без ожидания: удаление встает в очередь управления после уже поставленных
+    /// запусков, ошибка попадает в диагностику.
+    private func stopCaptureInBackground() {
+        startGeneration += 1
+        capture.stopInBackground { @Sendable error in
+            guard let error else { return }
+            Task { @MainActor in
+                self.noteCaptureError("остановка tap: \(error)")
+            }
+        }
+    }
+
+    private func noteCaptureError(_ message: String) {
+        lastCaptureError = CaptureErrorNote(message: message, date: Date())
+    }
+
     private func cancelTasks() {
         rebuildTask?.cancel()
         rebuildTask = nil
@@ -411,4 +494,12 @@ final class AudioPipeline {
     private static func now() -> Double {
         ProcessInfo.processInfo.systemUptime
     }
+}
+
+// MARK: - Для тестов
+
+extension AudioPipeline {
+    var analysisEngineForTesting: AnalysisEngine { engine }
+    var demoForTesting: DemoAudioSource? { demo }
+    var ringForTesting: SampleRingBuffer { ring }
 }

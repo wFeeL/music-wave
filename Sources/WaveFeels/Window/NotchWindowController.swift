@@ -5,6 +5,10 @@ import WaveCore
 
 /// Панель у выреза: положение по экранам, курсор, пропуск кликов и полноэкранный режим.
 ///
+/// Экраны. Вырез пересчитывается при смене параметров экранов и после пробуждения экранов.
+/// Остров стоит только на встроенном экране с вырезом; если его нет (внешний монитор при
+/// закрытой крышке), капсула встает под строку меню основного экрана (`NotchGeometry.layout`).
+///
 /// Курсор. Глобальный монитор `mouseMoved` нужен только чтобы заметить вход в зону выреза:
 /// событий над окнами своего приложения он не видит. Пока курсор в зоне или остров раскрыт,
 /// таймер 30 Гц опрашивает `NSEvent.mouseLocation`; он выключается, когда остров не раскрыт
@@ -25,6 +29,8 @@ final class NotchWindowController {
     private var hostingView: NSHostingView<IslandView>?
     private var isShown = false
     private var screenObserver: (any NSObjectProtocol)?
+    /// Экраны проснулись: панель ставится заново и выводится вперед.
+    private var screensWakeObserver: (any NSObjectProtocol)?
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var pollTimer: Timer?
@@ -44,6 +50,15 @@ final class NotchWindowController {
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.relayout()
+            }
+        }
+        screensWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -105,6 +120,10 @@ final class NotchWindowController {
             NotificationCenter.default.removeObserver(screenObserver)
         }
         screenObserver = nil
+        if let screensWakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(screensWakeObserver)
+        }
+        screensWakeObserver = nil
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
         }

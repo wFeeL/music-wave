@@ -17,14 +17,17 @@ struct TapError: Error, CustomStringConvertible, Sendable {
 
 /// Захват звука процессов через Core Audio process tap и приватное агрегатное устройство.
 ///
-/// Создание и удаление tap и агрегата идет на своей последовательной очереди (это IPC с coreaudiod),
-/// публичные методы синхронно ждут ее. IOProc работает на очереди `tap-io` и пишет моно в кольцо.
+/// Создание и удаление tap и агрегата идет на своей последовательной очереди (это IPC с coreaudiod,
+/// первое создание может идти сотни миллисекунд): `start` и `stopInBackground` ставят работу
+/// в очередь и не ждут, `stop()` ждет. Порядок вызовов сохраняется, поэтому прежний tap всегда
+/// удаляется раньше, чем создается следующий. IOProc работает на очереди `tap-io` и пишет моно в кольцо.
 nonisolated final class ProcessTapCapture: @unchecked Sendable {
     private struct Published: Sendable {
         var status: TapStatus
         var sampleRate: Double
     }
 
+    private let ring: SampleRingBuffer
     private let mixer: MonoMixer
     private let controlQueue = DispatchQueue(label: "com.wfeels.wavefeels.tap-control")
     private let ioQueue = DispatchQueue(label: "com.wfeels.wavefeels.tap-io", qos: .userInteractive)
@@ -34,8 +37,11 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
     private var tapID: AudioObjectID = kAudioObjectUnknown
     private var aggregateID: AudioObjectID = kAudioObjectUnknown
     private var procID: AudioDeviceIOProcID?
+    /// IOProc запущен и учтен в кольце как писатель.
+    private var writerAttached = false
 
     init(ring: SampleRingBuffer) {
+        self.ring = ring
         mixer = MonoMixer(ring: ring)
     }
 
@@ -44,35 +50,65 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
     /// Частота сэмплов, которые IOProc пишет в кольцо; 0, пока tap не работает.
     var sampleRate: Double { published.withLock { $0.sampleRate } }
 
-    /// Пересоздает tap и агрегат. При ошибке статус `failed`, все созданное удаляется.
-    func start(processObjectIDs: [AudioObjectID], systemWide: Bool, outputDeviceUID: String) throws {
-        try controlQueue.sync {
-            try self.startOnControlQueue(
-                processObjectIDs: processObjectIDs,
-                systemWide: systemWide,
-                outputDeviceUID: outputDeviceUID
-            )
+    /// Пересоздает tap и агрегат на очереди управления: сначала удаляет прежние, затем обнуляет
+    /// кольцо и создает новые. Вызывающий должен остановить читателя кольца (анализ) до вызова
+    /// и не запускать его до `completion`. `completion` приходит на очереди управления: частота
+    /// входа или ошибка; при ошибке все созданное удалено, статус `failed`.
+    func start(
+        processObjectIDs: [AudioObjectID],
+        systemWide: Bool,
+        outputDeviceUID: String,
+        completion: @escaping @Sendable (Result<Double, TapError>) -> Void
+    ) {
+        controlQueue.async {
+            do {
+                let rate = try self.startOnControlQueue(
+                    processObjectIDs: processObjectIDs,
+                    systemWide: systemWide,
+                    outputDeviceUID: outputDeviceUID
+                )
+                completion(.success(rate))
+            } catch {
+                completion(.failure(error as? TapError ?? TapError(message: "\(error)")))
+            }
         }
     }
 
-    func stop() {
+    /// Останавливает IOProc, удаляет агрегат и tap и ждет этого. Возвращает текст первой ошибки.
+    @discardableResult
+    func stop() -> String? {
         controlQueue.sync {
-            let error = self.teardown()
-            if let error {
-                Self.log("остановка tap: \(error)")
-                self.publish(.failed(error), sampleRate: 0)
-            } else {
-                self.publish(.idle, sampleRate: 0)
-            }
+            self.stopOnControlQueue()
+        }
+    }
+
+    /// То же, что `stop()`, но без ожидания. `completion` на очереди управления.
+    func stopInBackground(completion: @escaping @Sendable (String?) -> Void) {
+        controlQueue.async {
+            completion(self.stopOnControlQueue())
         }
     }
 
     // MARK: - Очередь управления
 
-    private func startOnControlQueue(processObjectIDs: [AudioObjectID], systemWide: Bool, outputDeviceUID: String) throws {
+    private func stopOnControlQueue() -> String? {
+        let error = teardown()
+        if let error {
+            Self.log("остановка tap: \(error)")
+            publish(.failed(error), sampleRate: 0)
+        } else {
+            publish(.idle, sampleRate: 0)
+        }
+        return error
+    }
+
+    private func startOnControlQueue(processObjectIDs: [AudioObjectID], systemWide: Bool, outputDeviceUID: String) throws -> Double {
+        // Прежний агрегат удаляется до создания нового.
         if let error = teardown() {
             Self.log("остановка прошлого tap: \(error)")
         }
+        // Писатель остановлен, читатель остановлен вызывающим.
+        ring.reset()
         do {
             let description = try Self.makeTapDescription(processObjectIDs: processObjectIDs, systemWide: systemWide)
 
@@ -96,7 +132,11 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
             )
             aggregateID = newAggregate
 
-            let layout = Self.inputLayout(aggregate: newAggregate, tapFormat: tapFormat)
+            let layout = try Self.inputLayout(
+                aggregate: newAggregate,
+                tapFormat: tapFormat,
+                expectsSubDevice: !outputDeviceUID.isEmpty
+            )
             let rate = try Self.inputSampleRate(aggregate: newAggregate, layout: layout, tapFormat: tapFormat)
 
             var newProc: AudioDeviceIOProcID?
@@ -111,10 +151,13 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
             // IOProc еще не запущен: смена номера первого буфера tap не гоняется с аудиопотоком.
             mixer.setFirstTapBuffer(layout.firstTapStream)
             try Self.check(AudioDeviceStart(newAggregate, newProc), "AudioDeviceStart")
+            ring.attachWriter()
+            writerAttached = true
 
             let count = systemWide ? 0 : processObjectIDs.count
             publish(.running(sampleRate: rate, processCount: count), sampleRate: rate)
             Self.log("tap запущен: \(systemWide ? "весь звук" : "процессов \(count)"), \(Int(rate)) Гц, вывод \(outputDeviceUID)")
+            return rate
         } catch {
             let message = (error as? TapError)?.message ?? "\(error)"
             Self.log("tap не запущен: \(message)")
@@ -145,6 +188,10 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
             aggregateID = kAudioObjectUnknown
         }
         procID = nil
+        if writerAttached {
+            ring.detachWriter()
+            writerAttached = false
+        }
         if tapID != kAudioObjectUnknown {
             note(AudioHardwareDestroyProcessTap(tapID), "AudioHardwareDestroyProcessTap")
             tapID = kAudioObjectUnknown
@@ -215,9 +262,15 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         var tapStreams: Range<Int> { firstTapStream..<max(firstTapStream, streams.count) }
     }
 
-    /// Находит потоки tap: они идут после входных потоков подустройств. Сверяет число их каналов
-    /// с форматом tap и пишет раскладку в лог (ее показывает диагностика).
-    private static func inputLayout(aggregate: AudioObjectID, tapFormat: AudioStreamBasicDescription) -> InputLayout {
+    /// Находит потоки tap (`TapStreamLayout`): с конца списка по числу каналов формата tap,
+    /// иначе после входных потоков подустройств. Если их нельзя отделить от входов подустройства
+    /// (например, список подустройств не прочитался), бросает ошибку: лучше не захватывать, чем
+    /// сводить микрофон. Раскладка пишется в лог (ее показывает диагностика).
+    private static func inputLayout(
+        aggregate: AudioObjectID,
+        tapFormat: AudioStreamBasicDescription,
+        expectsSubDevice: Bool
+    ) throws -> InputLayout {
         let streams: [AudioStreamID] = CAProperty.readArray(
             aggregate,
             kAudioDevicePropertyStreams,
@@ -227,25 +280,20 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
             CAProperty.read(stream, kAudioStreamPropertyVirtualFormat, default: AudioStreamBasicDescription())
         }
         let channels = formats.map { Int($0.mChannelsPerFrame) }
-
-        let subDevices: [AudioObjectID] = CAProperty.readArray(aggregate, kAudioAggregateDevicePropertyActiveSubDeviceList)
-        var subDeviceInputs = 0
-        for device in subDevices {
-            let inputs: [AudioStreamID] = CAProperty.readArray(
-                device,
-                kAudioDevicePropertyStreams,
-                scope: kAudioDevicePropertyScopeInput
-            )
-            subDeviceInputs += inputs.count
-        }
-
-        var first = subDeviceInputs
-        if first >= streams.count {
-            log("входных потоков агрегата \(streams.count), у подустройств \(subDeviceInputs): беру последний поток как tap")
-            first = max(streams.count - 1, 0)
-        }
+        let subDeviceInputs = subDeviceInputStreams(aggregate: aggregate, expectsSubDevice: expectsSubDevice)
         let tapChannels = Int(tapFormat.mChannelsPerFrame)
-        let foundChannels = first < channels.count ? channels[first...].reduce(0, +) : 0
+        let subDeviceText = subDeviceInputs.map { "\($0)" } ?? "не прочитано"
+
+        guard let first = TapStreamLayout.firstTapStream(
+            channels: channels,
+            subDeviceInputStreams: subDeviceInputs,
+            tapChannels: tapChannels
+        ) else {
+            throw TapError(message: "потоки tap не отделить от входов устройства вывода "
+                + "(каналы входных потоков агрегата \(channels), у подустройств потоков \(subDeviceText), "
+                + "в формате tap каналов \(tapChannels)); захват не запущен, чтобы не записать микрофон")
+        }
+        let foundChannels = channels[first...].reduce(0, +)
         if tapChannels > 0, foundChannels != tapChannels {
             log("каналов в потоках tap \(foundChannels), в формате tap \(tapChannels)")
         }
@@ -253,8 +301,28 @@ nonisolated final class ProcessTapCapture: @unchecked Sendable {
         let perStream = channels.enumerated()
             .map { index, count in "#\(index): \(count) кан.\(index >= first ? " tap" : "")" }
             .joined(separator: ", ")
-        log("входных потоков агрегата \(streams.count) (у подустройств \(subDeviceInputs)): \(perStream)")
+        log("входных потоков агрегата \(streams.count) (у подустройств \(subDeviceText)): \(perStream)")
         return InputLayout(streams: streams, channels: channels, formats: formats, firstTapStream: first)
+    }
+
+    /// Входных потоков у подустройств агрегата или `nil`, если список не прочитался либо
+    /// устройство вывода в нем не нашлось, хотя добавлялось.
+    private static func subDeviceInputStreams(aggregate: AudioObjectID, expectsSubDevice: Bool) -> Int? {
+        guard let subDevices: [AudioObjectID] = CAProperty.readArrayIfReadable(
+            aggregate,
+            kAudioAggregateDevicePropertyActiveSubDeviceList
+        ) else { return nil }
+        if expectsSubDevice, subDevices.isEmpty { return nil }
+        var total = 0
+        for device in subDevices {
+            guard let inputs: [AudioStreamID] = CAProperty.readArrayIfReadable(
+                device,
+                kAudioDevicePropertyStreams,
+                scope: kAudioDevicePropertyScopeInput
+            ) else { return nil }
+            total += inputs.count
+        }
+        return total
     }
 
     /// Включает для IOProc только потоки tap (`kAudioDevicePropertyIOProcStreamUsage`), чтобы

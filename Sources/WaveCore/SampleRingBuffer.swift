@@ -14,6 +14,8 @@ public final class SampleRingBuffer: @unchecked Sendable {
     /// Сколько сэмплов писатель успел заявить: растет до начала копирования,
     /// чтобы читатель увидел перезапись окна, которая еще не опубликована.
     private let claimed = Atomic<Int>(0)
+    private let activeWriterCount = Atomic<Int>(0)
+    private let peakWriterCount = Atomic<Int>(0)
 
     public init(capacity: Int) {
         var size = 1
@@ -85,4 +87,34 @@ public final class SampleRingBuffer: @unchecked Sendable {
         claimed.store(0, ordering: .relaxed)
         written.store(0, ordering: .releasing)
     }
+
+    // MARK: - Учет писателей
+
+    /// Писатель начал писать (IOProc запущен, таймер демо идет). Вызывается при запуске и
+    /// остановке писателя, не из аудио-колбэка. Писателей больше одного быть не должно: это
+    /// проверяют тесты по `peakWriters`.
+    public func attachWriter() {
+        let count = activeWriterCount.wrappingAdd(1, ordering: .relaxed).newValue
+        var peak = peakWriterCount.load(ordering: .relaxed)
+        while count > peak {
+            let (exchanged, original) = peakWriterCount.compareExchange(
+                expected: peak,
+                desired: count,
+                ordering: .relaxed
+            )
+            if exchanged { break }
+            peak = original
+        }
+    }
+
+    /// Писатель остановлен и больше не пишет.
+    public func detachWriter() {
+        activeWriterCount.wrappingSubtract(1, ordering: .relaxed)
+    }
+
+    /// Сколько писателей работает сейчас.
+    public var activeWriters: Int { activeWriterCount.load(ordering: .relaxed) }
+
+    /// Наибольшее число писателей, работавших одновременно, с момента создания.
+    public var peakWriters: Int { peakWriterCount.load(ordering: .relaxed) }
 }

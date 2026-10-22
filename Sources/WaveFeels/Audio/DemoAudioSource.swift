@@ -78,14 +78,18 @@ nonisolated final class DemoAudioSource: @unchecked Sendable {
                 self?.tick()
             }
             self.timer = timer
+            self.ring.attachWriter()
             timer.resume()
         }
     }
 
     func stop() {
         queue.sync {
-            self.timer?.cancel()
+            guard let timer = self.timer else { return }
+            // Обработчик таймера идет на этой же очереди: после отмены он больше не пишет.
+            timer.cancel()
             self.timer = nil
+            self.ring.detachWriter()
         }
     }
 

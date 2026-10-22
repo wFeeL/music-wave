@@ -61,22 +61,39 @@ nonisolated enum CAProperty {
         _ selector: AudioObjectPropertySelector,
         scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
     ) -> [T] {
-        guard object != kAudioObjectUnknown else { return [] }
+        readArrayIfReadable(object, selector, scope: scope) ?? []
+    }
+
+    /// Как `readArray`, но ошибка чтения дает `nil`, а не пустой массив: так пустой список
+    /// отличается от непрочитанного.
+    static func readArrayIfReadable<T: BitwiseCopyable>(
+        _ object: AudioObjectID,
+        _ selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+    ) -> [T]? {
+        guard object != kAudioObjectUnknown else { return nil }
         var address = makeAddress(selector, scope: scope)
         var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr else { return [] }
+        guard AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size) == noErr else { return nil }
         let stride = MemoryLayout<T>.stride
         let capacity = Int(size) / stride
         guard capacity > 0 else { return [] }
-        return [T](unsafeUninitializedCapacity: capacity) { buffer, initializedCount in
+        var failed = false
+        let values = [T](unsafeUninitializedCapacity: capacity) { buffer, initializedCount in
             initializedCount = 0
-            guard let base = buffer.baseAddress else { return }
+            guard let base = buffer.baseAddress else {
+                failed = true
+                return
+            }
             var ioSize = UInt32(capacity * stride)
             let status = AudioObjectGetPropertyData(object, &address, 0, nil, &ioSize, base)
             if status == noErr {
                 initializedCount = min(capacity, Int(ioSize) / stride)
+            } else {
+                failed = true
             }
         }
+        return failed ? nil : values
     }
 
     /// Строковое свойство. Core Audio отдает строку с +1, поэтому `takeRetainedValue()`.

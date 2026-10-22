@@ -13,6 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// запуска модели.
     private var settingsRequested = false
     private var diagnosticsRequested = false
+    /// Сон и пробуждение (`NSWorkspace`) и блокировка экрана (`DistributedNotificationCenter`).
+    private var workspaceObservers: [any NSObjectProtocol] = []
+    private var distributedObservers: [any NSObjectProtocol] = []
+
+    static let screenLockedNotification = Notification.Name("com.apple.screenIsLocked")
+    static let screenUnlockedNotification = Notification.Name("com.apple.screenIsUnlocked")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         arguments = LaunchArguments.parse(ProcessInfo.processInfo.arguments)
@@ -51,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.notch = notch
             self.modelHolder.model = model
             model.start(arguments: arguments)
+            self.subscribeToSystemEvents()
             notch.show()
             if self.settingsRequested {
                 self.settingsRequested = false
@@ -63,10 +70,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Снимает подписки, останавливает панель (мониторы курсора, таймер опроса, слежение за
+    /// полноэкранными окнами) и модель: цикл, задачи, tap с агрегатным устройством (удаляется
+    /// синхронно) и процессы perl адаптера.
     func applicationWillTerminate(_ notification: Notification) {
+        unsubscribeFromSystemEvents()
         notch?.stop()
         model?.stop()
+        Log.file("выход: захват, адаптер и подписки остановлены")
         Log.flush()
+    }
+
+    // MARK: - Сон, пробуждение и блокировка экрана
+
+    private func subscribeToSystemEvents() {
+        guard workspaceObservers.isEmpty, distributedObservers.isEmpty else { return }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.model?.systemWillSleep()
+                }
+            },
+            workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.model?.systemDidWake()
+                }
+            },
+        ]
+        let distributed = DistributedNotificationCenter.default()
+        distributedObservers = [
+            distributed.addObserver(forName: Self.screenLockedNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.model?.screenLockChanged(true)
+                }
+            },
+            distributed.addObserver(forName: Self.screenUnlockedNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.model?.screenLockChanged(false)
+                }
+            },
+        ]
+    }
+
+    private func unsubscribeFromSystemEvents() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        for observer in workspaceObservers {
+            workspace.removeObserver(observer)
+        }
+        workspaceObservers = []
+        let distributed = DistributedNotificationCenter.default()
+        for observer in distributedObservers {
+            distributed.removeObserver(observer)
+        }
+        distributedObservers = []
     }
 
     func showSettings() {

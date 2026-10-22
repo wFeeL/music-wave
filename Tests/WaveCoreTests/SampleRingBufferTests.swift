@@ -107,3 +107,21 @@ private final class DoneFlag: Sendable {
     #expect(result.successes > 0)
     #expect(result.torn == 0)
 }
+
+@Test func writerCountTracksAttachAndPeak() {
+    let rb = SampleRingBuffer(capacity: 16)
+    #expect(rb.activeWriters == 0)
+    rb.attachWriter()
+    #expect(rb.activeWriters == 1)
+    rb.detachWriter()
+    rb.attachWriter()
+    #expect(rb.activeWriters == 1)
+    #expect(rb.peakWriters == 1)
+    rb.attachWriter()
+    #expect(rb.activeWriters == 2)
+    #expect(rb.peakWriters == 2)
+    rb.detachWriter()
+    rb.detachWriter()
+    #expect(rb.activeWriters == 0)
+    #expect(rb.peakWriters == 2)
+}

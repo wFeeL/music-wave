@@ -12,7 +12,9 @@ typealias PaletteColor = WaveCore.RGBColor
 /// Цикл 10 Гц на главном акторе: уровень из `FrameStore` идет в `ActivityGate`, Now Playing
 /// источника в `IslandInputs`, затем `IslandStateMachine`. Там же настройки передаются в
 /// `AudioPipeline`, а после 10 с тишины захват приостанавливается, если Now Playing работает
-/// и сообщит о старте воспроизведения. Подписок и задач в `deinit` нет: владелец вызывает `stop()`.
+/// и сообщит о старте воспроизведения. Сон останавливает захват и адаптер, пробуждение через 1 с
+/// запускает их заново (`systemWillSleep`, `systemDidWake`, подписки в `AppDelegate`).
+/// Подписок и задач в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
 @Observable
 final class AppModel {
@@ -27,6 +29,14 @@ final class AppModel {
     /// Сколько трек может быть без обложки, прежде чем панель и волны вернутся к стандартной
     /// палитре: адаптер иногда присылает обложку следом за названием.
     static let missingArtworkGrace: Duration = .milliseconds(500)
+    /// Пауза после пробуждения перед запуском захвата и адаптера: устройства вывода и coreaudiod
+    /// приходят в себя не сразу.
+    static let wakeDelay: Duration = .seconds(1)
+    /// Как часто перечитывать доступ к звуку, пока показана подсказка и окна ее не опрашивают.
+    static let permissionPollInterval = 5.0
+    /// Приложения запускаются и закрываются пачкой: `/Applications` просматривается один раз
+    /// через столько после последнего события.
+    static let applicationsScanDelay: Duration = .milliseconds(500)
 
     let settings: AppSettings
     let store: FrameStore
@@ -93,6 +103,16 @@ final class AppModel {
     @ObservationIgnored private var shownArtworkData: Data?
     /// Значок приложения-источника для панели без трека, по пути бандла.
     @ObservationIgnored private var sourceIconCache: (path: String, icon: NSImage)?
+    /// Последний просмотр `/Applications`: Яндекс Музыка по имени бандла или `nil`. Первый раз
+    /// при запуске, дальше вне главного потока после запуска или закрытия приложений.
+    @ObservationIgnored private var scannedYandexMusic: AudioSource?
+    @ObservationIgnored private var applicationsScanned = false
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    /// Когда последний раз читался доступ к звуку (`checkAudioPermission`), по `systemUptime`.
+    @ObservationIgnored private var lastPermissionCheck = -Double.infinity
+    /// Между `systemWillSleep` и запуском после пробуждения.
+    @ObservationIgnored private var asleep = false
+    @ObservationIgnored private var wakeTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         settings = AppSettings(defaults: defaults)
@@ -117,20 +137,10 @@ final class AppModel {
         subscribeToNotifications()
         refreshSourceAppRunning()
 
-        if let file = arguments.demoFile {
-            do {
-                try pipeline.startDemo(file: file)
-            } catch {
-                log("демо не запустилось: \(error.localizedDescription)")
-            }
-        } else if arguments.noCapture {
+        if arguments.noCapture {
             log("захват звука выключен (--no-capture)")
-        } else {
-            pipeline.start()
         }
-        if !arguments.noCapture {
-            adapter.start()
-        }
+        startSources()
         checkAudioPermission()
 
         loopTask = Task { @MainActor [weak self] in
@@ -155,11 +165,90 @@ final class AppModel {
             NotificationCenter.default.removeObserver(observer)
         }
         appObservers = []
-        pipeline.stop()
-        adapter.stop()
+        wakeTask?.cancel()
+        wakeTask = nil
+        asleep = false
+        scanTask?.cancel()
+        scanTask = nil
+        stopSources()
         artworkTask?.cancel()
         artworkTask = nil
+    }
+
+    /// Захват или демо по аргументам запуска и адаптер Now Playing.
+    private func startSources() {
+        if let file = arguments.demoFile {
+            do {
+                try pipeline.startDemo(file: file)
+            } catch {
+                log("демо не запустилось: \(error.localizedDescription)")
+            }
+        } else if !arguments.noCapture {
+            pipeline.start()
+        }
+        if !arguments.noCapture {
+            adapter.start()
+        }
+    }
+
+    /// Захват, демо, анализ и процессы адаптера останавливаются, агрегатное устройство удаляется.
+    private func stopSources() {
+        pipeline.stop()
+        adapter.stop()
         silentSince = nil
+    }
+
+    // MARK: - Сон и блокировка экрана
+
+    /// `NSWorkspace.willSleepNotification`: захват и адаптер стоят до пробуждения.
+    func systemWillSleep() {
+        wakeTask?.cancel()
+        wakeTask = nil
+        guard loopTask != nil, !asleep else { return }
+        asleep = true
+        log("сон: захват и Now Playing остановлены")
+        stopSources()
+    }
+
+    /// `NSWorkspace.didWakeNotification`: через `wakeDelay` захват и адаптер запускаются заново,
+    /// tap собирается с нуля (устройство вывода и процессы за время сна могли смениться).
+    /// Пробуждение без замеченного сна тоже пересобирает все.
+    func systemDidWake() {
+        guard loopTask != nil else { return }
+        wakeTask?.cancel()
+        log("пробуждение: захват и Now Playing запустятся через \(Self.wakeDelay.components.seconds) с")
+        wakeTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.wakeDelay)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.wakeTask = nil
+            self.finishWake()
+        }
+    }
+
+    private func finishWake() {
+        guard loopTask != nil else { return }
+        if !asleep {
+            stopSources()
+        }
+        asleep = false
+        defaultSourceStale = true
+        applySettings()
+        refreshSourceAppRunning()
+        startSources()
+        checkAudioPermission()
+        log("после пробуждения захват и Now Playing запущены")
+    }
+
+    /// `com.apple.screenIsLocked` и `com.apple.screenIsUnlocked`: на заблокированном экране
+    /// остров скрыт (`IslandInputs.userPaused`) и на курсор не отвечает.
+    func screenLockChanged(_ locked: Bool) {
+        guard locked != screenLocked else { return }
+        screenLocked = locked
+        log(locked ? "экран заблокирован: остров скрыт" : "экран разблокирован")
     }
 
     /// Остров принудительно скрыт и на курсор не отвечает: пауза, блокировка экрана или
@@ -195,7 +284,8 @@ final class AppModel {
     }
 
     /// Яндекс Музыка по bundle ID, иначе приложение в `/Applications` с «Яндекс Музыка» или
-    /// «Yandex Music» в имени, иначе весь звук системы.
+    /// «Yandex Music» в имени, иначе весь звук системы. Каталог берется из последнего просмотра
+    /// (`scheduleApplicationsScan`); синхронно он читается только при первом вызове.
     func resolveDefaultSource() -> AudioSource {
         let workspace = NSWorkspace.shared
         for bundleID in ProcessMatcher.yandexMusicCandidates {
@@ -203,6 +293,16 @@ final class AppModel {
                 return Self.applicationSource(at: url, fallbackBundleID: bundleID)
             }
         }
+        if !applicationsScanned {
+            applicationsScanned = true
+            scannedYandexMusic = Self.scanApplicationsFolder()
+        }
+        return scannedYandexMusic ?? .systemWide
+    }
+
+    /// Приложение в `/Applications` с «Яндекс Музыка» или «Yandex Music» в имени.
+    /// Читает каталог, поэтому после запуска вызывается вне главного потока.
+    nonisolated static func scanApplicationsFolder() -> AudioSource? {
         let applications = URL(fileURLWithPath: "/Applications", isDirectory: true)
         let items = (try? FileManager.default.contentsOfDirectory(
             at: applications,
@@ -213,14 +313,38 @@ final class AppModel {
         for url in items.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where url.pathExtension == "app" {
             let name = url.deletingPathExtension().lastPathComponent.precomposedStringWithCanonicalMapping
             if names.contains(where: { name.localizedCaseInsensitiveContains($0) }) {
-                return Self.applicationSource(at: url, fallbackBundleID: nil)
+                return applicationSource(at: url, fallbackBundleID: nil)
             }
         }
-        return .systemWide
+        return nil
+    }
+
+    /// Просмотр `/Applications` вне главного потока через `applicationsScanDelay` после
+    /// последнего запуска или закрытия приложения; если результат изменился, источник по
+    /// умолчанию определяется заново.
+    private func scheduleApplicationsScan() {
+        scanTask?.cancel()
+        scanTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.applicationsScanDelay)
+            } catch {
+                return
+            }
+            let found = await Task.detached(priority: .utility) {
+                AppModel.scanApplicationsFolder()
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.scanTask = nil
+            self.applicationsScanned = true
+            guard found != self.scannedYandexMusic else { return }
+            self.scannedYandexMusic = found
+            self.defaultSourceStale = true
+            self.applySettings()
+        }
     }
 
     /// Источник-приложение по пути бандла: путь без символических ссылок, имя из бандла.
-    static func applicationSource(at url: URL, fallbackBundleID: String?) -> AudioSource {
+    nonisolated static func applicationSource(at url: URL, fallbackBundleID: String?) -> AudioSource {
         let path = AudioProcessList.canonicalPath(url)
         let bundle = Bundle(path: path)
         let bundleID = bundle?.bundleIdentifier ?? fallbackBundleID ?? ""
@@ -248,6 +372,7 @@ final class AppModel {
     /// Если доступ стал разрешенным (не при первой проверке), счетчик сторожа нулей
     /// сбрасывается и tap пересобирается.
     func checkAudioPermission() {
+        lastPermissionCheck = ProcessInfo.processInfo.systemUptime
         applyPermissionStatus(AudioCapturePermission.preflight())
         updatePermissionHint()
     }
@@ -364,6 +489,11 @@ final class AppModel {
             islandState = state
         }
         updatePermissionHint()
+        // Подсказка показана, а окна, которые опрашивают доступ каждую секунду, закрыты:
+        // пользователь мог выдать доступ в Системных настройках, не возвращаясь в приложение.
+        if permissionHint, now - lastPermissionCheck >= Self.permissionPollInterval {
+            checkAudioPermission()
+        }
         let low = ProcessInfo.processInfo.isLowPowerModeEnabled
         if low != lowPower {
             lowPower = low
@@ -450,10 +580,13 @@ final class AppModel {
         }
     }
 
+    /// Запуск или закрытие приложения: `sourceRunning` и источник по умолчанию пересчитываются
+    /// сразу по bundle ID, каталог `/Applications` просматривается позже вне главного потока.
     private func applicationsChanged() {
         defaultSourceStale = true
         applySettings()
         refreshSourceAppRunning()
+        scheduleApplicationsScan()
     }
 
     private func refreshSourceAppRunning() {
@@ -724,6 +857,7 @@ extension AppModel {
             DiagnosticsRow(label: "Режим запуска", value: mode),
             DiagnosticsRow(label: "Остров", value: Self.describe(islandState)),
             DiagnosticsRow(label: "Визуализация на паузе", value: Self.yesNo(settings.paused)),
+            DiagnosticsRow(label: "Экран заблокирован", value: Self.yesNo(screenLocked)),
         ])
     }
 
@@ -757,6 +891,12 @@ extension AppModel {
             rate = "нет"
         }
         rows.append(DiagnosticsRow(label: "Частота tap", value: rate))
+        rows.append(DiagnosticsRow(
+            label: "Последняя ошибка захвата",
+            value: pipeline.lastCaptureError.map {
+                "\($0.date.formatted(date: .omitted, time: .standard)): \($0.message)"
+            } ?? "нет"
+        ))
         rows.append(DiagnosticsRow(
             label: "Пересборок сторожа нулей",
             value: "\(pipeline.watchdogRebuilds) из \(AudioPipeline.maxWatchdogRebuilds)"
@@ -894,11 +1034,14 @@ extension AppModel {
         switch status {
         case .stopped: "остановлен"
         case .demo: "демо из файла"
+        case .starting: "создаю tap"
         case .capturing(.running(_, let processCount)): "захват идет, процессов в tap: \(processCount)"
         case .capturing(.idle): "tap не создан"
         case .capturing(.failed(let message)): "ошибка: \(message)"
         case .waitingForSource: "жду запуска источника"
         case .rebuilding(let attempt): "пересборка сторожем нулей, попытка \(attempt)"
+        case .retrying(let attempt, let message):
+            "tap не создан (\(message)), повтор \(attempt) из \(AudioPipeline.startRetryPauses.count)"
         case .suspended: "приостановлен в тишине"
         case .paused: "остановлен, визуализация на паузе"
         }
