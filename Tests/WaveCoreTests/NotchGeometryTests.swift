@@ -529,4 +529,135 @@ struct NotchGeometryTests {
             #expect(!pointer.needsPolling)
         }
     }
+
+    // MARK: - Баннер нового трека
+
+    /// Прямоугольник из локальных координат баннера (начало сверху слева, ось Y вниз)
+    /// в координаты экрана.
+    private func onScreen(_ rect: CGRect, in banner: CGRect) -> CGRect {
+        CGRect(x: banner.minX + rect.minX, y: banner.maxY - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    /// Пересечение с ненулевой площадью (на Linux `intersects` считает и касание краями).
+    private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        a.minX < b.maxX && b.minX < a.maxX && a.minY < b.maxY && b.minY < a.maxY
+    }
+
+    @Test func bannerSitsUnderNotch() throws {
+        #expect(NotchGeometry.bannerSize == CGSize(width: 400, height: 84))
+        #expect(NotchGeometry.bannerBottomRadius == 22)
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let banner = layout.bannerIsland
+        #expect(banner.size == CGSize(width: 400, height: 84))
+        #expect(banner.midX == layout.notch.midX)
+        #expect(banner.maxY == layout.notch.maxY)
+        let asymmetric = try #require(
+            NotchGeometry.layout(for: [notched(frame: CGRect(x: 0, y: 0, width: 1710, height: 1107), left: 751, right: 750)])
+        )
+        #expect(asymmetric.bannerIsland.midX == asymmetric.notch.midX)
+        #expect(asymmetric.bannerIsland.maxY == 1107)
+    }
+
+    @Test func bannerGrowsWithTallerNotch() throws {
+        var screen = notched()
+        screen.safeAreaTop = 38
+        screen.menuBarHeight = 38
+        let layout = try #require(NotchGeometry.layout(for: [screen]))
+        #expect(layout.bannerIsland.size == CGSize(width: 400, height: 90))
+        #expect(layout.bannerIsland.maxY == 956)
+        let content = layout.bannerContent
+        #expect(content.artwork == CGRect(x: 16, y: 14, width: 56, height: 56))
+        #expect(content.text.minY == 46)
+        #expect(content.text.maxY == 82)
+        #expect(content.waves.minY == 4)
+        #expect(content.waves.maxY == 34)
+    }
+
+    @Test func bannerContentMatchesSpec() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let content = layout.bannerContent
+        #expect(content.artwork == CGRect(x: 16, y: 14, width: 56, height: 56))
+        #expect(content.text == CGRect(x: 84, y: 40, width: 300, height: 36))
+        let wavesStart = layout.notch.maxX - layout.bannerIsland.minX + 10
+        #expect(content.waves == CGRect(x: wavesStart, y: 4, width: 384 - wavesStart, height: 24))
+    }
+
+    @Test func bannerContentAvoidsNotch() throws {
+        for height: CGFloat in [32, 34, 38] {
+            for (left, right): (CGFloat, CGFloat) in [(642.5, 642.5), (620, 640), (660, 600)] {
+                var screen = notched(left: left, right: right)
+                screen.safeAreaTop = height
+                let layout = try #require(NotchGeometry.layout(for: [screen]))
+                let banner = layout.bannerIsland
+                let content = layout.bannerContent
+                for (name, rect) in [("artwork", content.artwork), ("text", content.text), ("waves", content.waves)] {
+                    let placed = onScreen(rect, in: banner)
+                    #expect(rect.width > 0 && rect.height > 0, "\(name), вырез \(height)")
+                    #expect(!overlaps(placed, layout.notch), "\(name), вырез \(height), \(left)/\(right)")
+                    #expect(banner.contains(placed), "\(name), вырез \(height), \(left)/\(right)")
+                }
+                #expect(!overlaps(content.artwork, content.text))
+                #expect(!overlaps(content.artwork, content.waves))
+                #expect(!overlaps(content.text, content.waves))
+            }
+        }
+    }
+
+    @Test func pillBannerHangsFromPillTop() throws {
+        let layout = try #require(NotchGeometry.layout(for: [external()]))
+        let banner = layout.bannerIsland
+        #expect(banner.size == NotchGeometry.bannerSize)
+        #expect(banner.midX == layout.notch.midX)
+        #expect(banner.maxY == layout.notch.maxY)
+        #expect(banner.maxY < layout.screenFrame.maxY - 24)
+        // Те же прямоугольники, что у выреза 32 pt, только без выреза.
+        let reference = try #require(NotchGeometry.layout(for: [external()], fakeNotch: true))
+        #expect(layout.bannerContent == reference.bannerContent)
+        for rect in [layout.bannerContent.artwork, layout.bannerContent.text, layout.bannerContent.waves] {
+            #expect(banner.contains(onScreen(rect, in: banner)))
+        }
+    }
+
+    @Test func hoverOverBannerCounts() throws {
+        for screen in [notched(), external()] {
+            let layout = try #require(NotchGeometry.layout(for: [screen]))
+            let banner = layout.bannerIsland
+            let text = onScreen(layout.bannerContent.text, in: banner)
+            let point = CGPoint(x: text.midX, y: text.midY)
+            for state in [IslandState.hidden, .collapsed] {
+                let shown = layout.pointer(at: point, state: state, banner: true)
+                #expect(shown.inHoverZone)
+                #expect(!shown.acceptsClicks)
+                #expect(!shown.needsPolling)
+                let plain = layout.pointer(at: point, state: state, banner: false)
+                #expect(!plain.inHoverZone)
+                #expect(!plain.acceptsClicks)
+            }
+            // Зона доходит до верха экрана и не шире баннера.
+            let top = CGPoint(x: banner.midX, y: layout.screenFrame.maxY)
+            #expect(layout.pointer(at: top, state: .collapsed, banner: true).inHoverZone)
+            let beside = CGPoint(x: banner.maxX + 1, y: text.midY)
+            #expect(!layout.pointer(at: beside, state: .collapsed, banner: true).inHoverZone)
+            let below = CGPoint(x: banner.midX, y: banner.minY - 1)
+            #expect(!layout.pointer(at: below, state: .collapsed, banner: true).inHoverZone)
+            // Раскрытый остров баннер не меняет.
+            let center = CGPoint(x: layout.expandedIsland.midX, y: layout.expandedIsland.midY)
+            #expect(
+                layout.pointer(at: center, state: .expanded, banner: true)
+                    == layout.pointer(at: center, state: .expanded)
+            )
+        }
+    }
+
+    @Test func panelFrameContainsBanner() throws {
+        var tall = notched()
+        tall.safeAreaTop = 38
+        for screen in [notched(), tall, notched(left: 700, right: 600), external()] {
+            for wing: CGFloat in [40, 64, 200] {
+                var layout = try #require(NotchGeometry.layout(for: [screen]))
+                layout.wingWidth = wing
+                #expect(layout.panelFrame.contains(layout.bannerIsland), "\(screen.id), крыло \(wing)")
+            }
+        }
+    }
 }

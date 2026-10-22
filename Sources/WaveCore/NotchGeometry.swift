@@ -105,12 +105,58 @@ public struct NotchLayout: Sendable, Equatable {
         hasNotch ? expandedIsland.insetBy(dx: NotchGeometry.expandedShoulderRadius, dy: 0) : expandedIsland
     }
 
+    /// Размер баннера нового трека. У выреза: `NotchGeometry.bannerSize` (под вырез 32 pt),
+    /// под более высокий вырез выше на разницу. У капсулы: `NotchGeometry.bannerSize`.
+    public var bannerSize: CGSize {
+        CGSize(width: NotchGeometry.bannerSize.width, height: NotchGeometry.bannerSize.height + bannerExtra)
+    }
+
+    /// Баннер нового трека: `bannerSize` по центру выреза (у капсулы по центру капсулы, под
+    /// строкой меню), верх на уровне верха выреза или капсулы, как у раскрытого острова.
+    public var bannerIsland: CGRect {
+        let size = bannerSize
+        return CGRect(
+            x: notch.midX - size.width / 2, y: notch.maxY - size.height,
+            width: size.width, height: size.height
+        )
+    }
+
+    /// Раскладка содержимого баннера в его локальных координатах: начало сверху слева
+    /// `bannerIsland`, ось Y вниз. Обложка слева, текст под вырезом, волны в полосе справа от
+    /// выреза. У капсулы те же прямоугольники, что у условного выреза 32 pt
+    /// (`NotchGeometry.fakeNotchSize`), только самого выреза нет.
+    public var bannerContent: BannerLayout {
+        let width = NotchGeometry.bannerSize.width
+        let inset = NotchGeometry.bannerInset
+        let notchHeight = NotchGeometry.baseNotchHeight + bannerExtra
+        let notchRight = hasNotch
+            ? notch.maxX - bannerIsland.minX
+            : (width + NotchGeometry.fakeNotchSize.width) / 2
+        let artwork = NotchGeometry.bannerArtworkSize
+        let artworkTop = (NotchGeometry.bannerSize.height - artwork) / 2
+        let textLeft = inset + artwork + 12
+        let textTop = notchHeight + 8
+        let textBottom = NotchGeometry.bannerSize.height - 8 + bannerExtra
+        let wavesLeft = notchRight + 10
+        return BannerLayout(
+            artwork: CGRect(x: inset, y: artworkTop, width: artwork, height: artwork),
+            text: CGRect(x: textLeft, y: textTop, width: width - inset - textLeft, height: textBottom - textTop),
+            waves: CGRect(x: wavesLeft, y: 4, width: max(width - inset - wavesLeft, 0), height: notchHeight - 8)
+        )
+    }
+
+    /// На сколько вырез выше 32 pt: на столько выше баннер. У капсулы 0.
+    private var bannerExtra: CGFloat {
+        hasNotch ? max(notch.height - NotchGeometry.baseNotchHeight, 0) : 0
+    }
+
     /// Рамка панели: раскрытый и свернутый остров с текущим крылом плюс запас снизу под
     /// свечение текущего радиуса (`NotchGeometry.glowMargin(radius:)`) и по бокам под тень и
-    /// «вздох», по горизонтали не выходит за экран. Окно не больше, чем нужно сейчас: прозрачная
+    /// «вздох», по горизонтали не выходит за экран. Баннер в объединении для надежности: он
+    /// и так внутри раскрытого острова. Окно не больше, чем нужно сейчас: прозрачная
     /// площадь тоже стоит времени композитору. При настройках по умолчанию рамка та же, что в 0.9.0.
     public var panelFrame: CGRect {
-        let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth))
+        let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth)).union(bannerIsland)
         let glow = NotchGeometry.glowMargin(radius: glowRadius)
         let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
         let maxX = min(union.maxX + NotchGeometry.panelSideMargin, screenFrame.maxX)
@@ -125,17 +171,28 @@ public struct NotchLayout: Sendable, Equatable {
     /// выше экрана на `hoverTopOvershoot`, иначе курсор на самой верхней строке пикселей
     /// (`y == frame.maxY`) не попадал бы в полуоткрытый `CGRect`.
     public func hoverZone(expanded: Bool) -> CGRect {
-        let base = expanded ? expandedIsland : notch
+        hoverZone(over: expanded ? expandedIsland : notch)
+    }
+
+    /// `base`, продленный до верха экрана и на `hoverTopOvershoot` выше.
+    private func hoverZone(over base: CGRect) -> CGRect {
         let top = max(screenFrame.maxY, base.maxY) + NotchGeometry.hoverTopOvershoot
         return CGRect(x: base.minX, y: base.minY, width: base.width, height: top - base.minY)
     }
 
     /// Что делать с курсором в точке `point` (глобальные координаты AppKit) при состоянии `state`.
     /// `suppressed`: остров принудительно скрыт (пауза, блокировка экрана, полноэкранное окно)
-    /// и на курсор не отвечает, поэтому ни опроса, ни кликов.
-    public func pointer(at point: CGPoint, state: IslandState, suppressed: Bool = false) -> NotchPointer {
+    /// и на курсор не отвечает, поэтому ни опроса, ни кликов. `banner`: виден баннер нового
+    /// трека; пока остров не раскрыт, зона наведения: баннер, продленный до верха экрана.
+    /// Клики баннер не принимает и опроса не требует, наведение на него раскрывает панель.
+    public func pointer(
+        at point: CGPoint, state: IslandState, suppressed: Bool = false, banner: Bool = false
+    ) -> NotchPointer {
         let expanded = state == .expanded && !suppressed
-        let inHoverZone = hoverZone(expanded: expanded).contains(point)
+        let zone = banner && state != .expanded && !suppressed
+            ? hoverZone(over: bannerIsland)
+            : hoverZone(expanded: expanded)
+        let inHoverZone = zone.contains(point)
         return NotchPointer(
             inHoverZone: inHoverZone,
             acceptsClicks: expanded && expandedClickArea.contains(point),
@@ -165,6 +222,23 @@ public struct NotchPointer: Sendable, Equatable {
     }
 }
 
+/// Раскладка содержимого баннера нового трека в локальных координатах баннера
+/// (начало сверху слева `NotchLayout.bannerIsland`, ось Y вниз).
+public struct BannerLayout: Sendable, Equatable {
+    /// Обложка 56 pt.
+    public var artwork: CGRect
+    /// Название и исполнитель, под вырезом.
+    public var text: CGRect
+    /// Волны в полосе справа от выреза.
+    public var waves: CGRect
+
+    public init(artwork: CGRect, text: CGRect, waves: CGRect) {
+        self.artwork = artwork
+        self.text = text
+        self.waves = waves
+    }
+}
+
 public enum NotchGeometry {
     /// Видимая ширина раскрытой панели у выреза и у капсулы.
     public static let expandedBodyWidth: CGFloat = 468
@@ -181,6 +255,14 @@ public enum NotchGeometry {
     /// Отступ содержимого раскрытой капсулы со всех сторон.
     public static let pillContentInset: CGFloat = 16
     public static let pillSize = CGSize(width: 240, height: 28)
+    /// Баннер нового трека под вырез `baseNotchHeight`; под более высокий вырез выше на разницу.
+    public static let bannerSize = CGSize(width: 400, height: 84)
+    /// Радиус нижних углов баннера.
+    public static let bannerBottomRadius: CGFloat = 22
+    /// Отступ содержимого баннера слева и справа.
+    static let bannerInset: CGFloat = 16
+    /// Сторона обложки в баннере.
+    static let bannerArtworkSize: CGFloat = 56
     /// Самое широкое крыло, pt.
     public static let maxWingWidth: CGFloat = 200
     /// Насколько крыло уже свободной области строки меню рядом с вырезом, pt.
