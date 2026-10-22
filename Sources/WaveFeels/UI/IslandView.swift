@@ -97,7 +97,7 @@ struct IslandView: View {
             }
             .allowsHitTesting(false)
             bannerContent(state: state, geometry: geometry, visible: bannerVisible)
-            panelContent(state: state, geometry: geometry)
+            panelContent(state: state, geometry: geometry, banner: bannerVisible)
         }
         .frame(width: panel.width, height: panel.height, alignment: .topLeading)
         .ignoresSafeArea()
@@ -162,8 +162,10 @@ struct IslandView: View {
     // MARK: - Содержимое панели
 
     /// `ExpandedPanelView` в `IslandGeometry.panelContent`, только у раскрытого острова,
-    /// под маской формы острова в ее текущем (анимированном) положении.
-    private func panelContent(state: IslandState, geometry: IslandGeometry) -> some View {
+    /// под маской формы острова в ее текущем (анимированном) положении. Маска знает о баннере:
+    /// когда наведение превращает баннер в панель, она растет из прямоугольника баннера, а не
+    /// из свернутого острова.
+    private func panelContent(state: IslandState, geometry: IslandGeometry, banner: Bool) -> some View {
         let content = geometry.panelContent
         return ZStack(alignment: .topLeading) {
             if state == .expanded {
@@ -178,7 +180,7 @@ struct IslandView: View {
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .mask(alignment: .topLeading) {
-            IslandOutline(geometry: geometry, state: state)
+            IslandOutline(geometry: geometry, state: state, banner: banner)
         }
     }
 
