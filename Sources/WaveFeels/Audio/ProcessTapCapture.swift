@@ -176,21 +176,32 @@ nonisolated final class ProcessTapCapture: TapCapturing, @unchecked Sendable {
                 default: AudioStreamBasicDescription()
             )
 
-            let aggregate = Self.makeAggregateDescription(
-                tapUUID: description.uuid.uuidString,
-                outputDeviceUID: outputDeviceUID
-            )
+            // Устройство вывода в агрегате задает ему часы. Если с ним агрегат не создается
+            // (Multi-Output Device, другой агрегат, устройство не берется в подустройства),
+            // один раз пробуется агрегат из одного tap.
+            var subDeviceUID = outputDeviceUID
             var newAggregate: AudioObjectID = kAudioObjectUnknown
-            try Self.check(
-                AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &newAggregate),
-                "AudioHardwareCreateAggregateDevice"
+            var created = AudioHardwareCreateAggregateDevice(
+                Self.makeAggregateDescription(tapUUID: description.uuid.uuidString, outputDeviceUID: subDeviceUID) as CFDictionary,
+                &newAggregate
             )
+            if created != noErr, !subDeviceUID.isEmpty {
+                Self.log("агрегат с устройством вывода \(subDeviceUID) не создан: \(CAProperty.describe(created)); "
+                    + "агрегат без устройства вывода")
+                subDeviceUID = ""
+                newAggregate = kAudioObjectUnknown
+                created = AudioHardwareCreateAggregateDevice(
+                    Self.makeAggregateDescription(tapUUID: description.uuid.uuidString, outputDeviceUID: subDeviceUID) as CFDictionary,
+                    &newAggregate
+                )
+            }
+            try Self.check(created, "AudioHardwareCreateAggregateDevice")
             aggregateID = newAggregate
 
             let layout = try Self.inputLayout(
                 aggregate: newAggregate,
                 tapFormat: tapFormat,
-                expectsSubDevice: !outputDeviceUID.isEmpty
+                expectsSubDevice: !subDeviceUID.isEmpty
             )
             let rate = try Self.inputSampleRate(aggregate: newAggregate, layout: layout, tapFormat: tapFormat)
 
@@ -211,7 +222,8 @@ nonisolated final class ProcessTapCapture: TapCapturing, @unchecked Sendable {
 
             let count = systemWide ? 0 : processObjectIDs.count
             publish(.running(sampleRate: rate, processCount: count), sampleRate: rate)
-            Self.log("tap запущен: \(systemWide ? "весь звук" : "процессов \(count)"), \(Int(rate)) Гц, вывод \(outputDeviceUID)")
+            let output = subDeviceUID.isEmpty ? "агрегат без устройства вывода" : "вывод \(subDeviceUID)"
+            Self.log("tap запущен: \(systemWide ? "весь звук" : "процессов \(count)"), \(Int(rate)) Гц, \(output)")
             return rate
         } catch {
             let message = (error as? TapError)?.message ?? "\(error)"
