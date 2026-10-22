@@ -126,6 +126,8 @@ public struct NowPlayingStreamParser: Sendable {
     /// и сбрасывается только при смене трека.
     private var lastArtwork: (key: TrackKey, data: Data)?
     /// Результат последнего разбора base64, чтобы не декодировать одну и ту же строку заново.
+    /// Трек, которому принадлежит строка `state["artworkData"]`. `nil`, пока трек неизвестен.
+    private var artworkOwner: TrackKey?
     private var decodedArtwork: (encoded: String, data: Data?)?
 
     public init() {}
@@ -168,9 +170,24 @@ public struct NowPlayingStreamParser: Sendable {
             state = payload.filter { $0.value != .null }
         }
 
+        var broughtArtwork = false
+        if case .string = payload["artworkData"] { broughtArtwork = true }
+        let key = currentTrackKey()
+
+        if state["artworkData"] == nil {
+            artworkOwner = nil
+        } else if broughtArtwork {
+            artworkOwner = key
+        } else if let owner = artworkOwner, let key, owner != key {
+            // Трек сменился, а новая обложка не пришла: старая строка чужая.
+            state["artworkData"] = nil
+            artworkOwner = nil
+        } else if artworkOwner == nil {
+            artworkOwner = key
+        }
+
         var info = makeInfo()
-        if var built = info {
-            let key = TrackKey(title: built.title, artist: built.artist, album: built.album)
+        if var built = info, let key {
             if let artwork = built.artworkData {
                 lastArtwork = (key, artwork)
             } else if let last = lastArtwork, last.key == key {
@@ -182,6 +199,11 @@ public struct NowPlayingStreamParser: Sendable {
         }
         current = info
         return info
+    }
+
+    private func currentTrackKey() -> TrackKey? {
+        guard let title = state["title"]?.string else { return nil }
+        return TrackKey(title: title, artist: state["artist"]?.string, album: state["album"]?.string)
     }
 
     private mutating func makeInfo() -> NowPlayingInfo? {

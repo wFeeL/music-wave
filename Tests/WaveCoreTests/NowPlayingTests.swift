@@ -52,19 +52,55 @@ struct NowPlayingTests {
     @Test func artworkSurvivesTemporaryNilState() throws {
         var parser = NowPlayingStreamParser()
         _ = try parser.consume(line: Self.fullLine)
+        // Диффом: строка обложки остается в состоянии, пока title снят.
         #expect(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":null}}"#) == nil)
         let restored = try #require(try parser.consume(
             line: #"{"type":"data","diff":true,"payload":{"title":"Кино 🎸"}}"#))
         #expect(restored.artworkData == Data([1, 2, 3, 4]))
 
-        #expect(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":null}}"#) == nil)
-        let other = try #require(try parser.consume(
-            line: #"{"type":"data","diff":true,"payload":{"title":"Другая","artworkData":null}}"#))
+        // Полным снимком: состояние сброшено, обложку помнит только lastArtwork.
+        let track = #""bundleIdentifier":"com.apple.Music","artist":"Цой","album":"Группа крови""#
+        #expect(try parser.consume(line:
+            #"{"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.Music","artist":"Цой"}}"#) == nil)
+        let again = try #require(try parser.consume(line:
+            #"{"type":"data","diff":false,"payload":{\#(track),"title":"Кино 🎸"}}"#))
+        #expect(again.artworkData == Data([1, 2, 3, 4]))
+
+        // Реальная смена трека сбрасывает обложку навсегда.
+        let other = try #require(try parser.consume(line:
+            #"{"type":"data","diff":false,"payload":{\#(track),"title":"Другая"}}"#))
         #expect(other.artworkData == nil)
-        // Старая обложка не возвращается после смены трека.
-        let back = try #require(try parser.consume(
-            line: #"{"type":"data","diff":true,"payload":{"title":"Кино 🎸"}}"#))
+        let back = try #require(try parser.consume(line:
+            #"{"type":"data","diff":false,"payload":{\#(track),"title":"Кино 🎸"}}"#))
         #expect(back.artworkData == nil)
+    }
+
+    @Test func staleArtworkIsDroppedOnTrackChange() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.fullLine)
+        let b = try #require(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":"B"}}"#))
+        #expect(b.title == "B")
+        #expect(b.artworkData == nil)
+
+        let newArtwork = Data([9, 8]).base64EncodedString()
+        let withArt = try #require(try parser.consume(
+            line: #"{"type":"data","diff":true,"payload":{"artworkData":"\#(newArtwork)"}}"#))
+        #expect(withArt.title == "B")
+        #expect(withArt.artworkData == Data([9, 8]))
+
+        // Смена только альбома или исполнителя тоже новый трек.
+        let album = try #require(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"album":"X"}}"#))
+        #expect(album.artworkData == nil)
+    }
+
+    @Test func artworkArrivingBeforeTitleBelongsToThatTrack() throws {
+        var parser = NowPlayingStreamParser()
+        #expect(try parser.consume(line:
+            #"{"type":"data","diff":false,"payload":{"bundleIdentifier":"a","artworkData":"\#(Self.artworkBase64)"}}"#) == nil)
+        let info = try #require(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":"T"}}"#))
+        #expect(info.artworkData == Data([1, 2, 3, 4]))
+        let next = try #require(try parser.consume(line: #"{"type":"data","diff":true,"payload":{"title":"U"}}"#))
+        #expect(next.artworkData == nil)
     }
 
     @Test func nonDiffReplacesState() throws {
