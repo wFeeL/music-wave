@@ -210,6 +210,7 @@ struct IslandView: View {
         let appearance = model.settings.appearance
         let bannerVisible = model.bannerVisible
         // Баннер открылся или закрылся меньше `overlap` назад: живы и крылья, и волны баннера.
+        // Волны баннера только у свернутого острова: у раскрытой панели они не видны.
         let bannerMoving = now - model.bannerVisibleChangedAt < IslandTransition.overlap
         let breathes = state == .collapsed && !bannerVisible && model.settings.beatPulse && !reduceMotion
         let scale = breathes ? 1 + Self.breathDepth * CGFloat(visuals.pulse) : 1
@@ -259,7 +260,7 @@ struct IslandView: View {
                 IslandWavesView(
                     visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow,
                     appearance: appearance, paused: paused, banner: bannerVisible,
-                    bannerLayer: bannerVisible || bannerMoving, wingLayer: !bannerVisible || bannerMoving,
+                    bannerLayer: bannerVisible || (bannerMoving && state == .collapsed), wingLayer: !bannerVisible || bannerMoving,
                     reduceMotion: reduceMotion
                 )
             }
