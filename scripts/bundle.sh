@@ -6,6 +6,9 @@
 # Перед запуском нужен `swift build -c release`.
 # Необязательные части адаптера берутся из $ADAPTER_DIR (по умолчанию dist/adapter, туда их
 # кладет build-adapter.sh), если собраны.
+# Иконка: Resources/AppIcon.icns, если она есть, иначе scripts/make-icon.swift рисует ее в
+# dist/icon (повторно только после правки скрипта). С $ICON_SNAPSHOT_DIR туда же кладутся
+# icon.png (1024 px) и icon-sizes.png (все размеры) для проверки на глаз.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -52,8 +55,37 @@ plutil -replace CFBundleShortVersionString -string "$VERSION" "$CONTENTS/Info.pl
 plutil -replace CFBundleVersion -string "$BUILD" "$CONTENTS/Info.plist"
 plutil -lint "$CONTENTS/Info.plist"
 
+# Рисует иконку в каталог $1. В `if !` set -e не действует, поэтому шаги связаны через &&.
+make_icon() {
+    rm -rf "$1" && mkdir -p "$1" &&
+        swift scripts/make-icon.swift "$1/AppIcon.iconset" "$1/icon-sizes.png" &&
+        iconutil -c icns -o "$1/AppIcon.icns" "$1/AppIcon.iconset"
+}
+
 if [[ -f Resources/AppIcon.icns ]]; then
-    cp Resources/AppIcon.icns "$CONTENTS/Resources/AppIcon.icns"
+    ICNS=Resources/AppIcon.icns
+else
+    ICON_DIR=dist/icon
+    ICNS="$ICON_DIR/AppIcon.icns"
+    # .icns пишется последним: если его нет, прошлый запуск не дошел до конца.
+    if [[ ! -f "$ICNS" || scripts/make-icon.swift -nt "$ICNS" ]] && ! make_icon "$ICON_DIR"; then
+        # Без иконки бандл все равно собирается, чтобы подпись и снимки прошли; пропажу
+        # icon.png заметит проверка снимков в ci-mac.sh.
+        echo "warning: icon generation failed, bundling without icon" >&2
+        rm -f "$ICNS"
+    fi
+    if [[ -n "${ICON_SNAPSHOT_DIR:-}" ]]; then
+        mkdir -p "$ICON_SNAPSHOT_DIR"
+        if [[ -f "$ICON_DIR/AppIcon.iconset/icon_512x512@2x.png" ]]; then
+            cp "$ICON_DIR/AppIcon.iconset/icon_512x512@2x.png" "$ICON_SNAPSHOT_DIR/icon.png"
+        fi
+        if [[ -f "$ICON_DIR/icon-sizes.png" ]]; then
+            cp "$ICON_DIR/icon-sizes.png" "$ICON_SNAPSHOT_DIR/icon-sizes.png"
+        fi
+    fi
+fi
+if [[ -f "$ICNS" ]]; then
+    cp "$ICNS" "$CONTENTS/Resources/AppIcon.icns"
 fi
 
 cp Resources/Demo/demo.wav Resources/Demo/silence.wav "$CONTENTS/Resources/Demo/"

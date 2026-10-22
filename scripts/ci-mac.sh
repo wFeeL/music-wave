@@ -58,6 +58,8 @@ LIMIT_TEST=240
 LIMIT_SNAPSHOTS=120
 LIMIT_CPU=180
 LIMIT_SIGN=120
+# Бандл в первый раз еще и компилирует и запускает scripts/make-icon.swift.
+LIMIT_BUNDLE=240
 LIMIT_SMALL=120
 
 # --- служебные функции ---
@@ -159,7 +161,8 @@ smoke_launch() {
 }
 
 # Приложение до отрисовки пишет manifest.txt со списком PNG; шаг проходит, только если
-# список не пуст и каждый файл из него на месте и не пустой.
+# список не пуст и каждый файл из него на месте и не пустой. Нарисованную иконку (icon.png и
+# icon-sizes.png кладет bundle.sh) скрипт дописывает в список сам.
 render_snapshots() {
     local dir="$OUT/snapshots" manifest expected=0 missing=0 name
     manifest="$dir/manifest.txt"
@@ -167,6 +170,9 @@ render_snapshots() {
     if [[ ! -f "$manifest" ]]; then
         echo "snapshots: manifest.txt missing"
         return 1
+    fi
+    if [[ ! -f Resources/AppIcon.icns ]]; then
+        printf '%s\n' icon.png icon-sizes.png >> "$manifest"
     fi
     while IFS= read -r name; do
         [[ -n "$name" ]] || continue
@@ -279,7 +285,8 @@ step_release() {
 
 # Бандл, подпись, снимки и пробный запуск из бандла. Возвращает 0, если бандл подписан.
 step_bundle() {
-    if ! run_step bundle "$LIMIT_SMALL" "$OUT/bundle.log" bash scripts/bundle.sh "$VERSION" "$BUILD"; then
+    if ! run_step bundle "$LIMIT_BUNDLE" "$OUT/bundle.log" \
+        env ICON_SNAPSHOT_DIR="$OUT/snapshots" bash scripts/bundle.sh "$VERSION" "$BUILD"; then
         skip sign "bundle failed"
         skip snapshots "bundle failed"
         skip smoke "bundle failed"
@@ -317,7 +324,7 @@ log_requirements() { # основное приложение, копия для 
 
 # Вторая копия для проверки обновления. Возвращает 0, если она собрана и подписана.
 step_update_test() {
-    if ! run_step bundle-update-test "$LIMIT_SMALL" "$OUT/bundle.log" \
+    if ! run_step bundle-update-test "$LIMIT_BUNDLE" "$OUT/bundle.log" \
         bash scripts/bundle.sh "$VERSION" "$UPDATE_BUILD" "$UPDATE_APP"; then
         skip sign-update-test "bundle failed"
         skip zip-update-test "bundle failed"
