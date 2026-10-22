@@ -50,11 +50,11 @@ struct ExpandedPanelView: View {
     static let controlsWidth: CGFloat = 3 * buttonSize + 2 * buttonSpacing
     static let missingTrackText = "Нет данных о треке"
     static let openSourceText = "Открыть"
-    /// Кнопка источника в конце строки с названием: значок 26 pt со скруглением 6 pt, от
+    /// Кнопка источника в конце строки с названием: значок 20 pt со скруглением 4.5 pt, от
     /// названия на 8 pt; при наведении значок увеличивается до 1.08 за 0.15 с.
-    static let sourceButtonSize: CGFloat = 26
+    static let sourceButtonSize: CGFloat = 20
     static let sourceButtonInset: CGFloat = 8
-    static let sourceButtonRadius: CGFloat = 6
+    static let sourceButtonRadius: CGFloat = 4.5
     static let sourceButtonHoverScale: CGFloat = 1.08
     static let sourceButtonHoverAnimation = Animation.easeOut(duration: 0.15)
 
@@ -354,7 +354,7 @@ private struct SourceIconView: View {
 
 /// Значок приложения-источника в конце строки с названием: нажатие выводит приложение вперед
 /// или запускает его. Значок рисуется крупнее кнопки, как `SourceIconView`, чтобы его видимое
-/// тело заняло все 26 pt, и обрезается по скруглению 6 pt. Подсказка и метка доступности
+/// тело заняло все 20 pt, и обрезается по скруглению 4.5 pt. Подсказка и метка доступности
 /// «Открыть <имя>».
 struct SourceAppButton: View {
     let name: String

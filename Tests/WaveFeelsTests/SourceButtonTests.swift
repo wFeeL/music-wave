@@ -38,7 +38,7 @@ struct SourceButtonTests {
     }
 
     @Test func titleMakesRoomForButton() {
-        #expect(ExpandedPanelView.titleWidth(column: 200, hasSourceButton: true) == 166)
+        #expect(ExpandedPanelView.titleWidth(column: 200, hasSourceButton: true) == 172)
         #expect(ExpandedPanelView.titleWidth(column: 200, hasSourceButton: false) == 200)
     }
 }
