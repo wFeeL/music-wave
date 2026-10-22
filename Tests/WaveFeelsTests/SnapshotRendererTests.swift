@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import Synchronization
 import Testing
 @testable import WaveFeels
 
@@ -12,31 +13,18 @@ struct SnapshotRendererTests {
         "13-settings", "13-settings-dark", "13-settings-tall",
     ]
 
-    /// Шаг сердцебиения, которым тест меряет, надолго ли отрисовка занимает главный актор.
-    static let heartbeat: Duration = .milliseconds(20)
-
     @Test func rendersAllSnapshotsWithVisibleWaves() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("wavefeels-snapshots-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        // Пока идет отрисовка, задача на главном акторе просыпается каждые 20 мс; самый большой
-        // разрыв между пробуждениями показывает, сколько главный актор был занят без перерыва.
-        // Соседние тесты на главном акторе (таймеры адаптера и конвейера) ждут ровно столько.
+        // Сторож меряет, сколько главный поток был занят без перерыва, пока идет тест: соседние
+        // тесты на главном акторе ждут ровно столько.
         let clock = ContinuousClock()
-        let watch = Task { @MainActor in
-            var longest = Duration.zero
-            var last = clock.now
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.heartbeat)
-                let now = clock.now
-                longest = max(longest, now - last - Self.heartbeat)
-                last = now
-            }
-            return longest
-        }
-        defer { watch.cancel() }
+        let watch = MainThreadWatch()
+        watch.start()
+        defer { _ = watch.stop() }
         let started = clock.now
         let written = try await SnapshotRenderer.renderAll(to: directory, demo: Self.demo)
         let rendered = clock.now - started
@@ -114,13 +102,12 @@ struct SnapshotRendererTests {
         #expect(ink > 2000, "13-settings: темных пикселей \(ink)")
         #expect(glyphs > 2000, "13-settings-dark: светлых пикселей \(glyphs)")
 
-        watch.cancel()
-        let longest = await watch.value
-        print("SnapshotRendererTests: renderAll \(rendered), whole test \(clock.now - started), longest main actor hold \(longest)")
+        let longest = watch.stop()
+        print("SnapshotRendererTests: renderAll \(rendered), whole test \(clock.now - started), longest main thread hold \(longest)")
         // Соседние тесты ждут главный актор со своими сроками, поэтому отрисовка отпускает его между
         // снимками. Цель меньше 1 с, фактическое время в логе; предел с запасом на загруженный
         // виртуальный мак.
-        #expect(longest < .seconds(5), "главный актор занят без перерыва \(longest)")
+        #expect(longest < .seconds(5), "главный поток занят без перерыва \(longest)")
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
@@ -130,6 +117,44 @@ struct SnapshotRendererTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("Resources/Demo/demo.wav")
+    }
+}
+
+/// Сторож главного потока: таймер на главной очереди dispatch тикает каждые 20 мс, самый большой
+/// разрыв между тиками (за вычетом шага) и есть самое долгое непрерывное занятие главного потока.
+/// Задача с `Task.sleep` для этого не годится: ее продолжение сначала ждет поток общего пула и
+/// показывает еще и его загрузку.
+private final class MainThreadWatch: @unchecked Sendable {
+    private static let step: Duration = .milliseconds(20)
+
+    private struct State {
+        var last: ContinuousClock.Instant?
+        var longest: Duration = .zero
+    }
+
+    private let timer = DispatchSource.makeTimerSource(queue: .main)
+    private let state = Mutex(State())
+
+    func start() {
+        timer.setEventHandler { [self] in
+            let now = ContinuousClock.now
+            state.withLock { value in
+                if let last = value.last {
+                    value.longest = max(value.longest, now - last - Self.step)
+                }
+                value.last = now
+            }
+        }
+        timer.schedule(deadline: .now(), repeating: .milliseconds(20), leeway: .milliseconds(1))
+        timer.resume()
+    }
+
+    /// Останавливает таймер и возвращает самый большой разрыв. Повторный вызов безопасен.
+    func stop() -> Duration {
+        if !timer.isCancelled {
+            timer.cancel()
+        }
+        return state.withLock { $0.longest }
     }
 }
 

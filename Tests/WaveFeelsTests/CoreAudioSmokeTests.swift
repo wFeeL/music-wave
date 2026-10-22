@@ -80,11 +80,17 @@ struct CoreAudioSmokeTests {
         engine.stop()
         engine.start(sampleRate: 48_000)
         #expect(engine.tickIntervalForTesting == 1 / AnalysisEngine.idleRate)
+        let clock = ContinuousClock()
         let before = log.frames.count
+        let started = clock.now
         try await Task.sleep(for: .seconds(1))
-        // Под нагрузкой кадров бывает меньше, но не больше: 15 за секунду плюс первый сразу.
         let idleFrames = log.frames.count - before
-        #expect(idleFrames <= 20, "кадров за 1 с в простое: \(idleFrames)")
+        let elapsed = clock.now - started
+        // Сон под нагрузкой может затянуться, поэтому проверяется частота за фактическое время:
+        // кадров бывает меньше, но не больше 15 в секунду (плюс первый сразу и запас на границы).
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        let limit = Int(seconds * AnalysisEngine.idleRate) + 3
+        #expect(idleFrames <= limit, "кадров в простое: \(idleFrames) за \(elapsed), предел \(limit)")
 
         engine.setIdle(false)
         let active = engine.tickIntervalForTesting
