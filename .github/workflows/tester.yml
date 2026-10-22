@@ -5,7 +5,7 @@ name: tester
 on:
   push:
     tags: ['tester-*']
-permissions: {contents: write}
+permissions: {}
 concurrency:
   group: 'tester-${{ github.ref_name }}'
   cancel-in-progress: false
@@ -32,6 +32,8 @@ jobs:
     if: needs.gate.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Запись нужна только публикации отчета в ci-results.
+    permissions: {contents: write}
     env:
       MODE: tester
     steps:
@@ -87,6 +89,11 @@ jobs:
             fi
             echo "- report: tester-report.md"
           } > ci-out/summary.md
+      # Агент умеет писать файлы: скрипт публикации и workflow берутся из коммита, а не из
+      # рабочего каталога после агента.
+      - if: always()
+        name: restore scripts
+        run: git checkout -- scripts .github && git clean -fdq -- scripts .github
       - if: always()
         run: bash scripts/publish-ci-results.sh
         env: {GH_TOKEN: '${{ github.token }}', CI_OUTCOME: '${{ steps.tester.outcome }}'}

@@ -6,8 +6,8 @@
 # С RELEASE=1 (release.yml) режим full дополнительно собирает вторую копию для проверки обновления:
 # тот же бинарник, CFBundleVersion "<номер запуска>1", dist/update-test/WaveFeels.app, подпись и
 # архив dist/WaveFeels-<тег>-update-test.zip. Designated requirement обеих копий пишется в sign.txt.
-# Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, test-sample*.txt, sign.txt,
-# snapshots/, cpu.txt, cpu-sample.txt.
+# Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, sign.txt, snapshots/, cpu.txt,
+# cpu-sample*.txt; с SAMPLE_TESTS=1 еще test-sample.txt и test-sample-2.txt (стеки процесса тестов).
 # Каждый шаг идет под своим лимитом времени (в macOS нет timeout, работает фоновый сторож).
 # Шаги из будущих задач (--render-snapshots, cpu-probe.sh) пропускаются, пока их нет,
 # с отметкой skipped в summary.md. Адаптер (build-adapter.sh) собирается только в режиме full,
@@ -298,8 +298,9 @@ trim_test_sample() { # файл sample
     ' "$1"
 }
 
-# Через 8 и 20 с после старта `swift test` снимает стеки процесса тестов (swiftpm-testing-helper
-# для Swift Testing, иначе xctest) на 4 с в test-sample.txt и test-sample-2.txt. На исход шага не
+# С SAMPLE_TESTS=1 через 8 и 20 с после старта `swift test` снимает стеки процесса тестов
+# (swiftpm-testing-helper для Swift Testing, иначе xctest) на 4 с в test-sample.txt и
+# test-sample-2.txt. Нужно для разбора зависаний тестов, по умолчанию выключено. На исход шага не
 # влияет: файл с ошибкой тоже результат.
 sample_tests() { # pid swift test
     local start=$SECONDS at file target raw="$OUT/.test-sample.raw"
@@ -331,6 +332,10 @@ sample_tests() { # pid swift test
 
 run_tests() {
     local pid sampler rc
+    if [[ "${SAMPLE_TESTS:-0}" != 1 ]]; then
+        swift test --skip-build
+        return
+    fi
     swift test --skip-build &
     pid=$!
     sample_tests "$pid" > /dev/null 2>&1 &
@@ -449,7 +454,7 @@ case "$MODE" in
             skip_bundle "release build failed"
         fi
         if [[ $app_ok -eq 1 && -f scripts/cpu-probe.sh ]]; then
-            # Итог замера cpu-probe.sh пишет сам в cpu.txt и cpu-sample.txt, здесь только вывод шага.
+            # Итог замера cpu-probe.sh пишет сам в cpu.txt и cpu-sample*.txt, здесь только вывод шага.
             run_step cpu "$LIMIT_CPU" "$OUT/cpu.log" bash scripts/cpu-probe.sh "$APP"
         elif [[ $app_ok -eq 1 ]]; then
             skip cpu "scripts/cpu-probe.sh not present"
