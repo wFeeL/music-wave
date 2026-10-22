@@ -50,7 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Модель читает свойства Core Audio в главном потоке. Первое обращение к HAL
             // процесса может идти секундами, поэтому оно делается заранее вне главного потока.
             await Self.warmUpCoreAudio()
-            let model = AppModel()
+            let model = AppModel(defaults: Self.settingsDefaults(suite: arguments.settingsSuite))
+            if let suite = arguments.settingsSuite {
+                Self.logSettings(model.settings, suite: suite)
+            }
             let windows = WindowsController(model: model)
             let notch = NotchWindowController(model: model, arguments: arguments)
             self.model = model
@@ -195,6 +198,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.flush()
             exit(1)
         }
+    }
+
+    /// `--settings-suite`: все настройки модели (`AppSettings`, кэш проверки адаптера, история
+    /// источников Now Playing) берутся из отдельного набора `UserDefaults`, настройки пользователя
+    /// не читаются и не меняются. Без флага и для имени, которое `UserDefaults` не принимает,
+    /// `.standard`; во втором случае в лог не попадет строка «настройки из набора», и
+    /// cpu-probe.sh отбракует замер.
+    private static func settingsDefaults(suite: String?) -> UserDefaults {
+        guard let suite else { return .standard }
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            let line = "набор настроек \(suite) недоступен, используются настройки пользователя"
+            Log.app.error("\(line, privacy: .public)")
+            Log.file(line)
+            return .standard
+        }
+        return defaults
+    }
+
+    /// Действующие настройки вида из набора `--settings-suite` (после ограничения диапазонов),
+    /// по этой строке cpu-probe.sh проверяет, на чем шел замер.
+    private static func logSettings(_ settings: AppSettings, suite: String) {
+        func number(_ value: Double) -> String { String(format: "%g", value) }
+        let values: [String] = [
+            "линий \(settings.lineCount)",
+            "заливка \(number(settings.fill))",
+            "радиус свечения \(number(settings.glowRadius))",
+            "свечение \(number(settings.glowIntensity))",
+            "крылья \(number(settings.wingWidth)) pt",
+            "толщина \(number(settings.lineThickness))",
+            "амплитуда \(number(settings.waveAmplitude))",
+            "вздох \(settings.beatPulse ? "да" : "нет")",
+            "пауза \(settings.paused ? "да" : "нет")",
+        ]
+        let line = "настройки из набора \(suite): " + values.joined(separator: ", ")
+        Log.app.info("\(line, privacy: .public)")
+        Log.file(line)
     }
 
     /// Первое чтение свойства HAL на фоновом потоке, с записью в лог до и после.

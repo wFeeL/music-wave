@@ -8,6 +8,9 @@
 # архив dist/WaveFeels-<тег>-update-test.zip. Designated requirement обеих копий пишется в sign.txt.
 # Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, sign.txt, snapshots/, cpu.txt,
 # cpu-sample*.txt; с SAMPLE_TESTS=1 еще test-sample.txt и test-sample-2.txt (стеки процесса тестов).
+# С CPU_MAX=1 режим full после обычного замера CPU (набор настроек default) отдельным шагом
+# меряет набор max: cpu-max.txt и cpu-max-sample*.txt. По умолчанию этот шаг не идет, он
+# занимает еще около 95 с.
 # Каждый шаг идет под своим лимитом времени (в macOS нет timeout, работает фоновый сторож).
 # Шаги из будущих задач (--render-snapshots, cpu-probe.sh) пропускаются, пока их нет,
 # с отметкой skipped в summary.md. Адаптер (build-adapter.sh) собирается только в режиме full,
@@ -455,7 +458,13 @@ case "$MODE" in
         fi
         if [[ $app_ok -eq 1 && -f scripts/cpu-probe.sh ]]; then
             # Итог замера cpu-probe.sh пишет сам в cpu.txt и cpu-sample*.txt, здесь только вывод шага.
-            run_step cpu "$LIMIT_CPU" "$OUT/cpu.log" bash scripts/cpu-probe.sh "$APP"
+            # Замер идет на наборе настроек default (--settings-suite), а не на настройках раннера.
+            run_step cpu "$LIMIT_CPU" "$OUT/cpu.log" bash scripts/cpu-probe.sh --preset default --sample "$APP"
+            # Набор max занимает еще около 95 с и в лимит шага cpu вместе с default не помещается,
+            # поэтому идет отдельным шагом и только с CPU_MAX=1.
+            if [[ "${CPU_MAX:-0}" == 1 ]]; then
+                run_step cpu-max "$LIMIT_CPU" "$OUT/cpu-max.log" bash scripts/cpu-probe.sh --preset max --sample "$APP"
+            fi
         elif [[ $app_ok -eq 1 ]]; then
             skip cpu "scripts/cpu-probe.sh not present"
         else
