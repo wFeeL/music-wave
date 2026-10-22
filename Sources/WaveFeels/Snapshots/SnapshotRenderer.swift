@@ -107,12 +107,6 @@ enum SnapshotRenderer {
         return CGImageDestinationFinalize(destination) ? data as Data : Data()
     }
 
-    /// Палитра тестовой обложки, как ее получило бы приложение.
-    static var testArtworkPalette: [PaletteColor] {
-        guard let raster = ArtworkPixels.rgba64(from: testArtwork) else { return PaletteExtractor.fallback }
-        return PaletteExtractor.extract(rgba: raster.pixels, width: raster.width, height: raster.height)
-    }
-
     /// Экран со встроенным вырезом по центру.
     static var notchLayout: NotchLayout {
         let side = (screenSize.width - notchSize.width) / 2
@@ -165,6 +159,19 @@ enum SnapshotRenderer {
         return artwork.insetBy(dx: 12, dy: 12)
     }
 
+    /// Квадрат 20×20 pt по центру средней кнопки («пауза/играть») раскрытой панели на снимке.
+    @MainActor
+    static func playButtonSampleRect() -> CGRect {
+        let layout = notchLayout
+        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(AppSettings.Default.wingWidth))
+        let content = geometry.panelContent
+        let button = ExpandedPanelView.buttonSize
+        let centerX = content.maxX - ExpandedPanelView.trailingInset - button - ExpandedPanelView.buttonSpacing - button / 2
+        let panelTop = screenSize.height - layout.panelFrame.maxY
+        let center = CGPoint(x: layout.panelFrame.minX + centerX, y: panelTop + content.midY)
+        return CGRect(x: center.x - 10, y: center.y - 10, width: 20, height: 20)
+    }
+
     /// Список снимков в каталоге: имена PNG по строке. Пишется до отрисовки, CI сверяет с ним,
     /// все ли файлы на месте.
     static let manifestName = "manifest.txt"
@@ -184,7 +191,8 @@ enum SnapshotRenderer {
         let silent = fading.last
 
         let fallback = PaletteExtractor.fallback
-        let cover = testArtworkPalette
+        // `nil`: палитру выбирает модель по обложке трека и работе Now Playing, как в приложении.
+        let fromModel: [PaletteColor]? = nil
         var noArtwork = track
         noArtwork.artworkData = nil
         let scenes = [
@@ -192,19 +200,19 @@ enum SnapshotRenderer {
             SnapshotScene(name: "02-loud-beat", state: .collapsed, moment: loudBeat, palette: fallback),
             SnapshotScene(name: "02-loud-beat-light", state: .collapsed, moment: loudBeat, palette: fallback, backdrop: .light),
             SnapshotScene(name: "03-loud-no-beat", state: .collapsed, moment: loudCalm, palette: fallback),
-            SnapshotScene(name: "04-expanded", state: .expanded, moment: loudBeat, palette: cover),
-            SnapshotScene(name: "04-expanded-light", state: .expanded, moment: loudBeat, palette: cover, backdrop: .light),
-            SnapshotScene(name: "05-expanded-paused", state: .expanded, moment: silent, palette: cover, track: pausedTrack),
-            SnapshotScene(name: "06-long-title", state: .expanded, moment: loudCalm, palette: cover, track: longTitleTrack),
+            SnapshotScene(name: "04-expanded", state: .expanded, moment: loudBeat, palette: fromModel),
+            SnapshotScene(name: "04-expanded-light", state: .expanded, moment: loudBeat, palette: fromModel, backdrop: .light),
+            SnapshotScene(name: "05-expanded-paused", state: .expanded, moment: silent, palette: fromModel, track: pausedTrack),
+            SnapshotScene(name: "06-long-title", state: .expanded, moment: loudCalm, palette: fromModel, track: longTitleTrack),
             SnapshotScene(name: "07-palette-warm", state: .collapsed, moment: groove, palette: warmPalette),
             SnapshotScene(name: "08-palette-cold", state: .collapsed, moment: groove, palette: coldPalette),
             SnapshotScene(name: "09-pill-external", state: .collapsed, moment: loudBeat, palette: fallback, pill: true),
-            SnapshotScene(name: "10-expanded-no-artwork", state: .expanded, moment: loudCalm, palette: fallback, track: noArtwork),
+            SnapshotScene(name: "10-expanded-no-artwork", state: .expanded, moment: loudCalm, palette: fromModel, track: noArtwork),
             SnapshotScene(
-                name: "11-expanded-no-adapter", state: .expanded, moment: loudCalm, palette: fallback,
-                track: nil, nowPlaying: false
+                name: "11-expanded-no-adapter", state: .expanded, moment: loudCalm, palette: fromModel,
+                nowPlaying: false
             ),
-            SnapshotScene(name: "12-pill-expanded", state: .expanded, moment: loudBeat, palette: cover, pill: true),
+            SnapshotScene(name: "12-pill-expanded", state: .expanded, moment: loudBeat, palette: fromModel, pill: true),
         ]
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -280,7 +288,8 @@ private struct SnapshotScene {
     let name: String
     let state: IslandState
     let moment: DemoMoment
-    let palette: [PaletteColor]
+    /// `nil`: палитра из модели (обложка трека, если Now Playing работает).
+    let palette: [PaletteColor]?
     let backdrop: SnapshotBackdropAppearance
     let pill: Bool
     let track: NowPlayingInfo?
@@ -288,7 +297,7 @@ private struct SnapshotScene {
     let nowPlaying: Bool
 
     init(
-        name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor],
+        name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor]?,
         backdrop: SnapshotBackdropAppearance = .dark, pill: Bool = false,
         track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true
     ) {

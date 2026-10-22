@@ -84,6 +84,10 @@ final class AppModel {
     @ObservationIgnored private var artworkGeneration = 0
     /// Снимки: работает ли Now Playing, вместо `adapter.isAvailable`.
     @ObservationIgnored private var previewNowPlaying: Bool?
+    /// `nowPlayingAvailable` на прошлом тике: при смене обложка и палитра пересчитываются.
+    @ObservationIgnored private var artworkNowPlaying = false
+    /// Обложка, из которой сейчас получены `artwork` и `palette` (`nil`: стандартная палитра).
+    @ObservationIgnored private var shownArtworkData: Data?
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
         settings = AppSettings(defaults: defaults)
@@ -317,6 +321,8 @@ final class AppModel {
         if let sourceInfo, sourceInfo != lastTrack {
             lastTrack = sourceInfo
             updateArtwork()
+        } else if nowPlayingAvailable != artworkNowPlaying {
+            updateArtwork()
         }
 
         pipeline.adapterAvailable = adapter.isAvailable
@@ -452,18 +458,37 @@ final class AppModel {
         previewNowPlaying ?? adapter.isAvailable
     }
 
-    /// Обложка `lastTrack` сменилась: картинка для панели и палитра считаются вне главного
-    /// актора, затем палитра плавно перетекает в новую. Трек без обложки (или без трека)
-    /// через `missingArtworkGrace` получает стандартную палитру. На паузе `lastTrack` и его
-    /// обложка остаются.
-    private func updateArtwork() {
-        let data = lastTrack?.artworkData
-        guard data != artworkData else { return }
+    /// Обложка, по которой считаются картинка панели и палитра: только пока Now Playing
+    /// работает. В запасном режиме (design.md, «Now Playing») обложки нет и палитра стандартная,
+    /// даже если `lastTrack` остался с тех пор, когда адаптер работал.
+    nonisolated static func artworkSource(track: NowPlayingInfo?, nowPlayingAvailable: Bool) -> Data? {
+        nowPlayingAvailable ? track?.artworkData : nil
+    }
+
+    /// Обложка сменилась (новый трек или Now Playing начал либо перестал работать): картинка
+    /// для панели и палитра считаются вне главного актора, затем палитра плавно перетекает
+    /// в новую. Без обложки стандартная палитра наступает через `missingArtworkGrace`: так
+    /// нет вспышки, пока адаптер перезапускается или присылает обложку следом за названием.
+    /// На паузе `lastTrack` и его обложка остаются. `immediately` (снимки и тесты): то же
+    /// самое синхронно и без паузы.
+    private func updateArtwork(immediately: Bool = false) {
+        let available = nowPlayingAvailable
+        artworkNowPlaying = available
+        let data = Self.artworkSource(track: lastTrack, nowPlayingAvailable: available)
+        guard immediately || data != artworkData else { return }
         artworkData = data
         artworkTask?.cancel()
+        artworkTask = nil
         artworkGeneration += 1
         let generation = artworkGeneration
         let pixels = ExpandedPanelView.artworkPixels
+        // Вернулись к тому, что уже на экране (например, адаптер быстро перезапустился):
+        // ожидание отменено, пересчитывать нечего.
+        if !immediately, data == shownArtworkData { return }
+        if immediately {
+            applyArtwork(data.map { ArtworkAnalysis(data: $0, displayPixels: pixels) }, data: data, generation: generation)
+            return
+        }
         artworkTask = Task { [weak self] in
             let analysis: ArtworkAnalysis?
             if let data {
@@ -479,11 +504,12 @@ final class AppModel {
                 analysis = nil
             }
             guard let self, !Task.isCancelled, generation == self.artworkGeneration else { return }
-            self.applyArtwork(analysis, generation: generation)
+            self.applyArtwork(analysis, data: data, generation: generation)
         }
     }
 
-    private func applyArtwork(_ analysis: ArtworkAnalysis?, generation: Int) {
+    private func applyArtwork(_ analysis: ArtworkAnalysis?, data: Data?, generation: Int) {
+        shownArtworkData = data
         artwork = analysis?.image.map { PanelArtwork(image: $0, id: generation) }
         let target = analysis?.palette ?? PaletteExtractor.fallback
         if target != palette {
@@ -517,11 +543,12 @@ final class AppModel {
     /// Снимки острова: модель не запущена, состояние, трек, палитра и кадр задаются напрямую.
     /// Часы анимации встают на `time`, поэтому кадр на этот момент рисуется без шага анимации
     /// и без перехода палитры.
-    /// Обложка трека разбирается здесь же, синхронно; палитра задается отдельно.
+    /// Обложка трека разбирается здесь же, синхронно, тем же путем, что в работе; палитра
+    /// берется из нее же или задается явно (`palette`).
     func showPreview(
         state: IslandState,
         track: NowPlayingInfo?,
-        palette: [PaletteColor],
+        palette: [PaletteColor]?,
         frame: WaveFrame,
         motion: WaveMotion,
         pulse: BeatPulse,
@@ -530,20 +557,15 @@ final class AppModel {
     ) {
         islandState = state
         lastTrack = track
-        artworkTask?.cancel()
-        artworkTask = nil
-        artworkGeneration += 1
-        artworkData = track?.artworkData
-        let generation = artworkGeneration
-        artwork = artworkData
-            .flatMap { ArtworkPixels.image(from: $0, maxPixelSize: ExpandedPanelView.artworkPixels) }
-            .map { PanelArtwork(image: $0, id: generation) }
         previewNowPlaying = nowPlayingAvailable
-        self.palette = palette
+        updateArtwork(immediately: true)
+        if let palette {
+            self.palette = palette
+        }
         store.publish(frame)
         self.motion = motion
         self.pulse = pulse
-        paletteFade = PaletteFade(palette: palette)
+        paletteFade = PaletteFade(palette: self.palette)
         lastVisualTime = time
     }
 

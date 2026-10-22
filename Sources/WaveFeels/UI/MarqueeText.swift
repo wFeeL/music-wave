@@ -9,6 +9,7 @@ import SwiftUI
 /// Выбор между обычной и бегущей строкой делает `ViewThatFits` при раскладке, поэтому снимок
 /// (`ImageRenderer`) сразу показывает начало длинного текста с затуханием справа. Прокрутка
 /// живет в `task` и останавливается вместе с видом: бегущая строка есть только в раскрытой панели.
+/// При «Уменьшении движения» текст не прокручивается: видно начало и затухание справа.
 struct MarqueeText: View {
     static let pause: Duration = .milliseconds(1500)
     /// Скорость прокрутки, pt/с.
@@ -40,6 +41,7 @@ private struct MarqueeScroller: View {
     private struct Trip: Equatable {
         var text: String
         var distance: CGFloat
+        var reduceMotion: Bool
     }
 
     let text: String
@@ -52,6 +54,7 @@ private struct MarqueeScroller: View {
     @State private var headHidden = false
     /// Конец текста дошел до правого края: правый край не затухает.
     @State private var tailShown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let distance = max(textWidth - boxWidth, 0)
@@ -72,8 +75,8 @@ private struct MarqueeScroller: View {
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
             .mask { edgeMask }
-            .task(id: Trip(text: text, distance: distance)) {
-                await scroll(distance: distance)
+            .task(id: Trip(text: text, distance: distance, reduceMotion: reduceMotion)) {
+                await scroll(distance: reduceMotion ? 0 : distance)
             }
     }
 

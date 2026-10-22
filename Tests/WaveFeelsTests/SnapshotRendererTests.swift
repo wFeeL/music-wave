@@ -51,6 +51,17 @@ struct SnapshotRendererTests {
             let artworkCount = expanded.saturatedPixels(in: artwork, scale: SnapshotRenderer.scale)
             #expect(artworkCount > artworkArea / 2, "\(name): цветных пикселей обложки \(artworkCount) из \(artworkArea)")
         }
+
+        // Кнопки на своем месте: в середине средней кнопки белый значок «пауза» или «играть».
+        let playButton = SnapshotRenderer.playButtonSampleRect()
+        for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork"] {
+            let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
+            let bright = expanded.brightPixels(in: playButton, scale: SnapshotRenderer.scale)
+            #expect(bright > 100, "\(name): светлых пикселей в кнопке «пауза/играть» \(bright)")
+        }
+        // Без Now Playing кнопок нет.
+        let noAdapter = try Bitmap(url: directory.appendingPathComponent("11-expanded-no-adapter.png"))
+        #expect(noAdapter.brightPixels(in: playButton, scale: SnapshotRenderer.scale) == 0)
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
@@ -95,6 +106,27 @@ private struct Bitmap {
         self.width = width
         self.height = height
         self.pixels = pixels
+    }
+
+    /// Почти белые пиксели: все каналы от этого значения.
+    static let brightValue: UInt8 = 200
+
+    /// Сколько почти белых пикселей в `rect` (pt, начало сверху слева).
+    func brightPixels(in rect: CGRect, scale: CGFloat) -> Int {
+        let x0 = max(Int((rect.minX * scale).rounded(.down)), 0)
+        let x1 = min(Int((rect.maxX * scale).rounded(.up)), width)
+        let y0 = max(Int((rect.minY * scale).rounded(.down)), 0)
+        let y1 = min(Int((rect.maxY * scale).rounded(.up)), height)
+        var count = 0
+        for y in y0..<max(y1, y0) {
+            for x in x0..<max(x1, x0) {
+                let offset = (y * width + x) * 4
+                if min(pixels[offset], pixels[offset + 1], pixels[offset + 2]) >= Self.brightValue {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
 
     /// Сколько пикселей в `rect` (pt, начало сверху слева) с насыщенностью выше порога.

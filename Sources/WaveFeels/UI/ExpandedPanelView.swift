@@ -52,13 +52,14 @@ struct ExpandedPanelView: View {
     }
 
     /// Сколько ждать подтверждения паузы или игры от Now Playing, прежде чем вернуть значок.
-    static let pendingPlaybackTimeout: Duration = .seconds(2)
+    static let pendingPlaybackTimeout: Duration = .seconds(3)
 
     let model: AppModel
     /// Неподвижное время для снимков; `nil`: время идет.
     var date: Date? = nil
 
-    /// Значок «пауза/играть» сразу после нажатия, до ответа Now Playing.
+    /// Значок «пауза/играть» сразу после нажатия, до ответа Now Playing. Сбрасывается, когда
+    /// состояние трека изменилось, когда панель закрылась и в любом случае через 3 с.
     @State private var pendingPlaying: Bool? = nil
 
     var body: some View {
@@ -95,6 +96,10 @@ struct ExpandedPanelView: View {
         .padding(.trailing, playback == nil ? Self.trailingInsetWithoutControls : Self.trailingInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: playback?.isPlaying) {
+            // Now Playing подтвердил (или трек сменился): значок снова из состояния трека.
+            pendingPlaying = nil
+        }
+        .onDisappear {
             pendingPlaying = nil
         }
         .task(id: pendingPlaying) {
