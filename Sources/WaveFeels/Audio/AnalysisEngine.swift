@@ -6,6 +6,9 @@ import WaveCore
 /// со смещением на задержку, считает `Analyzer.process` и публикует кадр в `FrameStore`.
 /// Пока остров скрыт (`setIdle(true)`), таймер идет с частотой 15 Гц: этого хватает, чтобы
 /// `ActivityGate` заметил начало звука (лишние десятки миллисекунд), а волны не рисуются.
+/// Если в кольцо больше 100 мс не приходят новые сэмплы (tap или демо встали), анализ получает
+/// тишину: волны затухают, а не застывают на последнем окне, и это время идет в
+/// `zeroRunDuration`, как нули (`SampleFeedMonitor`).
 nonisolated final class AnalysisEngine: @unchecked Sendable {
     /// Самый большой шаг времени, который получает анализатор.
     static let maxStep = 0.1
@@ -30,6 +33,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var powerObserver: (any NSObjectProtocol)?
     private var window = [Float](repeating: 0, count: Analyzer.fftSize)
+    private var feed = SampleFeedMonitor()
     private var lastTickNanos: UInt64?
     private var interval = 1.0 / 60
     private var idle = false
@@ -56,6 +60,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 self.analyzer = Analyzer(sampleRate: rate)
             }
             self.lastTickNanos = nil
+            self.feed.reset()
             self.shared.withLock {
                 $0.zeroRun = 0
                 $0.isRunning = true
@@ -124,15 +129,23 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         lastTickNanos = now
 
         let (settings, delay, observer) = shared.withLock { ($0.settings, $0.delayFrames, $0.frameObserver) }
-        let copied = window.withUnsafeMutableBufferPointer { buffer in
-            ring.copyLatest(into: buffer, delay: delay)
+        let time = Double(now) / 1_000_000_000
+        let stalled = feed.update(totalWritten: ring.totalWritten, now: time)
+        let copied: Bool
+        if stalled {
+            // Новых сэмплов нет: последнее окно повторялось бы и держало волны в движении.
+            window.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
+            copied = true
+        } else {
+            copied = window.withUnsafeMutableBufferPointer { buffer in
+                ring.copyLatest(into: buffer, delay: delay)
+            }
         }
 
         let frame: WaveFrame
         let isZero: Bool
         if copied {
-            isZero = window.allSatisfy { $0 == 0 }
-            let time = Double(now) / 1_000_000_000
+            isZero = stalled || window.allSatisfy { $0 == 0 }
             frame = analyzer.process(samples: window, time: time, dt: dt, settings: settings)
         } else {
             isZero = true

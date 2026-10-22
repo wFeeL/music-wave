@@ -125,3 +125,50 @@ private final class DoneFlag: Sendable {
     #expect(rb.activeWriters == 0)
     #expect(rb.peakWriters == 2)
 }
+
+// MARK: - SampleFeedMonitor
+
+/// Писатель перестал писать (tap или демо встали): через 100 мс без новых сэмплов кольцо
+/// считается остановившимся, хотя `copyLatest` по-прежнему отдает последнее окно.
+@Test func feedMonitorNoticesWriterThatStopped() {
+    let rb = SampleRingBuffer(capacity: 4096)
+    var monitor = SampleFeedMonitor()
+    let block = [Float](repeating: 0.5, count: 480)
+    var stalled: [Bool] = []
+    // 10 мс на блок, как IOProc: кольцо пополняется, остановки нет.
+    for step in 0..<20 {
+        block.withUnsafeBufferPointer { rb.write($0) }
+        stalled.append(monitor.update(totalWritten: rb.totalWritten, now: Double(step) * 0.01))
+    }
+    #expect(!stalled.contains(true))
+
+    // Писатель встал на последнем блоке (0,19 с); окно все еще копируется.
+    var window = [Float](repeating: 0, count: 1024)
+    let copied = window.withUnsafeMutableBufferPointer { rb.copyLatest(into: $0, delay: 0) }
+    #expect(copied && window.allSatisfy { $0 == 0.5 })
+    let early = monitor.update(totalWritten: rb.totalWritten, now: 0.28)
+    #expect(!early)
+    let late = monitor.update(totalWritten: rb.totalWritten, now: 0.30)
+    #expect(late)
+
+    // Писатель снова пишет: остановки нет сразу.
+    block.withUnsafeBufferPointer { rb.write($0) }
+    let resumed = monitor.update(totalWritten: rb.totalWritten, now: 0.31)
+    #expect(!resumed)
+}
+
+/// Первый вызов (и вызов после `reset`) только запоминает счетчик, даже если кольцо пустое.
+@Test func feedMonitorStartsFresh() {
+    var monitor = SampleFeedMonitor()
+    let first = monitor.update(totalWritten: 0, now: 5)
+    #expect(!first)
+    let stalled = monitor.update(totalWritten: 0, now: 5.2)
+    #expect(stalled)
+    monitor.reset()
+    let afterReset = monitor.update(totalWritten: 0, now: 9)
+    #expect(!afterReset)
+    // Обнуленное кольцо (пересборка tap) тоже считается новыми данными.
+    let grew = monitor.update(totalWritten: 100, now: 9.05)
+    let shrank = monitor.update(totalWritten: 0, now: 9.1)
+    #expect(!grew && !shrank)
+}

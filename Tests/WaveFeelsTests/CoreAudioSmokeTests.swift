@@ -66,6 +66,38 @@ struct CoreAudioSmokeTests {
         #expect(zeroRun > 1, "zeroRunDuration: \(zeroRun)")
     }
 
+    /// Писатель кольца встал посреди звука (tap или демо перестали писать): анализ не повторяет
+    /// последнее окно, а получает тишину. Волны затухают, уровень падает ниже порога
+    /// `ActivityGate`, время идет в `zeroRunDuration`.
+    @Test func stalledFeedDecaysToSilence() async throws {
+        let ring = SampleRingBuffer(capacity: 131_072)
+        let engine = AnalysisEngine(ring: ring, store: FrameStore())
+        let log = FrameLog()
+        engine.observeFrames { log.append($0) }
+        let rate = 48_000.0
+        let block = (0..<480).map { Float(0.5 * sin(2 * Double.pi * 440 * Double($0) / rate)) }
+
+        engine.start(sampleRate: rate)
+        // 1 с синуса блоками по 10 мс, как IOProc (480 сэмплов на 440 Гц укладываются целым
+        // числом периодов, стыков нет).
+        await Task.detached {
+            for _ in 0..<100 {
+                block.withUnsafeBufferPointer { ring.write($0) }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }.value
+        let playing = log.frames
+        try await Task.sleep(for: .seconds(1.5))
+        let zeroRun = engine.zeroRunDuration
+        let last = try #require(log.frames.last)
+        engine.stop()
+
+        #expect(playing.contains { $0.level > 0.2 })
+        #expect(zeroRun > 1, "zeroRunDuration: \(zeroRun)")
+        #expect(last.rawLevelDB < -60, "rawLevelDB: \(last.rawLevelDB)")
+        #expect(last.level < 0.05, "level: \(last.level)")
+    }
+
     /// Пока остров скрыт, анализ идет с частотой 15 Гц; признак переживает остановку и запуск.
     @Test func idleEngineTicksAtFifteenHertz() async throws {
         let ring = SampleRingBuffer(capacity: 131_072)
