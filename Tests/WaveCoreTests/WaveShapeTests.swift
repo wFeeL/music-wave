@@ -188,11 +188,16 @@ struct WaveShapeTests {
         }
     }
 
-    @Test func phaseStaysWrapped() {
-        var motion = WaveMotion()
-        for i in 0..<1_000_000 {
-            let level = Float(i % 7) / 6
-            motion.advance(layers: [level, 1 - level, 1], dt: 1.0 / 60)
+    @Test func phaseStaysWrapped() async {
+        // 100 000 кадров это почти полчаса музыки: каждая фаза сворачивается тысячи раз.
+        // Цикл идет вне общего пула, чтобы не задерживать тесты, ждущие главный поток.
+        let motion = await runOffCooperativePool { () -> WaveMotion in
+            var motion = WaveMotion()
+            for i in 0..<100_000 {
+                let level = Float(i % 7) / 6
+                motion.advance(layers: [level, 1 - level, 1], dt: 1.0 / 60)
+            }
+            return motion
         }
         for profile in WaveProfile.allCases {
             for layer in WaveLayer.allCases {
