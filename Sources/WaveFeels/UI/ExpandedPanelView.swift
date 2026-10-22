@@ -282,19 +282,27 @@ private struct PanelArtworkView: View {
     }
 }
 
-/// Значок приложения-источника как есть, 72 pt, без своей маски: у значков macOS она уже есть.
-/// Без значка (весь звук системы) нейтральная плитка с динамиком.
+/// Значок приложения-источника как есть, без своей маски: у значков macOS она уже есть.
+/// В шаблоне значка вокруг тела прозрачное поле (тело около 82 % стороны), поэтому значок
+/// рисуется крупнее места обложки, по его центру и без обрезки: видимое тело совпадает с
+/// 72 pt обложки. Без значка (весь звук системы) нейтральная плитка с динамиком.
 private struct SourceIconView: View {
+    /// Доля стороны значка macOS, которую занимает его видимое тело.
+    static let iconBodyFraction: CGFloat = 0.82
+
     let icon: NSImage?
 
     var body: some View {
         let size = ExpandedPanelView.artworkSize
         Group {
             if let icon {
+                let drawn = (size / Self.iconBodyFraction).rounded()
                 Image(nsImage: icon)
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
+                    .frame(width: drawn, height: drawn)
+                    .frame(width: size, height: size)
             } else {
                 PanelTile.neutral(symbol: "speaker.wave.2.fill")
                     .overlay {

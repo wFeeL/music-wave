@@ -552,7 +552,14 @@ final class AppModel {
             return
         }
         log("открываю источник: \(name)")
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { @Sendable _, error in
+            // Вызывается не на главном потоке: замыкание явно @Sendable (без изоляции главного
+            // актора), модель не трогает, лог потокобезопасный.
+            guard let error else { return }
+            let message = "источник \(name) не открылся: \(error.localizedDescription)"
+            Log.app.error("\(message, privacy: .public)")
+            Log.file(message)
+        }
     }
 
     // MARK: - Кадр острова

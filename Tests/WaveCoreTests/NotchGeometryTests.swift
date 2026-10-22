@@ -263,10 +263,30 @@ struct NotchGeometryTests {
         }
     }
 
+    @Test func shoulderStripsDoNotAcceptClicks() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let island = layout.expandedIsland
+        let shoulder = NotchGeometry.expandedShoulderRadius
+        #expect(layout.expandedClickArea == island.insetBy(dx: shoulder, dy: 0))
+        #expect(layout.expandedClickArea.width == NotchGeometry.expandedBodyWidth)
+        // Полосы под плечами прозрачны, частью лежат на строке меню: клики идут мимо.
+        for x in [island.minX + 1, island.minX + shoulder - 1, island.maxX - 1, island.maxX - shoulder + 1] {
+            for y in [island.maxY - 1, island.midY, island.minY + 1] {
+                let pointer = layout.pointer(at: CGPoint(x: x, y: y), state: .expanded)
+                #expect(!pointer.acceptsClicks, "x \(x), y \(y)")
+                #expect(pointer.inHoverZone, "x \(x), y \(y)")
+            }
+        }
+        #expect(layout.pointer(at: CGPoint(x: island.minX + shoulder + 1, y: island.midY), state: .expanded).acceptsClicks)
+        // У капсулы плеч нет: кликабельна вся панель.
+        let pill = try #require(NotchGeometry.layout(for: [external()]))
+        #expect(pill.expandedClickArea == pill.expandedIsland)
+    }
+
     @Test func expandedAcceptsClicksOnlyInsideIsland() throws {
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
         let island = layout.expandedIsland
-        let inside = layout.pointer(at: CGPoint(x: island.minX + 5, y: island.minY + 5), state: .expanded)
+        let inside = layout.pointer(at: CGPoint(x: island.minX + 12, y: island.minY + 5), state: .expanded)
         #expect(inside == NotchPointer(inHoverZone: true, acceptsClicks: true, needsPolling: true))
         let below = layout.pointer(at: CGPoint(x: island.midX, y: island.minY - 5), state: .expanded)
         #expect(below == NotchPointer(inHoverZone: false, acceptsClicks: false, needsPolling: true))

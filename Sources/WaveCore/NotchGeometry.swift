@@ -79,6 +79,13 @@ public struct NotchLayout: Sendable, Equatable {
         )
     }
 
+    /// Где раскрытый остров принимает клики: только видимое тело. У выреза рамка шире тела на
+    /// плечи `expandedShoulderRadius` с каждой стороны; полосы под ними прозрачны и частью лежат
+    /// на строке меню, поэтому клики там уходят мимо. У капсулы плеч нет.
+    public var expandedClickArea: CGRect {
+        hasNotch ? expandedIsland.insetBy(dx: NotchGeometry.expandedShoulderRadius, dy: 0) : expandedIsland
+    }
+
     /// Рамка панели: раскрытый и самый широкий свернутый остров плюс запас снизу под свечение
     /// и по бокам под тень и «вздох», по горизонтали не выходит за экран.
     public var panelFrame: CGRect {
@@ -109,7 +116,7 @@ public struct NotchLayout: Sendable, Equatable {
         let inHoverZone = hoverZone(expanded: expanded).contains(point)
         return NotchPointer(
             inHoverZone: inHoverZone,
-            acceptsClicks: expanded && expandedIsland.contains(point),
+            acceptsClicks: expanded && expandedClickArea.contains(point),
             needsPolling: !suppressed && (expanded || inHoverZone)
         )
     }
@@ -119,8 +126,9 @@ public struct NotchLayout: Sendable, Equatable {
 public struct NotchPointer: Sendable, Equatable {
     /// Курсор в зоне наведения, идет в `IslandInputs.pointerInHoverZone`.
     public var inHoverZone: Bool
-    /// Окно принимает клики. Только раскрытый остров и только над ним самим: свернутый остров
-    /// и все вокруг пропускают клики в строку меню.
+    /// Окно принимает клики. Только раскрытый остров и только над его видимым телом
+    /// (`expandedClickArea`): свернутый остров, полосы под плечами и все вокруг пропускают
+    /// клики в строку меню.
     public var acceptsClicks: Bool
     /// Нужен частый опрос курсора: глобальный монитор не видит событий над своими окнами.
     public var needsPolling: Bool
