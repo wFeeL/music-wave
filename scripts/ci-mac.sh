@@ -5,8 +5,9 @@
 #   full: адаптер, release-сборка, тесты, бандл, подпись, снимки, пробный запуск, замер CPU, zip
 # Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, sign.txt, snapshots/, cpu.txt.
 # Каждый шаг идет под своим лимитом времени (в macOS нет timeout, работает фоновый сторож).
-# Шаги из будущих задач (build-adapter.sh, --render-snapshots, cpu-probe.sh) пропускаются,
-# пока их нет, с отметкой skipped в summary.md.
+# Шаги из будущих задач (--render-snapshots, cpu-probe.sh) пропускаются, пока их нет,
+# с отметкой skipped в summary.md. Адаптер (build-adapter.sh) собирается только в режиме full,
+# в остальных режимах бандл идет без него.
 # Скрипт рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 

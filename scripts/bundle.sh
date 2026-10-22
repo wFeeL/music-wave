@@ -2,7 +2,8 @@
 # Собирает dist/WaveFeels.app из release-бинарника SwiftPM.
 # Использование: scripts/bundle.sh <version> <build>, например 1.2.3 42.
 # Перед запуском нужен `swift build -c release`.
-# Необязательные части адаптера берутся из $ADAPTER_DIR (по умолчанию .build/adapter), если собраны.
+# Необязательные части адаптера берутся из $ADAPTER_DIR (по умолчанию dist/adapter, туда их
+# кладет build-adapter.sh), если собраны.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,7 +31,7 @@ if [[ ! -x "$BINARY" ]]; then
     exit 1
 fi
 
-ADAPTER_DIR=${ADAPTER_DIR:-.build/adapter}
+ADAPTER_DIR=${ADAPTER_DIR:-dist/adapter}
 APP=dist/WaveFeels.app
 CONTENTS="$APP/Contents"
 
@@ -58,8 +59,9 @@ if [[ -f "$ADAPTER_DIR/mediaremote-adapter.pl" ]]; then
     mkdir -p "$CONTENTS/Resources/Adapter"
     cp "$ADAPTER_DIR/mediaremote-adapter.pl" "$CONTENTS/Resources/Adapter/mediaremote-adapter.pl"
 fi
-if [[ -d "$ADAPTER_DIR/LICENSES" ]]; then
-    ditto "$ADAPTER_DIR/LICENSES" "$CONTENTS/Resources/LICENSES"
+if [[ -f "$ADAPTER_DIR/LICENSE" ]]; then
+    mkdir -p "$CONTENTS/Resources/LICENSES"
+    cp "$ADAPTER_DIR/LICENSE" "$CONTENTS/Resources/LICENSES/mediaremote-adapter.txt"
 fi
 if [[ -d "$ADAPTER_DIR/MediaRemoteAdapter.framework" ]]; then
     mkdir -p "$CONTENTS/Frameworks"

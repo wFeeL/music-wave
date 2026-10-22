@@ -74,6 +74,14 @@ sign_nested() {
 }
 
 report() {
+    # Подписи вложенного кода адаптера, если он есть в бандле, затем приложения.
+    local nested
+    for nested in "$FRAMEWORK" "$HELPER"; do
+        if [[ -e "$nested" ]]; then
+            codesign --verify --strict --verbose=2 "$nested" 2>&1
+            codesign -dvv "$nested" 2>&1
+        fi
+    done
     codesign --verify --deep --strict --verbose=2 "$APP" 2>&1
     codesign -dvv "$APP" 2>&1
     codesign -dr - "$APP" 2>&1
