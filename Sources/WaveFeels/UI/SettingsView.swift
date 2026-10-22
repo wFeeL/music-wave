@@ -19,6 +19,7 @@ struct SettingsView: View {
     static let statusInterval: Duration = .seconds(3)
     /// Список источников обновляется раз в столько обновлений статуса, то есть раз в 12 с.
     static let catalogEvery = 4
+    static let catalogDebounce: Duration = .seconds(1)
     static let sliderWidth: CGFloat = 190
     static let valueWidth: CGFloat = 52
 
@@ -32,6 +33,8 @@ struct SettingsView: View {
     @State private var loginStatus: SMAppService.Status
     @State private var loginMessage: String?
     @State private var copied = false
+    /// Отложенное обновление списка источников после запуска или закрытия приложения.
+    @State private var catalogTask: Task<Void, Never>?
     /// Меняется, чтобы меню источника вернулось к выбранному пункту после «Выбрать приложение…».
     @State private var pickerID = 0
 
@@ -88,10 +91,25 @@ struct SettingsView: View {
             }
         }
         .onReceive(workspaceCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
-            if presence.isOpen { refreshCatalog() }
+            scheduleCatalogRefresh()
         }
         .onReceive(workspaceCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
-            if presence.isOpen { refreshCatalog() }
+            scheduleCatalogRefresh()
+        }
+    }
+
+    /// Приложения часто запускаются и закрываются пачкой: список обновляется один раз, через
+    /// `catalogDebounce` после последнего события, и только пока окно открыто.
+    private func scheduleCatalogRefresh() {
+        catalogTask?.cancel()
+        guard presence.isOpen else {
+            catalogTask = nil
+            return
+        }
+        catalogTask = Task { @MainActor in
+            try? await Task.sleep(for: Self.catalogDebounce)
+            guard !Task.isCancelled, presence.isOpen else { return }
+            refreshCatalog()
         }
     }
 

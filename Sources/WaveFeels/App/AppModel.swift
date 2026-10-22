@@ -49,7 +49,8 @@ final class AppModel {
     /// Последний результат `AudioCapturePermission.preflight()`.
     private(set) var permissionStatus: AudioCapturePermission.Status = .unknown
     /// Источник, когда пользователь его не выбрал (`settings.source == nil`). Определяется при
-    /// каждом запуске и при запуске или закрытии приложений, в настройки не пишется.
+    /// каждом запуске и при запуске или закрытии приложений, даже если источник выбран: его
+    /// показывают настройки («По умолчанию (...)»). В настройки не пишется.
     private(set) var defaultSource: AudioSource = .systemWide
     var pointerInHoverZone = false
     var fullscreenSuppressed = false
@@ -67,9 +68,10 @@ final class AppModel {
     @ObservationIgnored private var appObservers: [any NSObjectProtocol] = []
     /// Первый `checkAudioPermission()` после запуска только запоминает статус.
     @ObservationIgnored private var permissionChecked = false
-    /// `defaultSource` надо определить заново: запуск, запуск или закрытие приложения,
-    /// пользователь снял свой выбор.
+    /// `defaultSource` надо определить заново: запуск, запуск или закрытие приложения.
     @ObservationIgnored private var defaultSourceStale = true
+    /// Тесты: свой поиск источника по умолчанию вместо `resolveDefaultSource()`.
+    @ObservationIgnored var defaultSourceResolver: (@MainActor () -> AudioSource)?
     @ObservationIgnored private var appliedSource: AudioSource?
     @ObservationIgnored private var sourceAppRunning = false
     @ObservationIgnored private var silentSince: Double?
@@ -185,7 +187,7 @@ final class AppModel {
 
     private func refreshDefaultSource() {
         defaultSourceStale = false
-        let source = resolveDefaultSource()
+        let source = defaultSourceResolver?() ?? resolveDefaultSource()
         if source != defaultSource {
             defaultSource = source
             log("источник по умолчанию: \(source.displayName)")
@@ -371,9 +373,7 @@ final class AppModel {
     /// Настройки пользователя в `AudioPipeline`. Свойства конвейера сами отбрасывают
     /// повторы, `LevelSettings` сравнивается здесь, чтобы не будить анализ каждый тик.
     private func applySettings() {
-        if settings.source != nil {
-            defaultSourceStale = true
-        } else if defaultSourceStale {
+        if defaultSourceStale {
             refreshDefaultSource()
         }
         let source = effectiveSource

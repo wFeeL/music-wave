@@ -121,13 +121,21 @@ final class WindowsController: NSObject, NSWindowDelegate {
         window.setContentSize(size)
         window.center()
         window.setFrameAutosaveName(autosaveName)
-        // Сохраненная рамка могла остаться меньше минимума содержимого.
-        let restored = window.contentRect(forFrameRect: window.frame).size
+        // Сохраненная рамка могла остаться меньше минимума содержимого: окно растет вправо
+        // и вниз, левый верхний угол остается на месте.
+        let frame = window.frame
+        let restored = window.contentRect(forFrameRect: frame).size
         if restored.width < minSize.width || restored.height < minSize.height {
-            window.setContentSize(NSSize(
+            let content = NSRect(
+                x: 0, y: 0,
                 width: max(restored.width, minSize.width),
                 height: max(restored.height, minSize.height)
-            ))
+            )
+            let grown = window.frameRect(forContentRect: content)
+            window.setFrame(
+                NSRect(x: frame.minX, y: frame.maxY - grown.height, width: grown.width, height: grown.height),
+                display: false
+            )
         }
         window.delegate = self
         return window
