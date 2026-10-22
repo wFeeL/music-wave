@@ -65,3 +65,16 @@ enum TestSignals {
         return (samples, beatTimes)
     }
 }
+
+/// Выполняет тяжелый синхронный расчет на глобальной очереди dispatch с QoS utility и ждет
+/// результат. Потоков общего пула Swift Concurrency столько же, сколько ядер (на маке CI три), и
+/// синхронный тест держит свой поток до конца. Два десятка таких тестов разом останавливают все
+/// остальные, в том числе продолжения после `Task.sleep`, которым поток пула нужен даже на главном
+/// акторе. Очередь dispatch пул не занимает, а низкий QoS отдает процессор тестам со сроками.
+func runOffCooperativePool<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .utility).async {
+            continuation.resume(returning: work())
+        }
+    }
+}

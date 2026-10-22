@@ -53,13 +53,17 @@ struct BeatDetectorTests {
         #expect(result.found >= 0.95)
     }
 
-    /// Частоты идут отдельными случаями теста, Swift Testing гоняет их параллельно: одним циклом
-    /// этот тест был самым долгим во всем наборе (около 11 с на Linux и до минуты на маке).
+    /// Частоты идут отдельными случаями теста и считаются параллельно: одним циклом этот тест был
+    /// самым долгим во всем наборе (около 11 с на Linux и до минуты на маке). Расчет идет вне пула
+    /// Swift Concurrency (`runOffCooperativePool`), иначе 23 случая занимают все его потоки.
     @Test(arguments: Array(stride(from: 40.0, through: 150.0, by: 5.0)))
-    func steadyToneHasNoBeats(frequency: Double) {
-        let tone = TestSignals.sine(
-            frequency: frequency, amplitude: 0.8, sampleRate: Self.sampleRate, count: Int(Self.sampleRate) * 10)
-        let beats = Self.detectBeats(in: tone)
+    func steadyToneHasNoBeats(frequency: Double) async {
+        let sampleRate = Self.sampleRate
+        let beats = await runOffCooperativePool {
+            let tone = TestSignals.sine(
+                frequency: frequency, amplitude: 0.8, sampleRate: sampleRate, count: Int(sampleRate) * 10)
+            return Self.detectBeats(in: tone)
+        }
         #expect(beats.count <= 1, "tone \(frequency) Hz gave \(beats.count) beats")
     }
 
