@@ -224,14 +224,25 @@ struct BeatSyncTests {
         #expect(mean >= 0.9, "mean F \(mean): \(summaries)")
     }
 
-    @Test func syncopationGlowsOnBeatsAndKicks() async {
+    /// Синкопы хип-хопа: после захвата доли вспыхивают, бочка вне сетки только слабо отсвечивает
+    /// (`offGridScale` не выше порога вспышки). До 1.1 эталоном были доли вместе с бочками: на реальной
+    /// музыке такие вспышки при захвате попадали в долю в 21 % случаев и читались как вспышки мимо такта.
+    @Test func syncopationFlashesOnBeats() async {
         let (scene, result) = await Self.run { Drums.hipHop90() }
-        var reference: [Double] = []
-        for time in (scene.beats + scene.kicks).sorted() where reference.last.map({ time - $0 > 0.030 }) ?? true {
-            reference.append(time)
+        guard let from = Self.lockedFrom(result, period: 60.0 / 90) else {
+            Issue.record("no lock: \(Self.describe(result, f: nil, offsets: nil))")
+            return
         }
-        let f = result.fMeasure(reference: result.audible(reference), tolerance: 0.05, from: Self.from)
+        // До захвата светятся сами бочки, и на «и» тоже, поэтому F считается с захвата.
+        #expect(from <= 8, "\(Self.describe(result, f: nil, offsets: nil))")
+        let f = result.fMeasure(reference: result.audible(scene.beats), tolerance: 0.05, from: from)
         #expect(f >= 0.9, "\(Self.describe(result, f: f, offsets: nil))")
+        let offGrid = scene.kicks.filter { kick in
+            kick >= from && !scene.beats.contains { abs($0 - kick) < 0.030 }
+        }
+        let flashed = result.audible(offGrid).filter { kick in result.events.contains { abs($0 - kick) < 0.05 } }
+        #expect(offGrid.count >= 10)
+        #expect(flashed.isEmpty, "flashes at off-grid kicks \(flashed)")
     }
 
     @Test func swingAndHumanizedKick() async {

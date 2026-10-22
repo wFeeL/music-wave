@@ -54,7 +54,9 @@ public struct BeatTracker: Sendable {
         public var phaseJumpChecks: Int
         /// Онсет бочки ближе этой доли периода к предсказанной доле не светится отдельно.
         public var dropWindow: Double
-        /// Яркость онсета бочки вне сетки при захвате.
+        /// Яркость онсета бочки вне сетки при захвате. Не выше порога вспышки `OfflineBeatChain.eventRise`
+        /// (0.2): при захвате бочка между долями дает слабый отблеск, а не вспышку мимо доли. На GTZAN
+        /// такие вспышки при 0.6 попадали в долю в 21 % случаев и тянули точность захвата с 0.93 до 0.82.
         public var offGridScale: Float
         /// Нижняя граница яркости онсета бочки.
         public var onsetFloor: Float
@@ -76,7 +78,7 @@ public struct BeatTracker: Sendable {
             phaseJump: Double = 0.12,
             phaseJumpChecks: Int = 2,
             dropWindow: Double = 0.2,
-            offGridScale: Float = 0.6,
+            offGridScale: Float = 0.2,
             onsetFloor: Float = 0.4,
             crossfadeBeats: Double = 2.0,
             gateFallPerBeatDB: Float = 14,

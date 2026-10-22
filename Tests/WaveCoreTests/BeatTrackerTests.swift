@@ -198,6 +198,23 @@ struct BeatTrackerTests {
         #expect(ids.seen.subtracting(before).count > 0)
     }
 
+    /// Бочка между долями при захвате дает отблеск не выше порога вспышки, а не вспышку мимо доли.
+    @Test func offGridKickStaysBelowFlashWhenLocked() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        try #require(tracker.blend == 1)
+        let beat = try #require(tracker.nextBeat)
+        // Бочка на «и», посередине между долями: дальше `dropWindow` от обеих.
+        let onset = OnsetEvent(time: beat + 0.25, strength: 1)
+        hops.feedSilence(&tracker, until: onset.time + 0.002, kick: onset)
+        try #require(tracker.locked)
+        let glow = try #require(tracker.schedule.events.first { !$0.predicted && $0.time == onset.time })
+        #expect(glow.amplitude <= OfflineBeatChain.eventRise)
+        #expect(glow.amplitude >= 0.15)
+    }
+
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
     @Test func nonFiniteKickLevelCountsAsFloor() {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
