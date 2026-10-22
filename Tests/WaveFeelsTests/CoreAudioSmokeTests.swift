@@ -66,6 +66,32 @@ struct CoreAudioSmokeTests {
         #expect(zeroRun > 1, "zeroRunDuration: \(zeroRun)")
     }
 
+    /// Пока остров скрыт, анализ идет с частотой 15 Гц; признак переживает остановку и запуск.
+    @Test func idleEngineTicksAtFifteenHertz() async throws {
+        let ring = SampleRingBuffer(capacity: 131_072)
+        let engine = AnalysisEngine(ring: ring, store: FrameStore())
+        let log = FrameLog()
+        engine.observeFrames { log.append($0) }
+
+        engine.setIdle(true)
+        engine.start(sampleRate: 48_000)
+        #expect(engine.tickIntervalForTesting == 1 / AnalysisEngine.idleRate)
+        // Конвейер перезапускает анализ при пересборке, а признак присылает только при смене.
+        engine.stop()
+        engine.start(sampleRate: 48_000)
+        #expect(engine.tickIntervalForTesting == 1 / AnalysisEngine.idleRate)
+        let before = log.frames.count
+        try await Task.sleep(for: .seconds(1))
+        // Под нагрузкой кадров бывает меньше, но не больше: 15 за секунду плюс первый сразу.
+        let idleFrames = log.frames.count - before
+        #expect(idleFrames <= 20, "кадров за 1 с в простое: \(idleFrames)")
+
+        engine.setIdle(false)
+        let active = engine.tickIntervalForTesting
+        #expect(active == 1.0 / 60 || active == 1.0 / 30)
+        engine.stop()
+    }
+
     /// `Resources/Demo/<name>` в корне репозитория.
     private static func resource(_ name: String) -> URL {
         URL(fileURLWithPath: #filePath)

@@ -10,10 +10,11 @@ typealias PaletteColor = WaveCore.RGBColor
 /// Связывает настройки, захват звука, Now Playing и состояние острова.
 ///
 /// Цикл 10 Гц на главном акторе: уровень из `FrameStore` идет в `ActivityGate`, Now Playing
-/// источника в `IslandInputs`, затем `IslandStateMachine`. Там же настройки передаются в
-/// `AudioPipeline`, а после 10 с тишины захват приостанавливается, если Now Playing работает
-/// и сообщит о старте воспроизведения. Сон останавливает захват и адаптер, пробуждение через 1 с
-/// запускает их заново (`systemWillSleep`, `systemDidWake`, подписки в `AppDelegate`).
+/// источника в `IslandInputs`, затем `IslandStateMachine`. Там же настройки и то, скрыт ли
+/// остров (тогда анализ идет реже), передаются в `AudioPipeline`, а после 10 с тишины захват
+/// приостанавливается, если Now Playing работает и сообщит о старте воспроизведения. Сон
+/// останавливает захват и адаптер, пробуждение через 1 с запускает их заново (`systemWillSleep`,
+/// `systemDidWake`, подписки в `AppDelegate`).
 /// Подписок и задач в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
 @Observable
@@ -501,6 +502,7 @@ final class AppModel {
             log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
             islandState = state
         }
+        pipeline.islandHidden = state == .hidden
         updatePermissionHint()
         // Подсказка показана, а окна, которые опрашивают доступ каждую секунду, закрыты:
         // пользователь мог выдать доступ в Системных настройках, не возвращаясь в приложение.

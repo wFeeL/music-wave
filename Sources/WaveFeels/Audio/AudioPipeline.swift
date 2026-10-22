@@ -63,6 +63,11 @@ final class AudioPipeline {
         didSet { if adapterAvailable != oldValue { updateSourceOutputting() } }
     }
 
+    /// Остров скрыт: анализ идет с частотой 15 Гц вместо 60. Выставляет `AppModel`.
+    @ObservationIgnored var islandHidden = false {
+        didSet { if islandHidden != oldValue { engine.setIdle(islandHidden) } }
+    }
+
     @ObservationIgnored var source: AudioSource = .systemWide {
         didSet {
             guard source != oldValue else { return }

@@ -4,9 +4,13 @@ import WaveCore
 
 /// Таймер анализа: 60 Гц (30 Гц в режиме энергосбережения) берет из кольца окно 2048 сэмплов
 /// со смещением на задержку, считает `Analyzer.process` и публикует кадр в `FrameStore`.
+/// Пока остров скрыт (`setIdle(true)`), таймер идет с частотой 15 Гц: этого хватает, чтобы
+/// `ActivityGate` заметил начало звука (лишние десятки миллисекунд), а волны не рисуются.
 nonisolated final class AnalysisEngine: @unchecked Sendable {
     /// Самый большой шаг времени, который получает анализатор.
     static let maxStep = 0.1
+    /// Частота анализа, пока остров скрыт, Гц.
+    static let idleRate = 15.0
 
     private struct Shared: Sendable {
         var settings = LevelSettings()
@@ -28,6 +32,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     private var window = [Float](repeating: 0, count: Analyzer.fftSize)
     private var lastTickNanos: UInt64?
     private var interval = 1.0 / 60
+    private var idle = false
 
     init(ring: SampleRingBuffer, store: FrameStore) {
         self.ring = ring
@@ -89,6 +94,18 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         }
     }
 
+    /// Остров скрыт: анализ реже. Применяется на очереди анализа, сохраняется между запусками.
+    func setIdle(_ idle: Bool) {
+        queue.async { [weak self] in
+            guard let self, self.idle != idle else { return }
+            self.idle = idle
+            self.applyInterval()
+        }
+    }
+
+    /// Текущий шаг таймера, с. Для тестов.
+    var tickIntervalForTesting: Double { queue.sync { interval } }
+
     /// Вызывается на очереди анализа для каждого опубликованного кадра. Для тестов и диагностики.
     func observeFrames(_ observer: (@Sendable (WaveFrame) -> Void)?) {
         shared.withLock { $0.frameObserver = observer }
@@ -127,7 +144,11 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     }
 
     private func applyInterval() {
-        interval = ProcessInfo.processInfo.isLowPowerModeEnabled ? 1.0 / 30 : 1.0 / 60
+        if idle {
+            interval = 1 / Self.idleRate
+        } else {
+            interval = ProcessInfo.processInfo.isLowPowerModeEnabled ? 1.0 / 30 : 1.0 / 60
+        }
         let nanos = Int(interval * 1_000_000_000)
         timer?.schedule(deadline: .now(), repeating: .nanoseconds(nanos), leeway: .milliseconds(2))
     }
