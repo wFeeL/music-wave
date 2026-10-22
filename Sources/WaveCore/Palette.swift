@@ -58,6 +58,23 @@ public struct OKLab: Sendable, Equatable {
         let eps = 1e-5
         return [rgb.r, rgb.g, rgb.b].allSatisfy { $0 >= -eps && $0 <= 1 + eps }
     }
+
+    /// Тот же оттенок и светлота с наибольшей насыщенностью внутри гаммы sRGB: бисекция по
+    /// множителю chroma. Цвет в гамме возвращается как есть.
+    func fittedToSRGBGamut() -> OKLab {
+        guard !isInSRGBGamut else { return self }
+        var low: Float = 0
+        var high: Float = 1
+        for _ in 0..<24 {
+            let mid = (low + high) / 2
+            if OKLab(l: l, a: a * mid, b: b * mid).isInSRGBGamut {
+                low = mid
+            } else {
+                high = mid
+            }
+        }
+        return OKLab(l: l, a: a * low, b: b * low)
+    }
 }
 
 /// sRGB с гамма-кривой, значения 0...1.
@@ -248,19 +265,7 @@ public enum PaletteExtractor {
         if lab.l < liftedLightness {
             lab = OKLab(l: liftedLightness, a: lab.a * 1.3, b: lab.b * 1.3)
         }
-        guard !lab.isInSRGBGamut else { return lab }
-
-        var low: Float = 0
-        var high: Float = 1
-        for _ in 0..<24 {
-            let mid = (low + high) / 2
-            if OKLab(l: lab.l, a: lab.a * mid, b: lab.b * mid).isInSRGBGamut {
-                low = mid
-            } else {
-                high = mid
-            }
-        }
-        return OKLab(l: lab.l, a: lab.a * low, b: lab.b * low)
+        return lab.fittedToSRGBGamut()
     }
 }
 

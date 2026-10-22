@@ -210,20 +210,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         var base = (color.isFinite ? color : PaletteExtractor.fallback[0]).oklab
         base.l = min(max(base.l, customMinimumLightness), 1)
         return [0, customHueTurn, -customHueTurn].map { turn in
-            RGBColor(oklab: fittedToGamut(base.rotatedHue(degrees: turn)))
+            RGBColor(oklab: base.rotatedHue(degrees: turn).fittedToSRGBGamut())
         }
-    }
-
-    /// Тот же оттенок и светлота с наибольшей насыщенностью внутри гаммы sRGB.
-    private static func fittedToGamut(_ lab: OKLab) -> OKLab {
-        guard !lab.isInSRGBGamut else { return lab }
-        func scaled(_ factor: Float) -> OKLab { OKLab(l: lab.l, a: lab.a * factor, b: lab.b * factor) }
-        var low: Float = 0, high: Float = 1
-        for _ in 0..<20 {
-            let mid = (low + high) / 2
-            if scaled(mid).isInSRGBGamut { low = mid } else { high = mid }
-        }
-        return scaled(low)
     }
 
     private static func clamped(_ value: Double, _ range: ClosedRange<Double>, _ fallback: Double) -> Double {
