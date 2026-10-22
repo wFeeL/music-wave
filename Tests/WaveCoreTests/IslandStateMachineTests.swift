@@ -100,6 +100,39 @@ import Testing
         #expect(run(&machine, paused, from: 0.2, to: 2) == .hidden)
     }
 
+    @Test func parkedPointerCountsOnlyOnceIslandCanExpand() {
+        var machine = IslandStateMachine()
+        let parked = IslandInputs(pointerInHoverZone: true)
+        #expect(run(&machine, parked, from: 0, to: 2) == .hidden)
+        #expect(machine.pointerDeadline == nil)
+        // Музыка началась под стоящим в вырезе курсором: сначала свернутый остров, раскрытие
+        // только через `expandDelay`.
+        var playingParked = playing
+        playingParked.pointerInHoverZone = true
+        #expect(machine.update(playingParked, now: 2.1) == .collapsed)
+        #expect(machine.update(playingParked, now: 2.2) == .collapsed)
+        #expect(machine.update(playingParked, now: 2.25) == .expanded)
+    }
+
+    @Test func pointerDeadlineTracksExpandAndCollapse() throws {
+        var machine = IslandStateMachine()
+        machine.update(playing, now: 0)
+        #expect(machine.pointerDeadline == nil)
+        var hover = playing
+        hover.pointerInHoverZone = true
+        machine.update(hover, now: 1)
+        let expandAt = try #require(machine.pointerDeadline)
+        #expect(abs(expandAt - 1.15) < 1e-9)
+        #expect(machine.update(hover, now: expandAt) == .expanded)
+        #expect(machine.pointerDeadline == nil)
+
+        machine.update(playing, now: 2)
+        let collapseAt = try #require(machine.pointerDeadline)
+        #expect(abs(collapseAt - 2.3) < 1e-9)
+        #expect(machine.update(playing, now: collapseAt) == .collapsed)
+        #expect(machine.pointerDeadline == nil)
+    }
+
     @Test func silenceTimerResetsWhenMusicResumes() {
         var machine = IslandStateMachine()
         machine.update(playing, now: 0)

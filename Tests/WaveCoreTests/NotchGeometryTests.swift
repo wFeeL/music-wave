@@ -246,10 +246,15 @@ struct NotchGeometryTests {
         }
     }
 
-    @Test func pointerOverNotchStartsPolling() throws {
+    /// Свернутый остров не опрашивает курсор, даже когда тот стоит в вырезе: панель пропускает
+    /// события, и глобальный монитор видит движения сам.
+    @Test func pointerOverCollapsedNotchNeedsNoPolling() throws {
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
-        let pointer = layout.pointer(at: CGPoint(x: layout.notch.midX, y: 956), state: .collapsed)
-        #expect(pointer == NotchPointer(inHoverZone: true, acceptsClicks: false, needsPolling: true))
+        let point = CGPoint(x: layout.notch.midX, y: 956)
+        for state in [IslandState.hidden, .collapsed] {
+            let pointer = layout.pointer(at: point, state: state)
+            #expect(pointer == NotchPointer(inHoverZone: true, acceptsClicks: false, needsPolling: false))
+        }
     }
 
     @Test func pointerOverWingsAndMenuBarIsIgnored() throws {

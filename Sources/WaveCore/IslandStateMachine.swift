@@ -63,6 +63,19 @@ public struct IslandStateMachine: Sendable {
         self.collapseDelay = collapseDelay
     }
 
+    /// Когда состояние сменится по курсору, если входы не изменятся: раскрытие через
+    /// `expandDelay` после входа в зону, сворачивание через `collapseDelay` после ухода.
+    /// `nil`, если такого отсчета нет. По нему владелец вызывает `update` точно в срок, не
+    /// дожидаясь своего тика.
+    public var pointerDeadline: Double? {
+        switch state {
+        case .hidden, .collapsed:
+            return pointerInSince.map { $0 + expandDelay }
+        case .expanded:
+            return pointerOutSince.map { $0 + collapseDelay }
+        }
+    }
+
     /// Возвращает новое состояние.
     @discardableResult
     public mutating func update(_ inputs: IslandInputs, now: Double) -> IslandState {
@@ -78,7 +91,9 @@ public struct IslandStateMachine: Sendable {
         let canExpand = content || (inputs.sourceRunning && inputs.hasLastTrack)
 
         contentFalseSince = content ? nil : (contentFalseSince ?? now)
-        pointerInSince = inputs.pointerInHoverZone ? (pointerInSince ?? now) : nil
+        // Курсор, оставленный в вырезе, пока раскрывать было нечего, не копит время: с началом
+        // музыки остров сначала выходит свернутым и раскрывается только через `expandDelay`.
+        pointerInSince = inputs.pointerInHoverZone && canExpand ? (pointerInSince ?? now) : nil
         pointerOutSince = inputs.pointerInHoverZone ? nil : (pointerOutSince ?? now)
 
         if state == .hidden, content {

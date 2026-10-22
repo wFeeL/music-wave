@@ -117,7 +117,7 @@ public struct NotchLayout: Sendable, Equatable {
         return NotchPointer(
             inHoverZone: inHoverZone,
             acceptsClicks: expanded && expandedClickArea.contains(point),
-            needsPolling: !suppressed && (expanded || inHoverZone)
+            needsPolling: expanded
         )
     }
 }
@@ -130,7 +130,10 @@ public struct NotchPointer: Sendable, Equatable {
     /// (`expandedClickArea`): свернутый остров, полосы под плечами и все вокруг пропускают
     /// клики в строку меню.
     public var acceptsClicks: Bool
-    /// Нужен частый опрос курсора: глобальный монитор не видит событий над своими окнами.
+    /// Нужен частый опрос курсора: раскрытый остров принимает события мыши, а глобальный
+    /// монитор не видит событий над своими окнами. Пока остров не раскрыт, панель пропускает
+    /// события и монитор видит движения сам, поэтому курсор, оставленный в вырезе, опроса
+    /// не держит.
     public var needsPolling: Bool
 
     public init(inHoverZone: Bool, acceptsClicks: Bool, needsPolling: Bool) {
