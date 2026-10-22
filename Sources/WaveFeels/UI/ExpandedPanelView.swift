@@ -367,7 +367,9 @@ struct SourceAppButton: View {
 
     var body: some View {
         let tooltip = Self.tooltip(for: name)
-        Button(action: action) {
+        Button {
+            action()
+        } label: {
             let size = ExpandedPanelView.sourceButtonSize
             let drawn = (size / SourceIconView.iconBodyFraction).rounded()
             Image(nsImage: icon)

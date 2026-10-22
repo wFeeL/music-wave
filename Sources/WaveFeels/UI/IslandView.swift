@@ -53,9 +53,9 @@ struct IslandView: View {
     /// входящее.
     static func reducedBodyAnimation(_ fade: IslandTransition.BodyFade) -> Animation? {
         switch fade {
-        case .immediate: nil
-        case .fadeIn: bannerReducedAnimation
-        case .fadeOutDelayed: bannerReducedAnimation.delay(bannerReducedDuration)
+        case .immediate: return nil
+        case .fadeIn: return bannerReducedAnimation
+        case .fadeOutDelayed: return bannerReducedAnimation.delay(bannerReducedDuration)
         }
     }
 

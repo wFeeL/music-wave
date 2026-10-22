@@ -521,13 +521,12 @@ extension SnapshotRenderer {
                   data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
                   space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               ) else { return nil }
-        var background = CGColor(gray: 1, alpha: 1)
-        appearance.performAsCurrentDrawingAppearance {
-            background = NSColor.windowBackgroundColor.cgColor
-        }
         let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
-        context.setFillColor(background)
-        context.fill(rect)
+        // Фон в оформлении `appearance`: заливка внутри блока, как `cacheDisplay` выше.
+        appearance.performAsCurrentDrawingAppearance {
+            context.setFillColor(NSColor.windowBackgroundColor.cgColor)
+            context.fill(rect)
+        }
         context.draw(image, in: rect)
         guard let flat = context.makeImage() else { return nil }
         let result = NSBitmapImageRep(cgImage: flat)
