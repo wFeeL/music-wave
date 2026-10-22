@@ -284,6 +284,12 @@ public final class StreamAnalyzer {
         )
     }
 
+    /// Рабочие буферы шага (БПФ, спектр, уровни, нормировка, амплитуды полос) для теста: шаги
+    /// не пересоздают и не растят их.
+    var workBuffers: [WorkBuffer] {
+        [fft.workBuffer, WorkBuffer(spectrum), WorkBuffer(levelsDB), WorkBuffer(normalized), WorkBuffer(bandAmplitudes)]
+    }
+
     private static func makeLayerRanges(for mapper: BandMapper) -> [Range<Int>] {
         WaveLayer.allCases.map { mapper.bands(for: $0) }
     }

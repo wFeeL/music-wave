@@ -4,13 +4,17 @@ import Synchronization
 /// БПФ вещественного сигнала с окном Ханна, возвращает спектр амплитуд.
 ///
 /// Внутри итеративный radix-2 комплексный БПФ размера `size`; таблицы окна,
-/// поворотов и перестановки бит считаются один раз в `init`.
+/// поворотов и перестановки бит считаются один раз в `init`. Бабочки этапов от четырех пар
+/// идут по четыре в векторах `SIMD4`: каждая дорожка делает те же умножения и сложения в том
+/// же порядке, что скалярная бабочка, поэтому спектр бит в бит прежний.
 public struct RealFFT: Sendable {
     public let size: Int
 
     private let window: [Float]
-    private let cosTable: [Float]
-    private let sinTable: [Float]
+    /// Повороты подряд для каждого этапа: у этапа с `h` парами в блоке они лежат с `h - 1`,
+    /// k-й равен `cos` и `-sin` от `2π k (size / 2h) / size`.
+    private let stageCos: [Float]
+    private let stageSin: [Float]
     private let bitReversed: [Int32]
     private let scale: Float
     private let scratch: FFTScratch
@@ -32,8 +36,23 @@ public struct RealFFT: Sendable {
         scale = Float(2 / windowSum)
 
         let half = size / 2
-        cosTable = (0..<half).map { Float(cos(2 * Double.pi * Double($0) / Double(size))) }
-        sinTable = (0..<half).map { Float(-sin(2 * Double.pi * Double($0) / Double(size))) }
+        let cosTable = (0..<half).map { Float(cos(2 * Double.pi * Double($0) / Double(size))) }
+        let sinTable = (0..<half).map { Float(-sin(2 * Double.pi * Double($0) / Double(size))) }
+        var stageCos = [Float]()
+        var stageSin = [Float]()
+        stageCos.reserveCapacity(size - 1)
+        stageSin.reserveCapacity(size - 1)
+        var pairs = 1
+        while pairs <= half {
+            let step = size / (2 * pairs)
+            for k in 0..<pairs {
+                stageCos.append(cosTable[k * step])
+                stageSin.append(sinTable[k * step])
+            }
+            pairs <<= 1
+        }
+        self.stageCos = stageCos
+        self.stageSin = stageSin
 
         let bits = size.trailingZeroBitCount
         bitReversed = (0..<size).map { index in
@@ -73,15 +92,21 @@ public struct RealFFT: Sendable {
         }
     }
 
+    /// Адрес и емкость рабочего массива для теста: вызовы его не пересоздают.
+    var workBuffer: WorkBuffer {
+        scratch.buffer.withLock { WorkBuffer($0) }
+    }
+
     /// Окно, БПФ и модуль. `scratch` это `2 * size` значений: действительные части, затем мнимые.
     private func transform(
         _ samples: UnsafeBufferPointer<Float>,
         scratch: UnsafeMutableBufferPointer<Float>,
         into output: UnsafeMutableBufferPointer<Float>
     ) {
-        let re = UnsafeMutableBufferPointer(rebasing: scratch[0..<size])
-        let im = UnsafeMutableBufferPointer(rebasing: scratch[size..<(2 * size)])
+        let size = size
         let half = size / 2
+        guard let re = scratch.baseAddress, let out = output.baseAddress else { return }
+        let im = re + size
 
         window.withUnsafeBufferPointer { window in
             bitReversed.withUnsafeBufferPointer { bitReversed in
@@ -89,41 +114,117 @@ public struct RealFFT: Sendable {
                 // поэтому каждый элемент `re` записан.
                 for i in 0..<size {
                     re[Int(bitReversed[i])] = samples[i] * window[i]
-                    im[i] = 0
                 }
             }
         }
+        im.update(repeating: 0, count: size)
 
-        cosTable.withUnsafeBufferPointer { cosTable in
-            sinTable.withUnsafeBufferPointer { sinTable in
-                var length = 2
-                while length <= size {
-                    let halfLength = length / 2
-                    let step = size / length
+        stageCos.withUnsafeBufferPointer { stageCos in
+            stageSin.withUnsafeBufferPointer { stageSin in
+                guard let cosBase = stageCos.baseAddress, let sinBase = stageSin.baseAddress else { return }
+                var pairs = 1
+                while pairs <= half {
+                    let length = 2 * pairs
+                    let wr = cosBase + (pairs - 1)
+                    let wi = sinBase + (pairs - 1)
                     var start = 0
-                    while start < size {
-                        for k in 0..<halfLength {
-                            let wr = cosTable[k * step]
-                            let wi = sinTable[k * step]
-                            let a = start + k
-                            let b = a + halfLength
-                            let tr = re[b] * wr - im[b] * wi
-                            let ti = re[b] * wi + im[b] * wr
-                            re[b] = re[a] - tr
-                            im[b] = im[a] - ti
-                            re[a] += tr
-                            im[a] += ti
+                    if pairs >= 4 {
+                        while start < size {
+                            var k = 0
+                            while k < pairs {
+                                Self.butterflies4(re: re, im: im, a: start + k, b: start + k + pairs, wr: wr + k, wi: wi + k)
+                                k += 4
+                            }
+                            start += length
                         }
-                        start += length
+                    } else {
+                        while start < size {
+                            for k in 0..<pairs {
+                                Self.butterfly(re: re, im: im, a: start + k, b: start + k + pairs, wr: wr[k], wi: wi[k])
+                            }
+                            start += length
+                        }
                     }
-                    length <<= 1
+                    pairs <<= 1
                 }
             }
         }
 
-        for k in 0..<half {
-            output[k] = (re[k] * re[k] + im[k] * im[k]).squareRoot() * scale
+        let scale = scale
+        var k = 0
+        if half >= 4 {
+            let scale4 = SIMD4<Float>(repeating: scale)
+            while k < half {
+                let r = Self.load4(re + k)
+                let i = Self.load4(im + k)
+                Self.store4((r * r + i * i).squareRoot() * scale4, to: out + k)
+                k += 4
+            }
         }
+        while k < half {
+            out[k] = (re[k] * re[k] + im[k] * im[k]).squareRoot() * scale
+            k += 1
+        }
+    }
+
+    /// Бабочка пары `a`, `b` с поворотом `(wr, wi)`.
+    @inline(__always)
+    private static func butterfly(
+        re: UnsafeMutablePointer<Float>, im: UnsafeMutablePointer<Float>, a: Int, b: Int, wr: Float, wi: Float
+    ) {
+        let tr = re[b] * wr - im[b] * wi
+        let ti = re[b] * wi + im[b] * wr
+        re[b] = re[a] - tr
+        im[b] = im[a] - ti
+        re[a] += tr
+        im[a] += ti
+    }
+
+    /// Четыре бабочки подряд: пары `a + j`, `b + j` с поворотами `wr[j]`, `wi[j]`, j = 0...3.
+    /// Каждая дорожка считает ровно то же, что `butterfly`.
+    @inline(__always)
+    private static func butterflies4(
+        re: UnsafeMutablePointer<Float>, im: UnsafeMutablePointer<Float>, a: Int, b: Int,
+        wr: UnsafePointer<Float>, wi: UnsafePointer<Float>
+    ) {
+        let cosines = load4(wr)
+        let sines = load4(wi)
+        let reA = load4(re + a)
+        let imA = load4(im + a)
+        let reB = load4(re + b)
+        let imB = load4(im + b)
+        let tr = reB * cosines - imB * sines
+        let ti = reB * sines + imB * cosines
+        store4(reA - tr, to: re + b)
+        store4(imA - ti, to: im + b)
+        store4(reA + tr, to: re + a)
+        store4(imA + ti, to: im + a)
+    }
+
+    @inline(__always)
+    private static func load4(_ pointer: UnsafePointer<Float>) -> SIMD4<Float> {
+        UnsafeRawPointer(pointer).loadUnaligned(as: SIMD4<Float>.self)
+    }
+
+    @inline(__always)
+    private static func load4(_ pointer: UnsafeMutablePointer<Float>) -> SIMD4<Float> {
+        UnsafeRawPointer(pointer).loadUnaligned(as: SIMD4<Float>.self)
+    }
+
+    @inline(__always)
+    private static func store4(_ value: SIMD4<Float>, to pointer: UnsafeMutablePointer<Float>) {
+        UnsafeMutableRawPointer(pointer).storeBytes(of: value, as: SIMD4<Float>.self)
+    }
+}
+
+/// Адрес и емкость буфера: по ним тест видит, что буфер не пересоздан и не вырос.
+struct WorkBuffer: Hashable, Sendable {
+    let address: UInt
+    let capacity: Int
+
+    init(_ array: [Float]) {
+        address = array.withUnsafeBufferPointer { UInt(bitPattern: $0.baseAddress) }
+        capacity = array.capacity
     }
 }
 
