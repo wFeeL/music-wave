@@ -1,0 +1,45 @@
+# sample <pid> 3 of the silence run: samples per thread and heaviest top-of-stack frames
+
+Analysis of sampling WaveFeels (pid 8824) every 1 millisecond
+Process:         WaveFeels [8824]
+Path:            /Users/USER/*/WaveFeels.app/Contents/MacOS/WaveFeels
+Load Address:    0x1009d8000
+Identifier:      com.wfeels.wavefeels
+Version:         0.0.34 (34)
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [6554]
+Target Type:     live task
+
+Date/Time:       2026-10-22 09:22:51.988 +0000
+Launch Time:     2026-10-22 09:22:31.567 +0000
+OS Version:      macOS 26.6.2 (25G83)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         19.2M
+Physical footprint (peak):  21.4M
+Idle exit:                  untracked
+Samples per thread:
+    1923 Thread_27408   DispatchQueue_1: com.apple.main-thread  (serial)
+    1923 Thread_27420: com.apple.NSEventThread
+    1923 Thread_27427
+    1923 Thread_27429: caulk.messenger.shared:17
+    1923 Thread_27430: caulk.messenger.shared:high
+    1923 Thread_27433: caulk::deferred_logger
+    1911 Thread_27414
+    1911 Thread_27419
+    1909 Thread_27418
+    20 Thread_<multiple>   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    12 Thread_<multiple>   DispatchQueue_403: com.wfeels.wavefeels.demo  (serial)
+    2 Thread_27418   DispatchQueue_12: com.apple.root.utility-qos.cooperative  (concurrent)
+    2 Thread_27419   DispatchQueue_15: com.apple.root.default-qos.cooperative  (concurrent)
+    2 Thread_27419   DispatchQueue_402: com.wfeels.wavefeels.analysis  (serial)
+
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        7615
+        semaphore_wait_trap  (in libsystem_kernel.dylib)        5769
+        mach_msg2_trap  (in libsystem_kernel.dylib)        3845
+        _dispatch_workloop_worker_thread  (in libdispatch.dylib)        32
+        kevent_id  (in libsystem_kernel.dylib)        14
+        start_wqthread  (in libsystem_pthread.dylib)        7

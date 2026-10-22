@@ -1,0 +1,3 @@
+✘ Test sixHundredTransformsAreFast() recorded an issue at RealFFTTests.swift:73:5: Expectation failed: (elapsed → 3.399836458 seconds) < (limit → 3.0 seconds)
+✘ Test sixHundredTransformsAreFast() failed after 16.747 seconds with 1 issue.
+✘ Test run with 275 tests in 30 suites failed after 37.349 seconds with 1 issue.

@@ -1,0 +1,56 @@
+# WaveFeels CPU probe
+
+app: /Users/runner/work/music-wave/music-wave/dist/WaveFeels.app
+method: cumulative CPU time from ps over a 30 s window after 5 s warm-up, % of one core
+machine: Apple M1 (Virtual), 3 cores, macOS 26.6.2
+
+## play
+
+args: --demo /Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Resources/Demo/demo.wav --fake-notch --exit-after 40
+window: 30 s after 5 s warm-up
+average: 11.53 % of one core (limit: at most 15 %)
+max per second: 16.30 %
+per second: 12.89 16.30 14.15 14.38 14.26 13.48 14.29 13.10 14.49 12.71 13.20 13.07 11.33 11.69 6.68 0.72 4.07 10.56 10.27 10.99 10.48 11.80 13.06 12.55
+child processes (Now Playing adapter): 0.00 % of one core
+rss: first 81.4 MB, last 81.6 MB, max 81.6 MB
+app exit code: 0
+island: shown (expected shown)
+verdict: ok
+
+app log:
+2026-10-22T09:21:51Z WaveFeels 0.0.34 (сборка 34), macOS Version 26.6.2 (Build 25G83), подпись: WaveFeels Self-Signed
+2026-10-22T09:21:51Z первое обращение к Core Audio
+2026-10-22T09:21:51Z первое обращение к Core Audio заняло 0.103 с
+2026-10-22T09:21:51Z демо: demo.wav, 44100 Гц
+2026-10-22T09:21:51Z проверка адаптера запущена
+2026-10-22T09:21:51Z остров: экран 1, вырез x 419.5, y 736.0, 185.0 × 32.0, панель x 245.0, y 558.0, 534.0 × 210.0
+2026-10-22T09:21:51Z остров: скрыт -> свернут
+2026-10-22T09:21:51Z проверка адаптера завершилась: код 0
+2026-10-22T09:21:51Z поток адаптера запущен
+2026-10-22T09:22:31Z выход по --exit-after
+2026-10-22T09:22:31Z выход: захват, адаптер и подписки остановлены
+
+## silence
+
+args: --demo /Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Resources/Demo/silence.wav --fake-notch --no-capture --exit-after 40
+window: 30 s after 5 s warm-up
+average: 0.73 % of one core (limit: below 1 %)
+max per second: 1.65 %
+per second: 1.65 0.92 1.63 0.83 0.89 0.00 0.90 0.89 0.86 0.00 0.87 0.82 0.91 0.00 0.87 0.88 0.00 0.00 0.88 0.83 0.83 0.00 0.88 0.91 0.87 0.88
+child processes (Now Playing adapter): 0.00 % of one core
+rss: first 79.2 MB, last 75.1 MB, max 79.2 MB
+app exit code: 0
+island: hidden (expected hidden)
+verdict: ok
+
+app log:
+2026-10-22T09:22:32Z WaveFeels 0.0.34 (сборка 34), macOS Version 26.6.2 (Build 25G83), подпись: WaveFeels Self-Signed
+2026-10-22T09:22:32Z первое обращение к Core Audio
+2026-10-22T09:22:32Z первое обращение к Core Audio заняло 0.102 с
+2026-10-22T09:22:32Z захват звука выключен (--no-capture)
+2026-10-22T09:22:32Z демо: silence.wav, 44100 Гц
+2026-10-22T09:22:32Z остров: экран 1, вырез x 419.5, y 736.0, 185.0 × 32.0, панель x 245.0, y 558.0, 534.0 × 210.0
+2026-10-22T09:23:12Z выход по --exit-after
+2026-10-22T09:23:12Z выход: захват, адаптер и подписки остановлены
+
+result: success

@@ -1,0 +1,60 @@
+== step sign: bash scripts/sign.sh /Users/runner/work/music-wave/music-wave/dist/WaveFeels.app
+certificate source: signing/ files
+
+Policy: Code Signing
+  Matching identities
+  1) B141BC7C97BC1A6D3ECBF2A806C75CDF8D740508 "WaveFeels Self-Signed" (CSSMERR_TP_NOT_TRUSTED)
+     1 identities found
+
+  Valid identities only
+     0 valid identities found
+signing identity: WaveFeels Self-Signed (B141BC7C97BC1A6D3ECBF2A806C75CDF8D740508)
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework: replacing existing signature
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient: replacing existing signature
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app: replacing existing signature
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework: valid on disk
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework: satisfies its Designated Requirement
+Executable=/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/Current/MediaRemoteAdapter
+Identifier=com.vandenbe.MediaRemoteAdapter
+Format=bundle with Mach-O universal (x86_64 arm64)
+CodeDirectory v=20400 size=504 flags=0x0(none) hashes=9+3 location=embedded
+Signature size=1702
+Authority=WaveFeels Self-Signed
+Signed Time=Oct 22, 2026 at 9:21:38 AM
+Info.plist entries=11
+TeamIdentifier=not set
+Sealed Resources version=2 rules=13 files=1
+Internal requirements count=1 size=108
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient: valid on disk
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient: satisfies its Designated Requirement
+Executable=/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient
+Identifier=MediaRemoteAdapterTestClient
+Format=Mach-O universal (x86_64 arm64)
+CodeDirectory v=20400 size=341 flags=0x0(none) hashes=5+2 location=embedded
+Signature size=1702
+Authority=WaveFeels Self-Signed
+Signed Time=Oct 22, 2026 at 9:21:38 AM
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+Internal requirements count=1 size=104
+--prepared:/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/Current/.
+--validated:/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Frameworks/MediaRemoteAdapter.framework/Versions/Current/.
+--prepared:/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient
+--validated:/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/Helpers/MediaRemoteAdapterTestClient
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app: valid on disk
+/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app: satisfies its Designated Requirement
+Executable=/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/MacOS/WaveFeels
+Identifier=com.wfeels.wavefeels
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=5165 flags=0x0(none) hashes=155+3 location=embedded
+Signature size=1702
+Authority=WaveFeels Self-Signed
+Signed Time=Oct 22, 2026 at 9:21:38 AM
+Info.plist entries=14
+TeamIdentifier=not set
+Sealed Resources version=2 rules=13 files=8
+Internal requirements count=1 size=96
+Executable=/Users/runner/work/music-wave/music-wave/dist/WaveFeels.app/Contents/MacOS/WaveFeels
+designated => identifier "com.wfeels.wavefeels" and certificate leaf = H"b141bc7c97bc1a6d3ecbf2a806c75cdf8d740508"
+leaf hash: b141bc7c97bc1a6d3ecbf2a806c75cdf8d740508, expected: b141bc7c97bc1a6d3ecbf2a806c75cdf8d740508
