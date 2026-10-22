@@ -53,7 +53,7 @@ struct TempoStickinessTests {
     /// Секунды потока для шага устойчивости без самой оценки.
     private static func advance(_ tempo: inout TempoEstimator, seconds: Double) {
         for _ in 0..<Int(seconds * 187.5) {
-            tempo.append(0)
+            tempo.append(0, kick: 0)
         }
     }
 
@@ -135,7 +135,7 @@ struct TempoStickinessTests {
         var tempo = TempoEstimator(framesPerSecond: 187.5)
         let odf = Self.impulses(seconds: 3)
         for (index, value) in odf.enumerated() {
-            tempo.append(value)
+            tempo.append(value, kick: 0)
             // Каждые 0.25 с (47 шагов), как у трекера.
             guard (index + 1) % 47 == 0 else { continue }
             let estimate = tempo.update()
@@ -150,7 +150,7 @@ struct TempoStickinessTests {
     @Test func silenceGivesNoTempo() {
         var tempo = TempoEstimator(framesPerSecond: 187.5)
         for _ in 0..<1200 {
-            tempo.append(0)
+            tempo.append(0, kick: 0)
         }
         #expect(tempo.update() == nil)
         #expect(tempo.period == nil)
@@ -159,7 +159,7 @@ struct TempoStickinessTests {
     @Test func resetForgetsEverything() {
         var tempo = TempoEstimator(framesPerSecond: 187.5)
         for value in Self.impulses(seconds: 4) {
-            tempo.append(value)
+            tempo.append(value, kick: 0)
         }
         #expect(tempo.update() != nil)
         tempo.reset()
@@ -176,14 +176,18 @@ struct TempoEstimatorTests {
         var estimates: [(time: Double, estimate: TempoEstimate)]
     }
 
-    /// Функция онсетов сцены в оценку темпа, `update` каждые 0.25 с времени потока.
-    private static func run(_ samples: [Float], sampleRate: Double = 48_000) -> Run {
+    /// Функция онсетов сцены в оценку темпа, `update` каждые 0.25 с времени потока. С `kickSamples`
+    /// функция бочки берется из этого сигнала, а не из сцены.
+    private static func run(_ samples: [Float], kickSamples: [Float]? = nil, sampleRate: Double = 48_000) -> Run {
         let analyzer = StreamAnalyzer(sampleRate: sampleRate)
         var tempo = TempoEstimator(framesPerSecond: analyzer.config.framesPerSecond)
         var estimates: [(time: Double, estimate: TempoEstimate)] = []
         var nextUpdate = TempoEstimator.updateInterval
-        for hop in analyzer.processSignal(samples) {
-            tempo.append(hop.broadbandODF, kick: hop.kickODF)
+        let hops = analyzer.processSignal(samples)
+        let kicks = kickSamples.map { StreamAnalyzer(sampleRate: sampleRate).processSignal($0).map(\.kickODF) }
+        for (index, hop) in hops.enumerated() {
+            let kick = kicks.map { index < $0.count ? $0[index] : 0 } ?? hop.kickODF
+            tempo.append(hop.broadbandODF, kick: kick)
             if hop.endTime >= nextUpdate {
                 nextUpdate += TempoEstimator.updateInterval
                 if let estimate = tempo.update() {
@@ -250,18 +254,32 @@ struct TempoEstimatorTests {
         Self.checkStable(run, bpm: sweep.bpm)
     }
 
-    /// Смена темпа на кратный (4:3) принимается не позже чем через 5 с, а до нее темп держится.
-    @Test func relatedTempoChangeIsAcceptedWithinFiveSeconds() async {
+    /// Смена темпа на кратный принимается не позже чем через `limit` секунд, а до нее темп держится.
+    @Test(arguments: [(120.0, 160.0, 5.0), (120, 90, 5.5)])
+    func relatedTempoChangeIsAcceptedInTime(from: Double, to: Double, limit: Double) async {
         let run = await runOffCooperativePool {
-            Self.run(Drums.tempoJump(from: 120, to: 160, at: 12, seconds: 18).samples)
+            Self.run(Drums.tempoJump(from: from, to: to, at: 12, seconds: 18).samples)
         }
         let switches = run.estimates.filter { $0.time >= 4 && $0.estimate.switched }
         #expect(switches.count == 1)
-        let change = switches.first { abs($0.estimate.period - 0.375) / 0.375 < 0.04 }
-        #expect(change.map { $0.time > 12 && $0.time - 12 <= 5 } == true, "switches \(switches.map(\.time))")
+        let target = 60 / to
+        let change = switches.first { abs($0.estimate.period - target) / target < 0.04 }
+        #expect(change.map { $0.time > 12 && $0.time - 12 <= limit } == true, "switches \(switches.map(\.time))")
         for (time, estimate) in run.estimates where time >= 4 && time < 12 {
-            #expect(abs(estimate.period - 0.5) / 0.5 < 0.04, "t \(time): \(60 / estimate.period) BPM")
+            #expect(abs(estimate.period * from / 60 - 1) < 0.04, "t \(time): \(60 / estimate.period) BPM")
         }
+    }
+
+    /// Функция бочки из розового шума (без долей) рядом с широкополосной функцией барабанов 160 BPM:
+    /// бочка ничего не поддерживает, и спор 3:2 не должен уходить к лагу ближе к 120 BPM (107).
+    @Test func noisyKickDoesNotPickARelatedRival() async {
+        let run = await runOffCooperativePool {
+            Self.run(
+                Drums.fourOnFloor(bpm: 160, seconds: 12, hats: .eighths).samples,
+                kickSamples: Drums.noiseOnly(levelDB: -20, seconds: 12).samples
+            )
+        }
+        Self.checkStable(run, bpm: 160)
     }
 
     /// Шум -20 dBFS под сценой -6 dB на 150 и 160 BPM: хэтов почти не видно, и у одной бочки октаву

@@ -34,7 +34,9 @@ public struct TempoEstimate: Sendable, Equatable {
 /// 4. когда темп установился, лаги в пределах 6 % от текущего периода получают `currentBonus`:
 ///    почти равные октавы (140 и 70 BPM с малым на слабых долях) не перебрасываются туда и обратно;
 /// 5. спор 3:2, 2:3, 4:3 и 3:4 решает бочка: если такой лаг набирает не меньше 85 % от лучшего,
-///    выбирается тот, который сильнее в той же гребенке по функции бочки. Хэт и малый между долями
+///    он выбирается, только когда в той же гребенке по функции бочки (без приоритета) он сильнее
+///    лучшего хотя бы на 10 %. Без запаса шумная бочка без долей отдавала спор лагу ближе к 120 BPM
+///    (160 уходил в 107), а с ним шум оставляет широкополосный выбор. Хэт и малый между долями
 ///    поднимают широкополосную функцию на лагах в три восьмых, бочка на каждой доле их не поддерживает
 ///    (неровная игра на 160-175 BPM уходила в 107-117 BPM);
 /// 6. выбранный лаг уточняется параболой по трем соседним `S`;
@@ -68,6 +70,8 @@ public struct TempoEstimator: Sendable {
     /// Отношения, спор которых решает функция бочки, и насколько соперник может уступать лучшему.
     static let kickTieRatios: [Double] = [1.5, 2.0 / 3, 4.0 / 3, 0.75]
     static let kickTieMargin = 0.15
+    /// На сколько поддержка бочки у соперника должна превышать поддержку лучшего лага.
+    static let kickSupportMargin = 0.1
     /// Прибавка к оценке лагов рядом с установившимся периодом.
     static let currentBonus = 0.15
     /// Постоянная времени веса свежести в секундах.
@@ -110,6 +114,9 @@ public struct TempoEstimator: Sendable {
     private var decimated: [Double]
     private var weights: [Double]
     private var acf: [Double]
+    /// Суммы весов пар по лагу для истории из `normCount` шагов прореживания.
+    private var norms: [Double]
+    private var normCount = 0
     /// Оценки гребенки: широкополосная с 0, бочки с `scoreStride`.
     private var scores: [Double]
     private let scoreStride: Int
@@ -137,13 +144,14 @@ public struct TempoEstimator: Sendable {
         decimated = [Double](repeating: 0, count: capacity / 2)
         weights = decimated
         acf = [Double](repeating: 0, count: Self.center(harmonic: Self.harmonics, halfLag: halfLagMax + 1) + 2)
+        norms = acf
         scoreStride = halfLagMax + 2
         scores = [Double](repeating: 0, count: 2 * scoreStride)
     }
 
     /// Функции онсетов очередного шага анализа: широкополосная (`HopResult.broadbandODF`) и бочки
-    /// (`HopResult.kickODF`). Без функции бочки спор 3:2 решает только широкополосная.
-    public mutating func append(_ odf: Float, kick: Float = 0) {
+    /// (`HopResult.kickODF`). При нулевой функции бочки спор 3:2 решает только широкополосная.
+    public mutating func append(_ odf: Float, kick: Float) {
         history[writeIndex] = odf.isFinite ? max(odf, 0) : 0
         kickHistory[writeIndex] = kick.isFinite ? max(kick, 0) : 0
         writeIndex = (writeIndex + 1) % history.count
@@ -275,7 +283,8 @@ public struct TempoEstimator: Sendable {
     }
 
     /// Соперники лучшего лага в отношениях `kickTieRatios`, набравшие не меньше `1 - kickTieMargin`
-    /// от него, сравниваются по гребенке функции бочки; при равенстве остается лучший.
+    /// от него, сравниваются по гребенке функции бочки: соперник выбирается, только если его
+    /// поддержка выше поддержки лучшего на `kickSupportMargin` от ее величины.
     private mutating func kickTieBreak(_ best: Int) -> Int {
         let threshold = (1 - Self.kickTieMargin) * scores[best]
         var hasRival = false
@@ -286,8 +295,9 @@ public struct TempoEstimator: Sendable {
             }
         }
         guard hasRival, comb(kick: true) else { return best }
+        let incumbent = kickSupport(best)
         var chosen = best
-        var support = kickSupport(best)
+        var support = incumbent + Self.kickSupportMargin * abs(incumbent)
         for ratio in Self.kickTieRatios {
             guard let rival = rival(of: best, ratio: ratio), scores[rival] >= threshold else { continue }
             let rivalSupport = kickSupport(rival)
@@ -319,7 +329,8 @@ public struct TempoEstimator: Sendable {
         return support
     }
 
-    /// Гребенка с приоритетом по широкополосной истории (в квадрате) или по истории бочки в `scores`.
+    /// Гребенка по широкополосной истории (в квадрате, с приоритетом) или по истории бочки (без
+    /// приоритета) в `scores`.
     /// `false`, если в истории нет энергии или она слишком коротка.
     private mutating func comb(kick: Bool) -> Bool {
         let capacity = history.count
@@ -354,14 +365,23 @@ public struct TempoEstimator: Sendable {
         // Автокорреляция с весом свежести; лаги, у которых меньше `minimumOverlap` пар, не считаются.
         let maxLag = min(acf.count - 1, n - minimumOverlap)
         guard maxLag >= Self.center(harmonic: 1, halfLag: halfLagMax + 1) + 1 else { return false }
+        if normCount != n {
+            // Веса зависят только от длины истории: после заполнения суммы не меняются.
+            for l in 1..<norms.count where l < n {
+                var norm = 0.0
+                for i in 0..<(n - l) {
+                    norm += weights[i] * weights[i + l]
+                }
+                norms[l] = norm
+            }
+            normCount = n
+        }
         for l in 1...maxLag {
             var sum = 0.0
-            var norm = 0.0
             for i in 0..<(n - l) {
                 sum += decimated[i] * decimated[i + l]
-                norm += weights[i] * weights[i + l]
             }
-            acf[l] = sum / norm
+            acf[l] = sum / norms[l]
         }
 
         // Соседи по краям диапазона нужны только параболе.
@@ -376,7 +396,7 @@ public struct TempoEstimator: Sendable {
                 sum += max(acf[center - 1], acf[center], acf[center + 1]) * w
                 weight += w
             }
-            scores[offset + halfLag] = sum / weight * combWeight * prior[halfLag]
+            scores[offset + halfLag] = sum / weight * combWeight * (kick ? 1 : prior[halfLag])
         }
         return true
     }
