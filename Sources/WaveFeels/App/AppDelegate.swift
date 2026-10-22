@@ -72,14 +72,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Снимает подписки, останавливает панель (мониторы курсора, таймер опроса, слежение за
-    /// полноэкранными окнами) и модель: цикл, задачи, tap с агрегатным устройством (удаляется
-    /// синхронно) и процессы perl адаптера.
+    /// полноэкранными окнами) и модель: цикл, задачи, tap с агрегатным устройством (удаление
+    /// ждется не дольше 2 с) и процессы perl адаптера.
     func applicationWillTerminate(_ notification: Notification) {
         unsubscribeFromSystemEvents()
         notch?.stop()
         model?.stop()
         Log.file("выход: захват, адаптер и подписки остановлены")
         Log.flush()
+    }
+
+    func showSettings() {
+        if let windows {
+            windows.showSettings()
+        } else {
+            settingsRequested = true
+            Log.file("настройки откроются после запуска модели")
+        }
+    }
+
+    func showDiagnostics() {
+        if let windows {
+            windows.showDiagnostics()
+        } else {
+            diagnosticsRequested = true
+            Log.file("диагностика откроется после запуска модели")
+        }
     }
 
     // MARK: - Сон, пробуждение и блокировка экрана
