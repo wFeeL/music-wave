@@ -66,7 +66,9 @@ final class AppModel {
     /// каждом запуске и при запуске или закрытии приложений, даже если источник выбран: его
     /// показывают настройки («По умолчанию (...)»). В настройки не пишется.
     private(set) var defaultSource: AudioSource = .systemWide
-    var pointerInHoverZone = false
+    /// Курсор в зоне наведения у выреза. Пишет `NotchWindowController` через
+    /// `setPointerInHoverZone(_:)`.
+    private(set) var pointerInHoverZone = false
     var fullscreenSuppressed = false
     var screenLocked = false
     /// Режим энергосбережения: остров рисуется не чаще 30 кадров в секунду.
@@ -77,6 +79,14 @@ final class AppModel {
     @ObservationIgnored private(set) var arguments = LaunchArguments()
     @ObservationIgnored private var gate = ActivityGate()
     @ObservationIgnored private var machine = IslandStateMachine()
+    /// Входы машины острова с последнего обновления: по ним остров пересчитывается сразу, когда
+    /// курсор входит в зону или выходит из нее, и в срок `IslandStateMachine.pointerDeadline`.
+    @ObservationIgnored private var islandInputs: IslandInputs?
+    /// Обновление острова в срок `pointerDeadline`, чтобы раскрытие и сворачивание не ждали тика.
+    @ObservationIgnored private var pointerTask: Task<Void, Never>?
+    @ObservationIgnored private var pointerTaskDeadline: Double?
+    /// Вызывается, когда меняется `islandState`: окно у выреза пересчитывает клики и опрос курсора.
+    @ObservationIgnored var onIslandStateChange: (@MainActor () -> Void)?
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     @ObservationIgnored private var workspaceObservers: [any NSObjectProtocol] = []
     @ObservationIgnored private var appObservers: [any NSObjectProtocol] = []
@@ -179,6 +189,10 @@ final class AppModel {
         wakeTask?.cancel()
         wakeTask = nil
         asleep = false
+        pointerTask?.cancel()
+        pointerTask = nil
+        pointerTaskDeadline = nil
+        islandInputs = nil
         scanTask?.cancel()
         scanTask = nil
         stopSources()
@@ -509,14 +523,7 @@ final class AppModel {
             fullscreenSuppressed: fullscreenSuppressed && settings.hideInFullscreen,
             userPaused: settings.paused || screenLocked
         )
-        machine.hideDelay = settings.hideDelay
-        let state = machine.update(inputs, now: now)
-        if state != islandState {
-            // По этой строке замер CPU в CI убеждается, что остров действительно показан.
-            log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
-            islandState = state
-        }
-        pipeline.islandHidden = state == .hidden
+        updateIsland(inputs, now: now)
         updatePermissionHint()
         // Подсказка показана, а окна, которые опрашивают доступ каждую секунду, закрыты:
         // пользователь мог выдать доступ в Системных настройках, не возвращаясь в приложение.
@@ -526,6 +533,56 @@ final class AppModel {
         let low = ProcessInfo.processInfo.isLowPowerModeEnabled
         if low != lowPower {
             lowPower = low
+        }
+    }
+
+    /// Курсор вошел в зону выреза или вышел из нее: остров пересчитывается сразу, а не в
+    /// следующем тике, и раскрытие наступает через 150 мс, сворачивание через 300 мс
+    /// (`IslandStateMachine`), а не на тик позже.
+    func setPointerInHoverZone(_ inside: Bool) {
+        guard inside != pointerInHoverZone else { return }
+        pointerInHoverZone = inside
+        guard loopTask != nil, var inputs = islandInputs else { return }
+        inputs.pointerInHoverZone = inside
+        updateIsland(inputs, now: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Машина острова по входам `inputs`; при смене состояния лог и `onIslandStateChange`.
+    private func updateIsland(_ inputs: IslandInputs, now: Double) {
+        islandInputs = inputs
+        machine.hideDelay = settings.hideDelay
+        let state = machine.update(inputs, now: now)
+        if state != islandState {
+            // По этой строке замер CPU в CI убеждается, что остров действительно показан.
+            log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
+            islandState = state
+            onIslandStateChange?()
+        }
+        pipeline.islandHidden = state == .hidden
+        schedulePointerDeadline(now: now)
+    }
+
+    /// Ставит обновление острова на срок `IslandStateMachine.pointerDeadline`, если он есть
+    /// и еще не поставлен.
+    private func schedulePointerDeadline(now: Double) {
+        let deadline = machine.pointerDeadline
+        guard deadline != pointerTaskDeadline else { return }
+        pointerTask?.cancel()
+        pointerTask = nil
+        pointerTaskDeadline = deadline
+        guard let deadline else { return }
+        let wait = max(0, deadline - now)
+        pointerTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(wait))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.pointerTask = nil
+            self.pointerTaskDeadline = nil
+            guard self.loopTask != nil, let inputs = self.islandInputs else { return }
+            self.updateIsland(inputs, now: ProcessInfo.processInfo.systemUptime)
         }
     }
 

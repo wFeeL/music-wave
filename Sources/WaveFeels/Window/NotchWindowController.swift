@@ -9,11 +9,14 @@ import WaveCore
 /// Остров стоит только на встроенном экране с вырезом; если его нет (внешний монитор при
 /// закрытой крышке), капсула встает под строку меню основного экрана (`NotchGeometry.layout`).
 ///
-/// Курсор. Глобальный монитор `mouseMoved` нужен только чтобы заметить вход в зону выреза:
-/// событий над окнами своего приложения он не видит. Пока курсор в зоне или остров раскрыт,
-/// таймер 30 Гц опрашивает `NSEvent.mouseLocation`; он выключается, когда остров не раскрыт
-/// и курсор вне зоны. Панель лежит частью на строке меню, поэтому клики она принимает только
-/// над раскрытым островом, свернутый остров всегда их пропускает.
+/// Курсор. Пока остров не раскрыт, панель пропускает события мыши, и глобальный монитор
+/// `mouseMoved` видит каждое движение, в том числе над вырезом. Раскрытый остров принимает
+/// события, а событий над окнами своего приложения монитор не видит, поэтому только пока
+/// остров раскрыт, таймер 30 Гц опрашивает `NSEvent.mouseLocation`. Смена состояния острова
+/// (`AppModel.onIslandStateChange`) сразу пересчитывает клики и опрос: остров раскрывается
+/// по таймеру модели, когда курсор уже стоит на месте. Панель лежит частью на строке меню,
+/// поэтому клики она принимает только над раскрытым островом, свернутый остров всегда их
+/// пропускает.
 ///
 /// Подписок и таймеров в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
@@ -78,6 +81,9 @@ final class NotchWindowController {
             }
             return event
         }
+        model.onIslandStateChange = { [weak self] in
+            self?.updatePointer()
+        }
         relayout()
     }
 
@@ -132,11 +138,12 @@ final class NotchWindowController {
             NSEvent.removeMonitor(localMonitor)
         }
         localMonitor = nil
+        model.onIslandStateChange = nil
         stopPolling()
         fullscreen.stop()
         panel?.ignoresMouseEvents = true
         panel?.orderOut(nil)
-        model.pointerInHoverZone = false
+        model.setPointerInHoverZone(false)
     }
 
     // MARK: - Панель
@@ -162,9 +169,7 @@ final class NotchWindowController {
         guard isShown, let layout, let panel else {
             stopPolling()
             panel?.ignoresMouseEvents = true
-            if model.pointerInHoverZone {
-                model.pointerInHoverZone = false
-            }
+            model.setPointerInHoverZone(false)
             return
         }
         let pointer = layout.pointer(
@@ -172,9 +177,6 @@ final class NotchWindowController {
             state: model.islandState,
             suppressed: model.islandSuppressed
         )
-        if model.pointerInHoverZone != pointer.inHoverZone {
-            model.pointerInHoverZone = pointer.inHoverZone
-        }
         if panel.ignoresMouseEvents == pointer.acceptsClicks {
             panel.ignoresMouseEvents = !pointer.acceptsClicks
         }
@@ -183,6 +185,9 @@ final class NotchWindowController {
         } else {
             stopPolling()
         }
+        // Последним: если остров от этого сменит состояние, вложенный вызов через
+        // `onIslandStateChange` пересчитает клики и опрос уже для нового состояния.
+        model.setPointerInHoverZone(pointer.inHoverZone)
     }
 
     private func startPolling() {
