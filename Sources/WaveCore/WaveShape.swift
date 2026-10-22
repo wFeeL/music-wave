@@ -12,10 +12,11 @@ public struct WaveMotion: Sendable {
 
     /// `layers` это уровни слоев 0...1 в порядке `WaveLayer`, `dt` в секундах.
     public mutating func advance(layers: [Float], dt: Double) {
-        let step = max(0, dt)
+        let step = dt.isFinite ? max(0, dt) : 0
         let twoPi = 2 * Double.pi
         for index in 0..<phases.count {
-            let level = index < layers.count ? Double(min(max(layers[index], 0), 1)) : 0
+            let raw = index < layers.count ? layers[index] : 0
+            let level = raw.isFinite ? Double(min(max(raw, 0), 1)) : 0
             let advanced = phases[index] + Self.speeds[index] * (0.3 + 1.7 * level) * step
             phases[index] = advanced.truncatingRemainder(dividingBy: twoPi)
         }

@@ -83,4 +83,24 @@ struct WaveShapeTests {
             #expect(p >= 0 && p < 2 * Double.pi)
         }
     }
+
+    @Test func motionIgnoresNonFiniteInput() {
+        var motion = WaveMotion()
+        motion.advance(layers: [.nan, .infinity, -.infinity], dt: .nan)
+        motion.advance(layers: [.nan, .infinity, 0.5], dt: .infinity)
+        motion.advance(layers: [.nan, .infinity, 0.5], dt: -1)
+        motion.advance(layers: [], dt: 1)
+        for layer in WaveLayer.allCases {
+            let p = motion.phase(layer)
+            #expect(p.isFinite && p >= 0 && p < 2 * Double.pi)
+        }
+        // NaN-уровень считается тишиной, бесконечный dt шагом 0, отрицательный тоже.
+        var reference = WaveMotion()
+        reference.advance(layers: [0, 0, 0], dt: 1)
+        motion = WaveMotion()
+        motion.advance(layers: [.nan, .nan, .nan], dt: 1)
+        for layer in WaveLayer.allCases {
+            #expect(motion.phase(layer) == reference.phase(layer))
+        }
+    }
 }

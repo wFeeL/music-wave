@@ -98,6 +98,8 @@ public struct RGBColor: Sendable, Equatable, Codable {
             b: Float(Self.fromLinear(linear.b)))
     }
 
+    var isFinite: Bool { r.isFinite && g.isFinite && b.isFinite }
+
     private static func toLinear(_ c: Double) -> Double {
         c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
     }
@@ -143,6 +145,7 @@ public enum PaletteExtractor {
         // Лучшие кластеры по оценке доли и насыщенности, попарно различимые.
         let total = Float(points.count)
         let ranked = centers.indices
+            .filter { counts[$0] > 0 }
             .map { index -> (lab: OKLab, score: Float) in
                 let c = centers[index]
                 let lab = OKLab(l: c.x, a: c.y, b: c.z)
@@ -167,7 +170,25 @@ public enum PaletteExtractor {
                 chosen.append(candidate)
             }
         }
-        return chosen.map { RGBColor(oklab: brightened($0)) }
+        return ensureThree(chosen.map { RGBColor(oklab: brightened($0)) })
+    }
+
+    /// Всегда ровно 3 конечных цвета: недостающие получаются сдвигом L первого цвета на 0.08 и 0.16,
+    /// а если и этого мало, первый цвет повторяется.
+    static func ensureThree(_ colors: [RGBColor]) -> [RGBColor] {
+        var result = colors.prefix(3).enumerated().map { index, color in
+            color.isFinite ? color : fallback[index]
+        }
+        if result.isEmpty { return fallback }
+        let base = result[0].oklab
+        for offset: Float in [0.08, -0.08, 0.16, -0.16] where result.count < 3 {
+            let l = base.l + offset
+            guard l >= liftedLightness, l <= 0.97 else { continue }
+            let candidate = RGBColor(oklab: brightened(OKLab(l: l, a: base.a, b: base.b)))
+            if candidate.isFinite { result.append(candidate) }
+        }
+        while result.count < 3 { result.append(result[0]) }
+        return result
     }
 
     /// K-means в OKLab, старт k-means++ на SplitMix64(seed: 42). Возвращает центры и размеры кластеров.
@@ -245,7 +266,7 @@ public enum PaletteExtractor {
 
 /// Смешивает палитры в OKLab, `t` ограничивается 0...1.
 public func mixPalettes(_ a: [RGBColor], _ b: [RGBColor], t: Float) -> [RGBColor] {
-    let t = min(max(t, 0), 1)
+    let t = t.isNaN ? 0 : min(max(t, 0), 1)
     if t == 0 { return a }
     if t == 1 { return b }
     return zip(a, b).map { from, to in

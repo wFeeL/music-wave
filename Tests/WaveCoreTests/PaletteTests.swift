@@ -104,7 +104,36 @@ struct PaletteTests {
             #expect(abs(distance(mh[i], a[i]) - total / 2) < 1e-3)
             #expect(abs(distance(mh[i], b[i]) - total / 2) < 1e-3)
         }
+        for t: Float in [1e-6, 1 - 1e-6] {
+            let m = mixPalettes(a, b, t: t)
+            #expect(m.count == 3)
+            let target = t < 0.5 ? a : b
+            for i in 0..<3 { #expect(distance(m[i], target[i]) < 1e-3) }
+        }
+        #expect(mixPalettes(a, b, t: .nan) == mixPalettes(a, b, t: 0))
         #expect(mixPalettes(a, b, t: -3) == mixPalettes(a, b, t: 0))
         #expect(mixPalettes(a, b, t: 9) == mixPalettes(a, b, t: 1))
+    }
+
+    @Test func paddingAlwaysYieldsThreeFiniteColors() {
+        let gray = RGBColor(hex: 0x808080)
+        for input in [[], [gray], [gray, gray], [gray, gray, gray, gray]] {
+            let out = PaletteExtractor.ensureThree(input)
+            #expect(out.count == 3)
+            for c in out { #expect(c.isFinite && (0...1).contains(c.r) && (0...1).contains(c.g) && (0...1).contains(c.b)) }
+        }
+        let padded = PaletteExtractor.ensureThree([gray])
+        #expect(distance(padded[0], padded[1]) > 0.05)
+        #expect(distance(padded[0], padded[2]) > 0.05)
+        let broken = PaletteExtractor.ensureThree([RGBColor(r: .nan, g: 0, b: 0)])
+        #expect(broken.count == 3 && broken.allSatisfy { $0.isFinite })
+    }
+
+    @Test func opposingHuesStillGiveThreeColors() {
+        // Два противоположных оттенка с равной долей: средний центр мог бы выйти серым.
+        let pixels = image([(0xE11D48, 0.5), (0x1DE1B5, 0.5)])
+        let palette = PaletteExtractor.extract(rgba: pixels, width: 64, height: 64)
+        #expect(palette.count == 3)
+        for c in palette { #expect(c.isFinite) }
     }
 }
