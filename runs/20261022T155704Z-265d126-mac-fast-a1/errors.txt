@@ -1,0 +1,4 @@
+✘ Test diagnosticsHaveRhythmSection() recorded an issue at AppModelRenderTests.swift:102:9: Expectation failed: (empty.rows.map(\.value) → ["нет", "0.00", "нет", "13 мс", "33 мс", "7 мс", "0 мс"]) == ["нет", "0.00", "нет", "0 мс", "33 мс", "7 мс", "0 мс"]
+✘ Test diagnosticsHaveRhythmSection() failed after 8.761 seconds with 1 issue.
+✘ Suite AppModelRenderTests failed after 8.765 seconds with 1 issue.
+✘ Test run with 424 tests in 48 suites failed after 19.112 seconds with 1 issue.
