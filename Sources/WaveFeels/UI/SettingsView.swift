@@ -12,9 +12,9 @@ import WaveCore
 /// дороже: он обновляется при открытии окна, при запуске и закрытии приложений и не чаще раза
 /// в 10 с.
 struct SettingsView: View {
-    /// Размер окна: все разделы в самом высоком состоянии (ручная задержка и подсказка о доступе
-    /// к звуку) помещаются без прокрутки.
-    static let windowSize = CGSize(width: 520, height: 840)
+    /// Размер окна: все разделы в самом высоком состоянии (ручная задержка, подсказка о доступе
+    /// к звуку и кнопка настроек конфиденциальности под ней) помещаются без прокрутки.
+    static let windowSize = CGSize(width: 520, height: 880)
     static let minSize = CGSize(width: 480, height: 420)
     static let statusInterval: Duration = .seconds(3)
     /// Список источников обновляется раз в столько обновлений статуса, то есть раз в 12 с.
@@ -64,6 +64,9 @@ struct SettingsView: View {
                         systemImage: "exclamationmark.triangle.fill"
                     )
                     .foregroundStyle(.orange)
+                    Button("Открыть настройки конфиденциальности") {
+                        AppModel.openPrivacySettings()
+                    }
                 }
             }
             Section("Волны") {

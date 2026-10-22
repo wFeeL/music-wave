@@ -62,3 +62,13 @@ struct AppModelPauseTests {
             .appendingPathComponent("Resources/Demo/demo.wav")
     }
 }
+
+/// Значок в строке меню: без доступа к звуку предупреждение видно и при закрытых окнах.
+struct MenuBarIconTests {
+    @Test func permissionProblemWinsOverPause() {
+        #expect(AppModelHolder.iconName(paused: false, permissionHint: false) == "waveform")
+        #expect(AppModelHolder.iconName(paused: true, permissionHint: false) == "waveform.slash")
+        #expect(AppModelHolder.iconName(paused: false, permissionHint: true) == "waveform.badge.exclamationmark")
+        #expect(AppModelHolder.iconName(paused: true, permissionHint: true) == "waveform.badge.exclamationmark")
+    }
+}

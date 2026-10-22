@@ -29,15 +29,27 @@ final class AppModelHolder {
     var paused: Bool {
         model?.settings.paused ?? false
     }
+
+    /// Нет доступа к звуку (`AppModel.permissionHint`).
+    var permissionHint: Bool {
+        model?.permissionHint ?? false
+    }
+
+    /// Значок в строке меню: волна, на паузе перечеркнутая, без доступа к звуку с восклицательным
+    /// знаком. Доступ важнее паузы: без него визуализация не заработает и после паузы.
+    nonisolated static func iconName(paused: Bool, permissionHint: Bool) -> String {
+        if permissionHint { return "waveform.badge.exclamationmark" }
+        return paused ? "waveform.slash" : "waveform"
+    }
 }
 
-/// Иконка в строке меню: волна, на паузе перечеркнутая.
+/// Иконка в строке меню, см. `AppModelHolder.iconName`.
 private struct MenuBarIcon: View {
     let holder: AppModelHolder
 
     var body: some View {
-        Image(systemName: holder.paused ? "waveform.slash" : "waveform")
-            .accessibilityLabel("WaveFeels")
+        Image(systemName: AppModelHolder.iconName(paused: holder.paused, permissionHint: holder.permissionHint))
+            .accessibilityLabel(holder.permissionHint ? "WaveFeels, нет доступа к звуку" : "WaveFeels")
     }
 }
 
@@ -46,6 +58,13 @@ private struct MenuBarMenu: View {
     let holder: AppModelHolder
 
     var body: some View {
+        if holder.permissionHint {
+            // Без окон подсказку иначе не увидеть: пункт ведет в диагностику с кнопками доступа.
+            Button("Нет доступа к звуку…") {
+                delegate.showDiagnostics()
+            }
+            Divider()
+        }
         Button("Настройки…") {
             delegate.showSettings()
         }
