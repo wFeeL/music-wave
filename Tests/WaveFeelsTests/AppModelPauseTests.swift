@@ -73,6 +73,13 @@ struct MenuBarIconTests {
         #expect(AppModelHolder.iconName(paused: true, alert: true) == "waveform.badge.exclamationmark")
     }
 
+    /// Без символа значок в строке меню был бы пустым, а это единственный вход в приложение.
+    @Test @MainActor func iconSymbolsExistInSystem() {
+        for name in AppModelHolder.iconNames {
+            #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "нет символа \(name)")
+        }
+    }
+
     @Test func iconNamesCoverEveryState() {
         let used = Set([false, true].flatMap { paused in
             [false, true].map { AppModelHolder.iconName(paused: paused, alert: $0) }
