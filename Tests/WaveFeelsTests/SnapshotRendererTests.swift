@@ -116,12 +116,51 @@ struct SnapshotRendererTests {
         #expect(ink > 2000, "13-settings: темных пикселей \(ink)")
         #expect(glyphs > 2000, "13-settings-dark: светлых пикселей \(glyphs)")
 
+        // Снимки настроек непрозрачны (переключатель вкладок сведен на фон окна), и вкладки
+        // читаются: в темном оформлении светлый текст, в светлом темный.
+        let tabBar = CGRect(x: settingsSize.width / 2 - 90, y: 0, width: 180, height: 24)
+        for name in SnapshotRenderer.settingsScenes.map(\.name) {
+            let bitmap = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
+            let scale = CGFloat(bitmap.width) / settingsSize.width
+            let translucent = bitmap.translucentPixels(in: settingsRect, scale: scale)
+            #expect(translucent == 0, "\(name): полупрозрачных пикселей \(translucent)")
+            let isDark = SnapshotRenderer.settingsScenes.first { $0.name == name }?.dark ?? false
+            let text = isDark
+                ? bitmap.brightPixels(in: tabBar, scale: scale)
+                : bitmap.darkPixels(in: tabBar, scale: scale)
+            #expect(text > Int(20 * scale * scale), "\(name): пикселей текста вкладок \(text)")
+        }
+
         let longest = watch.stop()
         print("SnapshotRendererTests: renderAll \(rendered), whole test \(clock.now - started), longest main thread hold \(longest)")
         // Соседние тесты ждут главный актор со своими сроками, поэтому отрисовка отпускает его между
         // снимками. Цель меньше 1 с, фактическое время в логе; предел с запасом на загруженный
         // виртуальный мак.
         #expect(longest < .seconds(5), "главный поток занят без перерыва \(longest)")
+
+        // Предпросмотр вкладки «Вид» рисует волны: снимок с демо против того же окна без демо.
+        // Все, кроме острова в полосе предпросмотра, у них одинаковое.
+        let seeded = PreviewTimelineCache.shared.timeline
+        #expect(seeded != nil, "renderAll не отдал демо предпросмотру")
+        let suite = "com.wfeels.wavefeels.tests.preview-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let control = AppModel(defaults: defaults)
+        PreviewTimelineCache.shared.timeline = nil
+        defer { PreviewTimelineCache.shared.timeline = seeded }
+        for scene in SnapshotRenderer.settingsScenes where scene.tab == .appearance {
+            let unseeded = directory.appendingPathComponent("\(scene.name)-unseeded.png")
+            try SnapshotRenderer.renderSettings(
+                name: scene.name, dark: scene.dark, tall: false, tab: .appearance, model: control, to: unseeded
+            )
+            let shot = try Bitmap(url: directory.appendingPathComponent("\(scene.name).png"))
+            let silent = try Bitmap(url: unseeded)
+            let scale = CGFloat(shot.width) / settingsSize.width
+            let waves = shot.saturatedPixels(in: settingsRect, scale: scale)
+            let quiet = silent.saturatedPixels(in: settingsRect, scale: scale)
+            #expect(waves - quiet > Int(40 * scale * scale), "\(scene.name): цветных пикселей \(waves), без демо \(quiet)")
+            await Task.yield()
+        }
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
@@ -217,6 +256,21 @@ private struct Bitmap {
     /// Сколько почти черных пикселей в `rect` (pt, начало сверху слева).
     func darkPixels(in rect: CGRect, scale: CGFloat) -> Int {
         count(in: rect, scale: scale) { r, g, b in max(r, g, b) <= 60 }
+    }
+
+    /// Сколько пикселей в `rect` (pt, начало сверху слева) не полностью непрозрачны.
+    func translucentPixels(in rect: CGRect, scale: CGFloat) -> Int {
+        let x0 = max(Int((rect.minX * scale).rounded(.down)), 0)
+        let x1 = min(Int((rect.maxX * scale).rounded(.up)), width)
+        let y0 = max(Int((rect.minY * scale).rounded(.down)), 0)
+        let y1 = min(Int((rect.maxY * scale).rounded(.up)), height)
+        var count = 0
+        for y in y0..<max(y1, y0) {
+            for x in x0..<max(x1, x0) where pixels[(y * width + x) * 4 + 3] < 255 {
+                count += 1
+            }
+        }
+        return count
     }
 
     /// Сколько почти белых пикселей в `rect` (pt, начало сверху слева).

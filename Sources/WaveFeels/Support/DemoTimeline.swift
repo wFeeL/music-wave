@@ -74,6 +74,14 @@ nonisolated struct DemoTimeline: Sendable {
         self.moments = moments
     }
 
+    /// Готовые моменты, первый на `step`, через `step`; пустой список дает один тихий момент.
+    /// Нужно тестам предпросмотра.
+    init(moments: [DemoMoment]) {
+        self.moments = moments.isEmpty
+            ? [DemoMoment(time: Self.step, frame: .silent, motion: WaveMotion(), glow: 0, pulse: 0)]
+            : moments
+    }
+
     /// Момент на `time` секунд, по кругу: время за `duration` (и отрицательное) сворачивается
     /// в прогон. Берется последний момент не позже свернутого времени; до первого момента
     /// стоит последний, как будто прогон уже прошел круг.

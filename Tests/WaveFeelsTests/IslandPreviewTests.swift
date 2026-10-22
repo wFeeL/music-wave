@@ -74,6 +74,92 @@ struct IslandPreviewTests {
         #expect(PreviewPlayer(cache: cache).timeline != nil)
     }
 
+    /// Подпись «ограничено до N pt» только там, где экран с вырезом не дает крылу его ширину.
+    @Test func wingCaptionShowsOnlyWhenLimited() {
+        #expect(AppearanceSettingsView.wingCaption(wing: 150, limit: 150, hasNotch: true) == nil)
+        #expect(AppearanceSettingsView.wingCaption(wing: 120, limit: 150, hasNotch: true) == nil)
+        #expect(AppearanceSettingsView.wingCaption(wing: 200, limit: 150, hasNotch: true) == "ограничено до 150 pt")
+        #expect(AppearanceSettingsView.wingCaption(wing: 200, limit: 150, hasNotch: false) == nil)
+        #expect(AppearanceSettingsView.wingCaption(wing: 200, limit: 151.7, hasNotch: true) == "ограничено до 151 pt")
+        #expect(AppearanceSettingsView.wingCaption(wing: 200, limit: nil, hasNotch: true) == nil)
+    }
+
+    /// «Уменьшение движения»: ни свечения доли, ни «вздоха», хотя в демо они есть.
+    @Test func previewReduceMotionHasNoGlowOrPulse() {
+        let cache = PreviewTimelineCache()
+        cache.timeline = Self.timeline(seconds: 2) { time in
+            (level: 0.6, glow: time.truncatingRemainder(dividingBy: 0.5) < 0.1 ? 0.9 : 0, pulse: 0.5)
+        }
+        let calm = PreviewPlayer(cache: cache)
+        let lively = PreviewPlayer(cache: cache)
+        var calmMax: Float = 0
+        var livelyGlow: Float = 0
+        var livelyPulse: Float = 0
+        for frame in 0..<120 {
+            let now = 100 + Double(frame) / 60
+            let quiet = calm.visuals(now: now, palette: PaletteExtractor.fallback, reduceMotion: true)
+            calmMax = max(calmMax, quiet.glow, quiet.pulse)
+            let normal = lively.visuals(now: now, palette: PaletteExtractor.fallback, reduceMotion: false)
+            livelyGlow = max(livelyGlow, normal.glow)
+            livelyPulse = max(livelyPulse, normal.pulse)
+        }
+        #expect(calmMax == 0)
+        #expect(livelyGlow > 0.5)
+        #expect(livelyPulse > 0)
+    }
+
+    /// Шов круга: демо прыгает с уровня 1 на 0, а предпросмотр нет. Уровни идут через пружины,
+    /// фазы волн двигаются своим ходом (в демо они нарочно бегут всемеро быстрее, и прыжок к ним
+    /// был бы виден).
+    @Test func previewIsSmoothAcrossLoopSeam() {
+        let cache = PreviewTimelineCache()
+        cache.timeline = Self.timeline(seconds: 2) { time in (level: Float(time / 2), glow: 0, pulse: 0) }
+        let player = PreviewPlayer(cache: cache)
+        var previous: IslandVisuals?
+        var seams = 0
+        var levelStep: Float = 0
+        var phaseStep = 0.0
+        for frame in 0..<240 {
+            let visuals = player.visuals(now: 50 + Double(frame) / 60, palette: PaletteExtractor.fallback, reduceMotion: false)
+            if let previous {
+                if previous.sampled.level - visuals.sampled.level > 0.5 {
+                    seams += 1
+                }
+                levelStep = max(levelStep, abs(visuals.frame.level - previous.frame.level))
+                for layer in WaveLayer.allCases {
+                    let turn = abs(visuals.motion.phase(layer).carrier - previous.motion.phase(layer).carrier)
+                    phaseStep = max(phaseStep, min(turn, 2 * .pi - turn))
+                }
+            }
+            previous = visuals
+        }
+        #expect(seams >= 1)
+        #expect(levelStep < 0.25)
+        #expect(phaseStep < 0.2)
+    }
+
+    /// Первый кадр встает на `loopStart` без запаздывания пружин и с фазами демо; демо короче
+    /// `loopStart` играет с начала.
+    @Test func previewFirstFrameStartsAtLoopStart() {
+        let cache = PreviewTimelineCache()
+        let timeline = Self.timeline(seconds: 20) { time in (level: Float(time / 20), glow: 0, pulse: 0) }
+        cache.timeline = timeline
+        let first = PreviewPlayer(cache: cache).visuals(now: 1000, palette: PaletteExtractor.fallback, reduceMotion: false)
+        let start = timeline.moment(at: PreviewPlayer.loopStart)
+        #expect(abs(start.time - PreviewPlayer.loopStart) < 1e-9)
+        #expect(first.sampled == start.frame)
+        #expect(first.frame.level == start.frame.level)
+        #expect(first.frame.layers == start.frame.layers)
+        for layer in WaveLayer.allCases {
+            #expect(first.motion.phase(layer) == start.motion.phase(layer))
+        }
+
+        let short = Self.timeline(seconds: 2) { time in (level: Float(time / 2), glow: 0, pulse: 0) }
+        cache.timeline = short
+        let opening = PreviewPlayer(cache: cache).visuals(now: 7, palette: PaletteExtractor.fallback, reduceMotion: false)
+        #expect(opening.sampled == short.moment(at: 0).frame)
+    }
+
     /// Окно настроек ужимается до видимой области экрана и сдвигается внутрь нее; окно, которое
     /// уже помещается, остается на месте.
     @Test func settingsWindowFitsVisibleFrame() {
@@ -89,6 +175,28 @@ struct IslandPreviewTests {
         let tall = WindowsController.fitted(NSRect(x: 900, y: 0, width: 520, height: 908), in: small)
         #expect(tall == NSRect(x: 760, y: 80, width: 520, height: 700))
         #expect(WindowsController.fitted(fits, in: .zero) == fits)
+    }
+
+    /// Готовое демо длиной `seconds` с шагом `DemoTimeline.step`: уровень всех слоев, свечение
+    /// и «вздох» по времени момента. Фазы в демо бегут всемеро быстрее, чем у живых волн.
+    private static func timeline(
+        seconds: Double,
+        _ value: (Double) -> (level: Float, glow: Float, pulse: Float)
+    ) -> DemoTimeline {
+        let count = Int((seconds / DemoTimeline.step).rounded())
+        var motion = WaveMotion()
+        let moments = (1...count).map { step -> DemoMoment in
+            let time = Double(step) * DemoTimeline.step
+            let sample = value(time)
+            let layers = [Float](repeating: sample.level, count: WaveLayer.allCases.count)
+            motion.advance(layers: layers, dt: 7 * DemoTimeline.step)
+            let frame = WaveFrame(
+                bands: [Float](repeating: sample.level, count: WaveFrame.silent.bands.count), layers: layers,
+                beat: sample.glow, level: sample.level, rawLevelDB: -20
+            )
+            return DemoMoment(time: time, frame: frame, motion: motion, glow: sample.glow, pulse: sample.pulse)
+        }
+        return DemoTimeline(moments: moments)
     }
 
     /// Тон 220 Гц длиной `seconds` в CAF во временной папке.
