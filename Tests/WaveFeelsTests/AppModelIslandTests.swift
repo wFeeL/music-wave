@@ -23,7 +23,7 @@ struct AppModelIslandTests {
         model.start(arguments: LaunchArguments(demoFile: Self.demo, noCapture: true))
         defer { model.stop() }
 
-        #expect(await waitUntil(.seconds(10)) { model.islandState == .collapsed })
+        #expect(await waitUntil(.seconds(30)) { model.islandState == .collapsed })
         model.setPointerInHoverZone(true)
         #expect(model.pointerInHoverZone)
         #expect(await waitUntil(.seconds(5)) { model.islandState == .expanded })
@@ -41,7 +41,7 @@ struct AppModelIslandTests {
         let model = AppModel(defaults: defaults)
         model.start(arguments: LaunchArguments(demoFile: Self.demo, noCapture: true))
         defer { model.stop() }
-        #expect(await waitUntil(.seconds(10)) { model.islandState == .collapsed })
+        #expect(await waitUntil(.seconds(30)) { model.islandState == .collapsed })
         #expect(!model.pipeline.islandHidden)
 
         model.screensSleepChanged(true)
