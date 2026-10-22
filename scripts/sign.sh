@@ -123,15 +123,19 @@ if [[ -z "$SHA" ]]; then
 fi
 echo "signing identity: $CERT_NAME ($SHA)"
 
-EXPECTED_LEAF=${SIGNING_EXPECTED_LEAF:-}
+# Хэш без пробелов, переводов строк и двоеточий (как его печатает openssl), строчными буквами.
+normalize_hash() {
+    printf '%s' "$1" | tr -d ' \r\n:' | tr '[:upper:]' '[:lower:]'
+}
+
+EXPECTED_LEAF=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")
 if [[ -z "$EXPECTED_LEAF" && -f signing/expected-leaf.txt ]]; then
-    EXPECTED_LEAF=$(tr -d ' \r\n' < signing/expected-leaf.txt)
+    EXPECTED_LEAF=$(normalize_hash "$(cat signing/expected-leaf.txt)")
 fi
 if [[ -z "$EXPECTED_LEAF" ]]; then
     echo "error: no expected leaf hash (SIGNING_EXPECTED_LEAF or signing/expected-leaf.txt)" >&2
     exit 1
 fi
-EXPECTED_LEAF=$(printf '%s' "$EXPECTED_LEAF" | tr '[:upper:]' '[:lower:]')
 
 REQ="=designated => identifier \"$IDENTIFIER\" and certificate leaf = H\"$SHA\""
 sign_nested --keychain "$KC" --sign "$SHA"
@@ -143,7 +147,7 @@ DR=$(codesign -dr - "$APP" 2>&1)
 LEAF=""
 LEAF_PATTERN='certificate leaf = H"([0-9A-Fa-f]+)"'
 if [[ $DR =~ $LEAF_PATTERN ]]; then
-    LEAF=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    LEAF=$(normalize_hash "${BASH_REMATCH[1]}")
 fi
 echo "leaf hash: ${LEAF:-none}, expected: $EXPECTED_LEAF"
 if [[ "$LEAF" != "$EXPECTED_LEAF" ]]; then
