@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let directory = arguments.snapshotDirectory {
             Task { @MainActor in
                 await Self.warmUpCoreAudio()
-                Self.renderSnapshots(to: directory)
+                await Self.renderSnapshots(to: directory)
             }
             return
         }
@@ -174,9 +174,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `--render-snapshots`: снимки острова в каталог и выход; при ошибке код выхода 1.
-    private static func renderSnapshots(to directory: URL) {
+    private static func renderSnapshots(to directory: URL) async {
         do {
-            let urls = try SnapshotRenderer.renderAll(to: directory)
+            let urls = try await SnapshotRenderer.renderAll(to: directory)
             Self.log("снимков записано: \(urls.count) в \(directory.path(percentEncoded: false))")
             Log.flush()
             NSApp.terminate(nil)

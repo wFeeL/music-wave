@@ -194,18 +194,20 @@ enum SnapshotRenderer {
     static let manifestName = "manifest.txt"
 
     /// Рисует все снимки в `directory` и возвращает пути. `demo` по умолчанию из ресурсов приложения.
+    /// Прогон демо через анализатор идет вне главного актора (в отладочной сборке это секунды),
+    /// на главном остается только отрисовка, и между снимками он отпускается.
     @MainActor
-    static func renderAll(to directory: URL, demo: URL? = nil) throws -> [URL] {
+    static func renderAll(to directory: URL, demo: URL? = nil) async throws -> [URL] {
         guard let demoURL = demo ?? Bundle.main.url(forResource: "demo", withExtension: "wav", subdirectory: "Demo") else {
             throw SnapshotError.demoNotFound
         }
-        let audio = try DemoAudioSource.loadMono(demoURL)
-        let music = DemoRun(samples: audio.samples, sampleRate: audio.sampleRate, duration: 12.7, mutedFrom: nil)
-        let fading = DemoRun(samples: audio.samples, sampleRate: audio.sampleRate, duration: 8, mutedFrom: 6)
-        let loudBeat = music.strongestBeat(in: 8.0...8.7)
-        let loudCalm = music.calmest(in: 8.25...8.5)
-        let groove = music.strongestBeat(in: 12.0...12.7)
-        let silent = fading.last
+        let moments = try await Task.detached(priority: .userInitiated) {
+            try DemoMoments(demo: demoURL)
+        }.value
+        let loudBeat = moments.loudBeat
+        let loudCalm = moments.loudCalm
+        let groove = moments.groove
+        let silent = moments.silent
 
         let fallback = PaletteExtractor.fallback
         // `nil`: палитру выбирает модель по обложке трека и работе Now Playing, как в приложении.
@@ -244,11 +246,13 @@ enum SnapshotRenderer {
             let url = directory.appendingPathComponent("\(scene.name).png")
             try render(scene, model: model, to: url)
             written.append(url)
+            await Task.yield()
         }
         for scene in settingsScenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
             try renderSettings(name: scene.name, dark: scene.dark, tall: scene.tall, model: model, to: url)
             written.append(url)
+            await Task.yield()
         }
         return written
     }
@@ -412,8 +416,27 @@ private struct SnapshotScene {
     }
 }
 
+/// Моменты демо для снимков: удар и спокойный миг громкой музыки, удар в конце и тишина после
+/// обнуления звука. Считаются вне главного актора.
+nonisolated private struct DemoMoments: Sendable {
+    let loudBeat: DemoMoment
+    let loudCalm: DemoMoment
+    let groove: DemoMoment
+    let silent: DemoMoment
+
+    init(demo: URL) throws {
+        let audio = try DemoAudioSource.loadMono(demo)
+        let music = DemoRun(samples: audio.samples, sampleRate: audio.sampleRate, duration: 12.7, mutedFrom: nil)
+        let fading = DemoRun(samples: audio.samples, sampleRate: audio.sampleRate, duration: 8, mutedFrom: 6)
+        loudBeat = music.strongestBeat(in: 8.0...8.7)
+        loudCalm = music.calmest(in: 8.25...8.5)
+        groove = music.strongestBeat(in: 12.0...12.7)
+        silent = fading.last
+    }
+}
+
 /// Состояние острова на момент `time` прогона демо.
-private struct DemoMoment {
+nonisolated private struct DemoMoment: Sendable {
     let time: Double
     let frame: WaveFrame
     let motion: WaveMotion
@@ -422,7 +445,7 @@ private struct DemoMoment {
 
 /// Прогон демо через `Analyzer` вне реального времени, кадр каждые 1/60 с.
 /// После `mutedFrom` секунд звук обнуляется.
-private struct DemoRun {
+nonisolated private struct DemoRun {
     static let frameStep = 1.0 / 60
 
     let moments: [DemoMoment]

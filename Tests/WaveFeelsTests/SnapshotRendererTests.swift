@@ -12,13 +12,34 @@ struct SnapshotRendererTests {
         "13-settings", "13-settings-dark", "13-settings-tall",
     ]
 
-    @Test func rendersAllSnapshotsWithVisibleWaves() throws {
+    /// Шаг сердцебиения, которым тест меряет, надолго ли отрисовка занимает главный актор.
+    static let heartbeat: Duration = .milliseconds(20)
+
+    @Test func rendersAllSnapshotsWithVisibleWaves() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("wavefeels-snapshots-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let written = try SnapshotRenderer.renderAll(to: directory, demo: Self.demo)
+        // Пока идет отрисовка, задача на главном акторе просыпается каждые 20 мс; самый большой
+        // разрыв между пробуждениями показывает, сколько главный актор был занят без перерыва.
+        // Соседние тесты на главном акторе (таймеры адаптера и конвейера) ждут ровно столько.
+        let clock = ContinuousClock()
+        let watch = Task { @MainActor in
+            var longest = Duration.zero
+            var last = clock.now
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.heartbeat)
+                let now = clock.now
+                longest = max(longest, now - last - Self.heartbeat)
+                last = now
+            }
+            return longest
+        }
+        defer { watch.cancel() }
+        let started = clock.now
+        let written = try await SnapshotRenderer.renderAll(to: directory, demo: Self.demo)
+        let rendered = clock.now - started
         let writtenNames = Set(written.map { $0.deletingPathExtension().lastPathComponent })
         for name in Self.names {
             let url = directory.appendingPathComponent("\(name).png")
@@ -43,6 +64,7 @@ struct SnapshotRendererTests {
         #expect(loudCount > 100, "02-loud-beat: насыщенных пикселей в крыльях \(loudCount)")
         #expect(silentCount == 0, "01-silent: насыщенных пикселей в крыльях \(silentCount)")
 
+        await Task.yield()
         // Раскрытая панель показывает обложку (или градиент вместо нее) на своем месте: длинный
         // текст не сдвигает ее, середина обложки цветная, не черная.
         let artwork = SnapshotRenderer.artworkSampleRect()
@@ -53,6 +75,7 @@ struct SnapshotRendererTests {
             #expect(artworkCount > artworkArea / 2, "\(name): цветных пикселей обложки \(artworkCount) из \(artworkArea)")
         }
 
+        await Task.yield()
         // Плитка без обложки и значок источника не цветные, но и не пустые.
         for name in ["10-expanded-no-artwork", "11-expanded-no-adapter"] {
             let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
@@ -60,6 +83,7 @@ struct SnapshotRendererTests {
             #expect(visible > artworkArea / 4, "\(name): заметных пикселей на месте обложки \(visible) из \(artworkArea)")
         }
 
+        await Task.yield()
         // Кнопки на своем месте: в середине средней кнопки белый значок «пауза» или «играть».
         let transport = SnapshotRenderer.transportSampleRects()
         for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork"] {
@@ -73,6 +97,7 @@ struct SnapshotRendererTests {
         let noAdapter = try Bitmap(url: directory.appendingPathComponent("11-expanded-no-adapter.png"))
         #expect(noAdapter.brightPixels(in: transport.backward, scale: SnapshotRenderer.scale) == 0)
 
+        await Task.yield()
         // Окно настроек отрисовано целиком, а не пустым фоном: в светлом оформлении есть темный
         // текст, в темном светлый. Масштаб зависит от экрана, на котором идет отрисовка.
         let settingsSize = SettingsView.windowSize
@@ -88,6 +113,14 @@ struct SnapshotRendererTests {
         let glyphs = dark.brightPixels(in: settingsRect, scale: darkScale)
         #expect(ink > 2000, "13-settings: темных пикселей \(ink)")
         #expect(glyphs > 2000, "13-settings-dark: светлых пикселей \(glyphs)")
+
+        watch.cancel()
+        let longest = await watch.value
+        print("SnapshotRendererTests: renderAll \(rendered), whole test \(clock.now - started), longest main actor hold \(longest)")
+        // Соседние тесты ждут главный актор со своими сроками, поэтому отрисовка отпускает его между
+        // снимками. Цель меньше 1 с, фактическое время в логе; предел с запасом на загруженный
+        // виртуальный мак.
+        #expect(longest < .seconds(5), "главный актор занят без перерыва \(longest)")
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.
