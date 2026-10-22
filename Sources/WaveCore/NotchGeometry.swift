@@ -85,13 +85,15 @@ public struct NotchLayout: Sendable, Equatable {
     }
 
     /// Что делать с курсором в точке `point` (глобальные координаты AppKit) при состоянии `state`.
-    public func pointer(at point: CGPoint, state: IslandState) -> NotchPointer {
-        let expanded = state == .expanded
+    /// `suppressed`: остров принудительно скрыт (пауза, блокировка экрана, полноэкранное окно)
+    /// и на курсор не отвечает, поэтому ни опроса, ни кликов.
+    public func pointer(at point: CGPoint, state: IslandState, suppressed: Bool = false) -> NotchPointer {
+        let expanded = state == .expanded && !suppressed
         let inHoverZone = hoverZone(expanded: expanded).contains(point)
         return NotchPointer(
             inHoverZone: inHoverZone,
             acceptsClicks: expanded && expandedIsland.contains(point),
-            needsPolling: expanded || inHoverZone
+            needsPolling: !suppressed && (expanded || inHoverZone)
         )
     }
 }
@@ -169,8 +171,72 @@ public enum NotchGeometry {
 
     /// Допуск сравнения рамок полноэкранного окна и экрана, pt.
     static let fullscreenTolerance: CGFloat = 1
+    /// Высота полосы у верха экрана, которую должна задевать видимая строка меню, pt.
+    static let menuBarProbeHeight: CGFloat = 1
+
+    /// Полноэкранный режим на экране `screen` (координаты AppKit): окно слоя 0 приложения `pid`
+    /// занимает экран (`windowCoversScreen`), и строки меню у верха этого экрана нет. По одной
+    /// рамке растянутое окно под строкой меню при скрытом Dock не отличить от полноэкранного,
+    /// а в полноэкранном пространстве строка меню спрятана. Строка меню ищется как окно слоя
+    /// `menuBarLayer` (`CGWindowLevelForKey(.mainMenuWindow)`), задевающее верхнюю полосу экрана.
+    public static func fullscreenCheck(
+        windows: [ServerWindow], pid: Int32, screen: CGRect, topAllowance: CGFloat,
+        menuBarLayer: Int, primaryScreenHeight: CGFloat
+    ) -> FullscreenCheck {
+        let topStrip = CGRect(
+            x: screen.minX, y: screen.maxY - menuBarProbeHeight,
+            width: screen.width, height: menuBarProbeHeight
+        )
+        var covering: CGRect?
+        var menuBarVisible = false
+        for window in windows {
+            let rect = appKitRect(fromWindowServer: window.bounds, primaryScreenHeight: primaryScreenHeight)
+            if window.layer == menuBarLayer, overlaps(rect, topStrip) {
+                menuBarVisible = true
+            } else if covering == nil, window.pid == pid, window.layer == 0,
+                      windowCoversScreen(rect, screen: screen, topAllowance: topAllowance) {
+                covering = rect
+            }
+        }
+        return FullscreenCheck(coveringWindow: covering, menuBarVisible: menuBarVisible)
+    }
+
+    /// Пересечение с ненулевой площадью. `CGRect.intersects` в Foundation на Linux считает
+    /// пересечением и касание краями, на Darwin нет; здесь одинаково везде.
+    private static func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        a.minX < b.maxX && b.minX < a.maxX && a.minY < b.maxY && b.minY < a.maxY
+    }
 
     private static func centeredNotch(size: CGSize, top: CGFloat, in frame: CGRect) -> CGRect {
         CGRect(x: frame.midX - size.width / 2, y: top - size.height, width: size.width, height: size.height)
+    }
+}
+
+/// Окно из `CGWindowListCopyWindowInfo`: владелец, слой и рамка в координатах CGWindow
+/// (начало сверху слева основного экрана, ось Y вниз).
+public struct ServerWindow: Sendable, Equatable {
+    public var pid: Int32
+    public var layer: Int
+    public var bounds: CGRect
+
+    public init(pid: Int32, layer: Int, bounds: CGRect) {
+        self.pid = pid
+        self.layer = layer
+        self.bounds = bounds
+    }
+}
+
+/// Результат `NotchGeometry.fullscreenCheck`: оба признака отдельно, для лога.
+public struct FullscreenCheck: Sendable, Equatable {
+    /// Окно переднего приложения во весь экран (координаты AppKit) или `nil`.
+    public var coveringWindow: CGRect?
+    /// У верха экрана видна строка меню.
+    public var menuBarVisible: Bool
+
+    public var isFullscreen: Bool { coveringWindow != nil && !menuBarVisible }
+
+    public init(coveringWindow: CGRect?, menuBarVisible: Bool) {
+        self.coveringWindow = coveringWindow
+        self.menuBarVisible = menuBarVisible
     }
 }

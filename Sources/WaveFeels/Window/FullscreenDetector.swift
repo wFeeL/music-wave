@@ -2,11 +2,12 @@ import AppKit
 import CoreGraphics
 import WaveCore
 
-/// Занимает ли окно переднего приложения весь экран с вырезом.
+/// Занимает ли окно переднего приложения весь экран с вырезом, и спрятана ли на нем строка меню.
 ///
 /// Проверка идет при смене активного пространства и активного приложения: из
-/// `CGWindowListCopyWindowInfo` берутся только рамки окон слоя 0 переднего приложения, без
-/// названий и содержимого, поэтому записи экрана не нужно. Список окон читается вне главного
+/// `CGWindowListCopyWindowInfo` берутся только владелец, слой и рамка окон, без названий
+/// и содержимого, поэтому записи экрана не нужно. Решение принимает
+/// `NotchGeometry.fullscreenCheck`: окно слоя 0 во весь экран и нет видимой строки меню. Список окон читается вне главного
 /// потока, устаревшие ответы отбрасываются по номеру проверки. Подписки снимает `stop()`.
 @MainActor
 final class FullscreenDetector {
@@ -16,6 +17,9 @@ final class FullscreenDetector {
 
     private(set) var isFullscreen = false
     var onChange: (() -> Void)?
+
+    /// Последний результат проверки; в лог пишется только смена признаков.
+    private var lastCheck: FullscreenCheck?
 
     private var screenID: CGDirectDisplayID?
     private var observers: [any NSObjectProtocol] = []
@@ -52,6 +56,7 @@ final class FullscreenDetector {
         generation += 1
         screenID = nil
         isFullscreen = false
+        lastCheck = nil
     }
 
     private func environmentChanged() {
@@ -68,24 +73,33 @@ final class FullscreenDetector {
         generation += 1
         let current = generation
         guard let query = makeQuery() else {
-            apply(false, details: "нет экрана или переднего приложения")
+            apply(FullscreenCheck(coveringWindow: nil, menuBarVisible: false), appName: "нет экрана или переднего приложения")
             return
         }
         Task { @MainActor [weak self] in
-            let match = await Task.detached(priority: .utility) {
-                FullscreenDetector.coveringWindow(query)
+            let result = await Task.detached(priority: .utility) {
+                FullscreenDetector.evaluate(query)
             }.value
             guard let self, current == self.generation else { return }
-            self.apply(match != nil, details: match.map { "окно \(Self.describe($0)), \(query.appName)" } ?? query.appName)
+            self.apply(result, appName: query.appName)
         }
     }
 
-    private func apply(_ fullscreen: Bool, details: String) {
+    private func apply(_ result: FullscreenCheck, appName: String) {
+        let previous = lastCheck
+        lastCheck = result
+        let signalsChanged = previous?.coveringWindow != result.coveringWindow
+            || previous?.menuBarVisible != result.menuBarVisible
+        let fullscreen = result.isFullscreen
+        if signalsChanged, previous != nil || result.coveringWindow != nil {
+            let window = result.coveringWindow.map { "во весь экран, \($0.logDescription)" } ?? "не во весь экран"
+            let message = "полноэкранный режим: \(fullscreen ? "да" : "нет") (окно \(window), "
+                + "строка меню \(result.menuBarVisible ? "видна" : "не видна"), \(appName))"
+            Log.ui.info("\(message, privacy: .public)")
+            Log.file(message)
+        }
         guard fullscreen != isFullscreen else { return }
         isFullscreen = fullscreen
-        let message = "полноэкранное окно: \(fullscreen ? "да" : "нет") (\(details))"
-        Log.ui.info("\(message, privacy: .public)")
-        Log.file(message)
         onChange?()
     }
 
@@ -120,31 +134,25 @@ final class FullscreenDetector {
         )
     }
 
-    /// Рамка (координаты AppKit) первого окна слоя 0 приложения `query.pid`, которое занимает
-    /// экран целиком, или `nil`.
-    private nonisolated static func coveringWindow(_ query: Query) -> CGRect? {
+    /// Читает список окон на экране и передает его в `NotchGeometry.fullscreenCheck`.
+    private nonisolated static func evaluate(_ query: Query) -> FullscreenCheck {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return nil
-        }
-        for info in list {
-            guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == query.pid,
-                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+        let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] ?? []
+        let windows = list.compactMap { info -> ServerWindow? in
+            guard let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue,
                   let bounds = info[kCGWindowBounds as String] as? NSDictionary,
-                  let windowServerRect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
-            else { continue }
-            let rect = NotchGeometry.appKitRect(
-                fromWindowServer: windowServerRect,
-                primaryScreenHeight: query.primaryScreenHeight
-            )
-            if NotchGeometry.windowCoversScreen(rect, screen: query.screenFrame, topAllowance: query.topAllowance) {
-                return rect
-            }
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+            else { return nil }
+            return ServerWindow(pid: pid, layer: layer, bounds: rect)
         }
-        return nil
-    }
-
-    private static func describe(_ rect: CGRect) -> String {
-        String(format: "x %.0f, y %.0f, %.0f × %.0f", rect.minX, rect.minY, rect.width, rect.height)
+        return NotchGeometry.fullscreenCheck(
+            windows: windows,
+            pid: query.pid,
+            screen: query.screenFrame,
+            topAllowance: query.topAllowance,
+            menuBarLayer: Int(CGWindowLevelForKey(.mainMenuWindow)),
+            primaryScreenHeight: query.primaryScreenHeight
+        )
     }
 }

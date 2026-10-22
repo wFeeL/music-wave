@@ -257,9 +257,92 @@ struct NotchGeometryTests {
         let zoomedAboveDock = CGRect(x: 0, y: 70, width: 1470, height: 854)
         let narrower = CGRect(x: 10, y: 0, width: 1460, height: 956)
         let otherScreen = CGRect(x: 1470, y: 0, width: 1470, height: 956)
-        let belowMenuBar = CGRect(x: 0, y: 0, width: 1470, height: 914)
-        for window in [zoomedAboveDock, narrower, otherScreen, belowMenuBar] {
+        for window in [zoomedAboveDock, narrower, otherScreen] {
             #expect(!NotchGeometry.windowCoversScreen(window, screen: screen, topAllowance: 32))
+        }
+    }
+
+    // MARK: - Полноэкранный режим: окно и строка меню
+
+    private static let appPID: Int32 = 42
+    private static let menuBarLayer = 24
+
+    /// Окно в координатах CGWindow на экране `notched()` (основной, высота 956).
+    private func server(_ rect: CGRect, pid: Int32 = appPID, layer: Int = 0) -> ServerWindow {
+        ServerWindow(pid: pid, layer: layer, bounds: rect)
+    }
+
+    /// Строка меню экрана `notched()`: высота как `menuBarHeight` фикстуры, 32 pt.
+    private var menuBar: ServerWindow {
+        server(CGRect(x: 0, y: 0, width: 1470, height: 32), pid: 0, layer: Self.menuBarLayer)
+    }
+
+    private func check(_ windows: [ServerWindow]) -> FullscreenCheck {
+        NotchGeometry.fullscreenCheck(
+            windows: windows, pid: Self.appPID, screen: CGRect(x: 0, y: 0, width: 1470, height: 956), topAllowance: 32,
+            menuBarLayer: Self.menuBarLayer, primaryScreenHeight: 956
+        )
+    }
+
+    @Test func zoomedWindowUnderMenuBarIsNotFullscreen() {
+        // Окно растянуто под строкой меню, Dock скрыт: по рамке не отличить от полноэкранного.
+        let zoomed = server(CGRect(x: 0, y: 32, width: 1470, height: 924))
+        let result = check([menuBar, zoomed])
+        #expect(result.coveringWindow == CGRect(x: 0, y: 0, width: 1470, height: 924))
+        #expect(result.menuBarVisible)
+        #expect(!result.isFullscreen)
+    }
+
+    @Test func coveringWindowWithoutMenuBarIsFullscreen() {
+        let fullFrame = check([server(CGRect(x: 0, y: 0, width: 1470, height: 956))])
+        #expect(fullFrame == FullscreenCheck(coveringWindow: CGRect(x: 0, y: 0, width: 1470, height: 956), menuBarVisible: false))
+        #expect(fullFrame.isFullscreen)
+        let belowNotch = check([server(CGRect(x: 0, y: 32, width: 1470, height: 924))])
+        #expect(belowNotch.isFullscreen)
+    }
+
+    @Test func menuBarSlidOutAboveScreenDoesNotCount() {
+        let hidden = server(CGRect(x: 0, y: -32, width: 1470, height: 32), pid: 0, layer: Self.menuBarLayer)
+        let result = check([hidden, server(CGRect(x: 0, y: 0, width: 1470, height: 956))])
+        #expect(!result.menuBarVisible)
+        #expect(result.isFullscreen)
+    }
+
+    @Test func menuBarOfOtherDisplayDoesNotCount() {
+        let otherMenuBar = server(CGRect(x: 1470, y: 0, width: 1920, height: 24), pid: 0, layer: Self.menuBarLayer)
+        let result = check([otherMenuBar, server(CGRect(x: 0, y: 0, width: 1470, height: 956))])
+        #expect(!result.menuBarVisible)
+        #expect(result.isFullscreen)
+    }
+
+    @Test func otherAppsAndLayersAreIgnored() {
+        let full = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        #expect(check([server(full, pid: 7)]).coveringWindow == nil)
+        #expect(check([server(full, layer: 3)]).coveringWindow == nil)
+        #expect(!check([server(full, pid: 7), server(full, layer: 3)]).isFullscreen)
+        #expect(!check([]).isFullscreen)
+    }
+
+    @Test func ordinaryWindowsWithMenuBarAreNotFullscreen() {
+        for rect in [
+            CGRect(x: 0, y: 32, width: 1470, height: 854),
+            CGRect(x: 0, y: 32, width: 1470, height: 924),
+            CGRect(x: 100, y: 100, width: 800, height: 600),
+        ] {
+            #expect(!check([menuBar, server(rect)]).isFullscreen)
+        }
+    }
+
+    // MARK: - Подавленный остров
+
+    @Test func suppressedIslandNeitherPollsNorAcceptsClicks() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let center = CGPoint(x: layout.expandedIsland.midX, y: layout.expandedIsland.maxY - 5)
+        for state in [IslandState.hidden, .collapsed, .expanded] {
+            let pointer = layout.pointer(at: center, state: state, suppressed: true)
+            #expect(pointer.inHoverZone)
+            #expect(!pointer.acceptsClicks)
+            #expect(!pointer.needsPolling)
         }
     }
 }

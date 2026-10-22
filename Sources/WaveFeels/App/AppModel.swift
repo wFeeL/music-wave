@@ -128,6 +128,12 @@ final class AppModel {
         silentSince = nil
     }
 
+    /// Остров принудительно скрыт и на курсор не отвечает: пауза, блокировка экрана или
+    /// полноэкранное окно при включенной настройке.
+    var islandSuppressed: Bool {
+        settings.paused || screenLocked || (fullscreenSuppressed && settings.hideInFullscreen)
+    }
+
     // MARK: - Источник по умолчанию
 
     /// Источник, который сейчас используется: выбранный пользователем или по умолчанию.

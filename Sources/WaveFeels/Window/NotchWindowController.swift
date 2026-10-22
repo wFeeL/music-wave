@@ -142,12 +142,17 @@ final class NotchWindowController {
     private func updatePointer() {
         guard isShown, let layout, let panel else {
             stopPolling()
+            panel?.ignoresMouseEvents = true
             if model.pointerInHoverZone {
                 model.pointerInHoverZone = false
             }
             return
         }
-        let pointer = layout.pointer(at: NSEvent.mouseLocation, state: model.islandState)
+        let pointer = layout.pointer(
+            at: NSEvent.mouseLocation,
+            state: model.islandState,
+            suppressed: model.islandSuppressed
+        )
         if model.pointerInHoverZone != pointer.inHoverZone {
             model.pointerInHoverZone = pointer.inHoverZone
         }
@@ -206,16 +211,20 @@ final class NotchWindowController {
 
     private static func describe(_ layout: NotchLayout) -> String {
         let kind = layout.hasNotch ? "вырез" : "капсула под строкой меню"
-        return "остров: экран \(layout.screenID), \(kind) \(describe(layout.notch)), панель \(describe(layout.panelFrame))"
-    }
-
-    private static func describe(_ rect: CGRect) -> String {
-        String(format: "x %.1f, y %.1f, %.1f × %.1f", rect.minX, rect.minY, rect.width, rect.height)
+        return "остров: экран \(layout.screenID), \(kind) \(layout.notch.logDescription), "
+            + "панель \(layout.panelFrame.logDescription)"
     }
 
     private func log(_ message: String) {
         Log.ui.info("\(message, privacy: .public)")
         Log.file(message)
+    }
+}
+
+extension CGRect {
+    /// «x 642.5, y 924.0, 185.0 × 32.0» для логов окна у выреза.
+    var logDescription: String {
+        String(format: "x %.1f, y %.1f, %.1f × %.1f", minX, minY, width, height)
     }
 }
 
