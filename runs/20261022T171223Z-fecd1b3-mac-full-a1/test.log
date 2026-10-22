@@ -1,0 +1,966 @@
+== step test: run_tests
+[0/1] Planning build
+Test Suite 'All tests' started at 2026-10-22 17:09:50.124.
+Test Suite 'All tests' passed at 2026-10-22 17:09:50.135.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.011) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ArtworkPixelsTests started.
+◇ Suite MediaRemoteAdapterTests started.
+◇ Suite AppModelIslandTests started.
+◇ Suite PipelineLifecycleTests started.
+◇ Suite ActivityGateTests started.
+◇ Suite AnalysisEngineTimingTests started.
+◇ Suite FrameStoreTests started.
+◇ Suite NowPlayingTests started.
+◇ Suite AppModelPauseTests started.
+◇ Suite BeatTrackerPartsTests started.
+➜ Suite TempoEstimatorTests skipped.
+◇ Suite AppModelArtworkTests started.
+◇ Suite IslandStateMachineTests started.
+◇ Suite CaptureRecoveryPipelineTests started.
+◇ Suite SourceChoicesTests started.
+◇ Suite OutputStartDetectorTests started.
+◇ Suite AppModelRenderTests started.
+◇ Suite OnlinePeakPickerTests started.
+◇ Suite WaveAppearanceTests started.
+◇ Suite BeatGlowTests started.
+◇ Suite LevelSpringTests started.
+◇ Suite MenuBarIconTests started.
+◇ Suite TempoStickinessTests started.
+◇ Suite AttackReleaseTests started.
+◇ Suite IdleCapturePolicyTests started.
+◇ Suite AppModelDefaultSourceTests started.
+◇ Suite CoreAudioSmokeTests started.
+➜ Suite OnsetDetectorTests skipped.
+◇ Suite CaptureRecoveryTests started.
+◇ Suite WaveSetTests started.
+◇ Suite HostClockTests started.
+◇ Suite AppSettingsTests started.
+◇ Suite OrphanedAdapterProcessesTests started.
+◇ Suite ProcessMatcherTests started.
+◇ Suite NotchPanelTests started.
+◇ Suite SnapshotRendererTests started.
+◇ Suite LaunchArgumentsTests started.
+◇ Suite BandMapperTests started.
+◇ Suite TapStreamLayoutTests started.
+◇ Suite LatencyTests started.
+◇ Suite PaletteTests started.
+◇ Suite RenderPacingTests started.
+➜ Suite BeatSyncTests skipped.
+◇ Suite LevelProcessorTests started.
+◇ Suite NotchGeometryTests started.
+◇ Suite StreamAnalyzerTests started.
+◇ Suite WaveShapeTests started.
+◇ Suite AdapterSilenceMonitorTests started.
+➜ Suite BeatTrackerTests skipped.
+◇ Suite SuperFluxTests started.
+◇ Test copyWindowCoversBasicCases() started.
+◇ Test denormalInputHasNoNaN() started.
+◇ Test feedMonitorNoticesWriterThatStoppedWithCopyWindow() started.
+◇ Test copyWindowRejectsOverwrittenOrFuture() started.
+◇ Test sineAtBinCenterGivesUnitPeak() started.
+◇ Test copyWindowNeverTearsMonotonicRamp() started.
+◇ Test writerCountTracksAttachAndPeak() started.
+◇ Test sixHundredTransformsAreFast() started.
+◇ Test amplitudeScalesLinearly() started.
+◇ Test leakageFarFromPeakIsSmall() started.
+◇ Test copyWindowEndingAtIndex() started.
+◇ Test silenceGivesZeros() started.
+◇ Test resetClearsStamp() started.
+◇ Test stampIsNeverTorn() started.
+◇ Test feedMonitorStartsFresh() started.
+◇ Test stampRoundTrips() started.
+◇ Test roundsCapacityUpToPowerOfTwo() started.
+◇ Test solidPNGShrinksTo64AndKeepsColor() started.
+◇ Test garbageGivesNil() started.
+◇ Test analysisOfSolidArtworkGivesImageAndThreeColors() started.
+◇ Test orphanedStreamFromPreviousRunIsTerminated() started.
+◇ Test snapshotArtworkGivesItsOwnPalette() started.
+◇ Test absurdDurationIsDropped() started.
+◇ Test quickStreamDeathsMakeAdapterUnavailable() started.
+◇ Test silentAdapterStaysInFallbackUntilSourceTrackOrRestart() started.
+◇ Test restartKeepsTrackUntilNewPayload() started.
+◇ Test lineDecoderParsesStreamOffMain() started.
+◇ Test hungTestIsKilledAndStreamStillStarts() started.
+◇ Test emptyBundleIsUnavailable() started.
+◇ Test lineSplitterKeepsOrderAcrossChunks() started.
+◇ Test commandIDsMatchAdapterReadme() started.
+◇ Test longLivedStreamDeathsDoNotAccumulate() started.
+◇ Test restartHoldExpires() started.
+◇ Test demoStartStopCyclesLeakNothing() started.
+◇ Test onlyAvailableAdapterCanBeMarkedSilent() started.
+◇ Test testCacheIsKeyedByOSBuild() started.
+◇ Test pointerExpandsAndCollapsesIslandAndReportsStateChanges() started.
+◇ Test unstampedWritesStillProduceFrames() started.
+◇ Test ringResetRestartsProcessing() started.
+◇ Test idleProcessesOneHopPerWake() started.
+◇ Test zeroRunGrowsOnZerosAndResetsOnClick() started.
+◇ Test framesCarryAudibleTimeAndScheduleFollowsClicks() started.
+◇ Test scheduleRoundTripsAndResets() started.
+◇ Test gateNeedsHoldTimeToToggle() started.
+◇ Test noDuplicateRenderFrames(phase:) started.
+◇ Test shortBlipDoesNotResetHoldTimer() started.
+◇ Test interpolatesBetweenNeighbours() started.
+◇ Test keepsLast128() started.
+◇ Test publishAfterResetStartsNewHistory() started.
+◇ Test sameTimeReplacesNewest() started.
+◇ Test interpolatedClampsFraction() started.
+◇ Test interpolatesEveryField() started.
+◇ Test sequenceCountsPublishes() started.
+◇ Test resetHoldsOneFrameEverywhere() started.
+◇ Test silentFrameShape() started.
+◇ Test olderTimeRestartsHistory() started.
+◇ Test clampsOutsideHistory() started.
+◇ Test persistedPauseHoldsFromStart() started.
+◇ Test numbersAndBooleansAcceptAlternateForms() started.
+◇ Test emptyPayloadGivesNil() started.
+◇ Test diffMergesAndNullDeletes() started.
+◇ Test absurdDurationIsNil(micros:) started.
+◇ Test artworkArrivingBeforeTitleBelongsToThatTrack() started.
+◇ Test elapsedWithoutTimestampOrElapsed() started.
+◇ Test missingTitleGivesNil() started.
+◇ Test fullPayloadParses() started.
+◇ Test emptyDiffKeepsState() started.
+◇ Test invalidJSONThrowsAndKeepsState() started.
+◇ Test pauseStopsAndResumesDemo() started.
+◇ Test dayLongDurationIsKept() started.
+◇ Test elapsedAdvancesOnlyWhilePlaying() started.
+◇ Test circularDifferenceWrapsIntoHalfPeriod() started.
+◇ Test selectFindsTheRank() started.
+◇ Test artworkSurvivesTemporaryNilState() started.
+◇ Test artworkDroppedWhenArtistChanges() started.
+◇ Test nonDiffReplacesState() started.
+◇ Test invalidBase64GivesNilArtwork() started.
+➜ Test foldsFastTempoIntoRange() skipped.
+◇ Test otherTypesAndBlankLinesAreIgnored() started.
+◇ Test staleArtworkIsDroppedOnTrackChange() started.
+➜ Test noisyTempoDoesNotFlip(bpm:) skipped.
+➜ Test holdsTempoInNoise(bpm:) skipped.
+➜ Test swungHatsKeepTheBeat() skipped.
+➜ Test relatedTempoChangeIsAcceptedInTime(from:to:limit:) skipped.
+◇ Test coverPaletteOnlyWhileNowPlayingWorks() started.
+➜ Test noisyKickDoesNotPickARelatedRival() skipped.
+◇ Test panelTrackNeedsNowPlayingOfSelectedSource() started.
+◇ Test artworkSourceNeedsNowPlaying() started.
+➜ Test syncopationKeepsTheBeat() skipped.
+➜ Test findsSteadyTempo(bpm:) skipped.
+➜ Test tempoSweepIsStable(_:) skipped.
+◇ Test frameStoreReturnsLastPublished() started.
+◇ Test collapsesAfterPointerLeaves() started.
+◇ Test hidesAfterHideDelayOfSilence() started.
+◇ Test doesNotExpandWithoutAnything() started.
+◇ Test silenceTimerResetsWhenMusicResumes() started.
+◇ Test fullscreenHidesImmediately() started.
+◇ Test showsWhenAudioStarts() started.
+◇ Test hoverExpandsAfterDelay() started.
+◇ Test collapsesToHiddenWhenNoContent() started.
+◇ Test transitionKeepsBothWaveLayers() started.
+◇ Test userPauseHidesImmediately() started.
+◇ Test briefHoverDoesNotExpand() started.
+◇ Test parkedPointerCountsOnlyOnceIslandCanExpand() started.
+◇ Test pointerDeadlineTracksExpandAndCollapse() started.
+◇ Test failingTapIsRetriedSlowlyAfterFastRetries() started.
+◇ Test expandsOnPauseWithLastTrack() started.
+◇ Test appWithoutPathKeyedByBundleID() started.
+◇ Test browserListIsFixed() started.
+◇ Test artworkSurvivesBriefDisappearance() started.
+◇ Test outputtingAppsComeFirstInStableOrder() started.
+◇ Test keepsOrderAndDropsRepeats() started.
+◇ Test selectedOutsideListsGoesToOther() started.
+◇ Test systemWideNeverListedAsApp() started.
+◇ Test emptyBaselineWakesOnFirstOutput() started.
+◇ Test comparesPathsInCanonicalForm() started.
+◇ Test wakesOnlyWhenAProcessStartsOutput() started.
+◇ Test selectedReplacesSameAppWithOtherName() started.
+◇ Test needsARealLevelRise() started.
+◇ Test firesOnceOnARiseAndHoldsTheCombineWindow() started.
+◇ Test glowFollowsScheduleAtPresentationTime() started.
+◇ Test diagnosticsHaveRhythmSection() started.
+◇ Test colorModeFadesLikeNewArtwork() started.
+◇ Test previewKeepsFrameValues() started.
+◇ Test diagnosticsHaveRenderSection() started.
+◇ Test interpolatesPublishedFrames() started.
+◇ Test customPaletteTurnsHue() started.
+◇ Test lineTable() started.
+◇ Test presetsAreDistinct() started.
+◇ Test clampsRanges() started.
+◇ Test paletteFollowsMode() started.
+◇ Test codableRoundTrip() started.
+◇ Test velocityStartsFromRest() started.
+◇ Test defaultsMatchSpec() started.
+◇ Test fallReachesHalfIn140ms() started.
+◇ Test riseReachesHalfIn37ms() started.
+◇ Test resetStopsTheSpring() started.
+◇ Test frameRateIndependent() started.
+◇ Test neverOvershoots() started.
+◇ Test ignoresInvalidInput() started.
+◇ Test bassAccentClamps() started.
+◇ Test ignoresNonFiniteInput() started.
+◇ Test peaksAtLeadTime() started.
+◇ Test iconNamesCoverEveryState() started.
+◇ Test staleEventStaysDark(age:) started.
+◇ Test iconSymbolsExistInSystem() started.
+◇ Test shiftKeepsIds() started.
+◇ Test soundProblemWinsOverPause() started.
+◇ Test unrelatedTempoSwitchesQuicklyLater() started.
+◇ Test neverExceedsOne() started.
+◇ Test resetForgetsEverything() started.
+◇ Test outliersThatDisagreeDoNotSwitch() started.
+◇ Test lateEventStartsBright() started.
+◇ Test relatedAgreementNeedsTwelveOfTheLastSixteen() started.
+◇ Test ignoresInvalidPeriods() started.
+◇ Test forgetsOldIds() started.
+◇ Test relatedAgreementCountsOverTheWindow() started.
+◇ Test decayFollowsTempo() started.
+◇ Test waitsForMinimumHistory() started.
+◇ Test silenceGivesNoTempo() started.
+◇ Test ignoresSingleOutlier() started.
+◇ Test relatedRatioNeedsLongAgreementOnceEstablished() started.
+◇ Test sameIdDoesNotFlashTwice() started.
+◇ Test relatedRatioSwitchesQuicklyAtFirst() started.
+◇ Test reconfigureStartsOverAtTheNewRate() started.
+◇ Test movesTwentyPercentTowardNearEstimates() started.
+◇ Test zeroDtKeepsValue() started.
+◇ Test releaseDecaysToOneOverE() started.
+◇ Test attackReachesTimeConstantFraction() started.
+◇ Test resetSetsValue() started.
+◇ Test suspendedCaptureResumesOnSoundOrPlayback() started.
+◇ Test soundResetsSilenceTimer() started.
+◇ Test unavailableAdapterIsNeverSuspended() started.
+◇ Test outputtingSourceProcessHoldsCapture() started.
+◇ Test selfWakeRightAfterSuspendIsNotSuspendedAgain() started.
+◇ Test resolvesDefaultWhileExplicitSourceIsSet() started.
+◇ Test sourceWithNowPlayingIsSuspendedAfterTenSeconds() started.
+➜ Test lagIsStableAcrossLevelAndTempo() skipped.
+◇ Test systemWideIsNeverSuspended() started.
+➜ Test broadbandSeesDrums() skipped.
+➜ Test onsetsAreAtLeast150msApart() skipped.
+◇ Test sourceWithoutNowPlayingIsNeverSuspended() started.
+➜ Test pinkNoiseRarelyTriggersKicks() skipped.
+◇ Test suspendedCaptureResumesWhenNowPlayingCanNoLongerTell() started.
+➜ Test kickRecallAcrossTempos() skipped.
+➜ Test quietNoiseDoesNotTrigger() skipped.
+➜ Test steadyTonesDoNotTrigger() skipped.
+➜ Test kickOnsetsHaveConstantLag() skipped.
+◇ Test silenceIsCountedAnewAfterResume() started.
+➜ Test offbeatBassDoesNotTriggerKicks() skipped.
+◇ Test idleEngineTicksAtFifteenHertz() started.
+◇ Test demoAudioDrivesAnalysis() started.
+◇ Test silenceGrowsZeroRun() started.
+◇ Test processListSnapshotHasValidPIDs() started.
+◇ Test outputDeviceMonitorReadsDeviceOrUnknown() started.
+◇ Test failedStartRetriesFastThenSlowly() started.
+◇ Test stalledFeedDecaysToSilence() started.
+◇ Test hintsSeparateDeniedAccessFromStalledCapture() started.
+◇ Test onlyReturningSoundResetsWatchdog() started.
+◇ Test watchdogWaitsForSoundingSourceLongZerosAndNoPendingRebuild() started.
+◇ Test watchdogRebuildsFastFiveTimesThenSlowly() started.
+◇ Test resetClearsEverything() started.
+◇ Test twoLinesAreBassAndHigh() started.
+◇ Test standardTimingMatchesSpec() started.
+◇ Test oneLineShowsOverallLevel() started.
+◇ Test appearanceCarriesThicknessFillAndGain() started.
+◇ Test echoesScaleLevelAndOpacity() started.
+◇ Test filtersStampJitter() started.
+◇ Test noTimeBeforeTheFirstAnchor() started.
+◇ Test resyncsOnJump() started.
+◇ Test upgradeFrom090KeepsValuesAndWritesNothing() started.
+◇ Test followsSlowDrift() started.
+◇ Test appearanceDefaultsAndClamps() started.
+◇ Test nonFiniteValuesFallBackToDefaults() started.
+◇ Test nowPlayingSourceHistoryPersists() started.
+◇ Test everyFieldSurvivesReload() started.
+◇ Test syncOffsetDefaultsAndClamps() started.
+◇ Test storedGarbageIsClampedOrIgnored() started.
+◇ Test observationFiresOnlyForRealChanges() started.
+◇ Test appearanceKeysPersist() started.
+◇ Test keysUsePrefixAndEnumsAreJSON() started.
+◇ Test defaultsOnEmptyStore() started.
+◇ Test garbageColorModeFallsBackToArtwork() started.
+◇ Test settersClampRanges() started.
+◇ Test picksOnlyOrphansRunningThisBundlesScript() started.
+◇ Test matchesChromiumHelperByBundlePrefix() started.
+◇ Test neverPicksItself() started.
+◇ Test safariIncludesWebKitGPU() started.
+◇ Test audioSourceCodableRoundTrip() started.
+◇ Test panelPassesClicksAndStaysAboveMenuBar() started.
+◇ Test resultIsSortedAndUnique() started.
+◇ Test doesNotMatchSimilarPrefix() started.
+◇ Test trailingSlashInBundlePathIsNormalized() started.
+◇ Test bundleIDBelongsByEqualityOrDottedPrefix() started.
+◇ Test nowPlayingBelongsBySameBundleRules() started.
+◇ Test systemWideMatchesNothing() started.
+◇ Test rebuildWhenHelperRespawns() started.
+◇ Test matchesElectronHelperInsideBundle() started.
+◇ Test emptyBundlePathAndBundleIDMatchNothing() started.
+◇ Test matchesFirefoxPluginContainer() started.
+◇ Test yandexCandidates() started.
+◇ Test rendersAllSnapshotsWithVisibleWaves() started.
+◇ Test matchesPathWithDifferentUnicodeNormalization() started.
+◇ Test edgeFrequencyLookup() started.
+◇ Test layerAssignment() started.
+◇ Test layersPartitionAllBands() started.
+◇ Test emptyBandIsInterpolatedNotCopied() started.
+◇ Test sine1kHzLandsInMidLayer() started.
+◇ Test emptyBandsMatchSampleRate() started.
+◇ Test lowestBandsHaveValuesEvenWithoutBins() started.
+◇ Test edgesAreLogSpaced() started.
+◇ Test silenceGivesFloor() started.
+◇ Test missingDemoValueGivesNil() started.
+◇ Test flagAfterDemoIsNotTakenAsValue() started.
+◇ Test outputLatencyBuiltInSpeakers() started.
+◇ Test latencyModeCodableRoundTrip() started.
+◇ Test outputLatencyManualIsMilliseconds() started.
+◇ Test presentationLeadIsTwoRefreshes() started.
+◇ Test outputLatencyBluetoothAddsFortyMs() started.
+◇ Test unreadableSubDevicesStillSkipStereoMicrophone() started.
+◇ Test outputLatencyZeroRateIsZero() started.
+◇ Test ignoresUnknownArguments() started.
+◇ Test outputLatencyClampedToHalfSecond() started.
+◇ Test invalidExitAfterGivesNil() started.
+◇ Test emptyArgumentsGiveDefaults() started.
+◇ Test parsesAllFlags() started.
+◇ Test speakersWithoutInputsGiveTheOnlyStream() started.
+◇ Test integerExitAfterIsAccepted() started.
+◇ Test allStreamsBelongToSubDeviceFail() started.
+◇ Test channelMismatchFallsBackToKnownSubDeviceCount() started.
+◇ Test tooFewChannelsFail() started.
+◇ Test trailingStreamsThatOvershootTapChannelsFail() started.
+◇ Test unknownTapFormatAndUnreadableSubDevicesFail() started.
+◇ Test headsetMicrophoneComesFirst() started.
+◇ Test unknownTapFormatUsesSubDeviceCount() started.
+◇ Test tapSplitIntoMonoStreamsIsAccumulatedFromTheEnd() started.
+◇ Test zeroChannelStreamBeforeTapIsNotIncluded() started.
+◇ Test noStreamsFail() started.
+◇ Test mixEndpoints() started.
+◇ Test splitMixIsDeterministic() started.
+◇ Test knownOKLabValue() started.
+◇ Test oklabRoundTrip() started.
+◇ Test opposingHuesStillGiveThreeColors() started.
+◇ Test grayscaleImageFallsBack() started.
+◇ Test alwaysThreeColors() started.
+◇ Test retargetStartsFromWhatIsShown() started.
+◇ Test darkColorsAreLiftedInGamut() started.
+◇ Test fadeSurvivesOddClocks() started.
+◇ Test fadeTakesPointEightSeconds() started.
+◇ Test fadeHoldsInitialPalette() started.
+◇ Test transparentImageFallsBack() started.
+◇ Test extractsDominantColors() started.
+◇ Test paddingAlwaysYieldsThreeFiniteColors() started.
+➜ Test noiseAloneNeverGlows(seed:) skipped.
+➜ Test syncopationGlowsOnBeatsAndKicks() skipped.
+➜ Test tempoJumpRelocks() skipped.
+➜ Test postLockConvergence(bpm:) skipped.
+➜ Test steadyBeatLocksOnTime(bpm:) skipped.
+➜ Test swingAndHumanizedKick() skipped.
+➜ Test dnbInNoiseStillGlowsOnKicks(noiseDB:minimum:) skipped.
+➜ Test dnbFallsBackToKicks() skipped.
+➜ Test quietIntroNeverGlows() skipped.
+➜ Test onsetPathIsLateByAtMost45ms() skipped.
+➜ Test jitterSmallerAt120Hz() skipped.
+➜ Test otherSampleRates(rate:) skipped.
+➜ Test tempoRampIsFollowed() skipped.
+➜ Test breakdownHasAtMostOnePhantom() skipped.
+➜ Test bluetoothLatencyIsPredicted() skipped.
+➜ Test offBeatEnergyDoesNotMoveTheGlow(bpm:offbeatBass:snare:) skipped.
+➜ Test syncOffsetShiftsTheGlow() skipped.
+◇ Test medianOfRecentIntervals() started.
+◇ Test bucketsIntervals() started.
+◇ Test autoModeEqualizesQuietAndLoud() started.
+◇ Test kicksPumpTheBassLayer() started.
+◇ Test quietHissStaysSmall() started.
+◇ Test absoluteModeFollowsLoudness() started.
+◇ Test transitionWindow() started.
+◇ Test outputAlwaysInUnitRange() started.
+◇ Test silenceIsFlat() started.
+◇ Test refreshPeriodFromScreenRate() started.
+◇ Test systemVolumeScalesOutput() started.
+◇ Test invalidInputDoesNotPoisonPeak() started.
+◇ Test skipsLongGaps() started.
+◇ Test keepsLast3600() started.
+◇ Test medianSpansBuckets() started.
+◇ Test countsAnalysisFrames() started.
+◇ Test sigmaOfIntervalsAndTimeline() started.
+◇ Test ignoresInvalidTime() started.
+◇ Test samplesGoToTheCurrentBucket() started.
+◇ Test summaryText() started.
+◇ Test pillHoverZonesIncludeScreenTopEdge() started.
+◇ Test wingWidthIsClamped() started.
+◇ Test notchOnScreenWithOffsetOrigin() started.
+◇ Test pillExpandedHangsFromPillTop() started.
+◇ Test rawLevelIgnoresSensitivity() started.
+◇ Test windowBelowNotchCoversScreen() started.
+◇ Test envelopeDecaysWithin200ms() started.
+◇ Test contentClearsNotchByAtLeast12() started.
+◇ Test fullFrameWindowCoversScreen() started.
+◇ Test spectrumIntoMatchesArrayVersion() started.
+◇ Test panelFrameAtDefaultsMatches090() started.
+◇ Test kickLevelIsKickBinPower() started.
+◇ Test noNaNOnZerosAndDenormals() started.
+◇ Test windowServerRectOnSecondaryScreenAbove() started.
+◇ Test resetClearsAutoLevelPeaks() started.
+◇ Test bassSineDrivesBassLayer() started.
+◇ Test levelStepOverride() started.
+◇ Test configScalesWithRate() started.
+◇ Test reconfigureKeepsBandForSineAfterRateChange() started.
+◇ Test frameTimeIsWindowCentre() started.
+◇ Test hihatNoiseDrivesHighLayer() started.
+◇ Test expandedAcceptsClicksOnlyInsideIsland() started.
+◇ Test hoverZoneIncludesScreenTopEdge() started.
+◇ Test resetOnsetsKeepsLevels() started.
+◇ Test fakeNotchUsesFirstScreen() started.
+◇ Test silenceDecaysToFlat() started.
+◇ Test shoulderStripsDoNotAcceptClicks() started.
+◇ Test collapsedIncludesWings() started.
+◇ Test asymmetricAuxiliaryAreas() started.
+◇ Test emptyScreensGiveNil() started.
+◇ Test menuBarSlidOutAboveScreenDoesNotCount() started.
+◇ Test panelIsClampedToScreen() started.
+◇ Test panelContainsEverything() started.
+◇ Test prefersBuiltInNotchedScreen() started.
+◇ Test notchFromAuxiliaryAreas() started.
+◇ Test trackForSourceKeepsAdapterWorking() started.
+◇ Test expandedHangsFromTop() started.
+◇ Test suppressedIslandNeitherPollsNorAcceptsClicks() started.
+◇ Test twoMinutesOfSoundWithoutTrackMarksAdapterSilent() started.
+◇ Test waveIsZeroAtEdges() started.
+◇ Test waveStaysInRange() started.
+◇ Test resetStartsOver() started.
+◇ Test longGapCountsAsOneStep() started.
+◇ Test onlyAudibleTimeCounts() started.
+◇ Test unavailableAdapterIsNotCounted() started.
+◇ Test collapsedPillHasNoWings() started.
+◇ Test appliesOnlyToAppsSeenInNowPlaying() started.
+◇ Test gradientLocationsResolveBothFades() started.
+◇ Test panelFrameFitsWidestWing() started.
+◇ Test phaseStaysWrapped() started.
+◇ Test lightnessIsCapped() started.
+◇ Test zoomedWindowUnderMenuBarIsNotFullscreen() started.
+◇ Test pulseStaysAtRestInSilence() started.
+◇ Test crestSpeedFollowsSlowLoudness() started.
+◇ Test pulseDoesNotDependOnFrameRate() started.
+◇ Test wingIsLimitedToAuxiliaryAreaAndPassesClicks() started.
+◇ Test silentWaveIsDimButKeepsTint() started.
+➜ Test kickOnsetsDoNotFeedThePLL() skipped.
+◇ Test hugeStepStaysFinite() started.
+➜ Test locksOnSteadyBeat() skipped.
+◇ Test degenerateAuxiliaryWidthsFallBackToPill() started.
+◇ Test menuBarOfOtherDisplayDoesNotCount() started.
+➜ Test gateClosesInBreakdown() skipped.
+➜ Test unlocksWhenBeatStops() skipped.
+➜ Test rateChangeRelocksWithNewIDs() skipped.
+◇ Test coveringWindowWithoutMenuBarIsFullscreen() started.
+➜ Test gateHoldsBetweenKicks() skipped.
+➜ Test nonFiniteKickLevelCountsAsFloor() skipped.
+◇ Test glowColorIsLightAndSoftlyTinted() started.
+◇ Test wingStartsBrightAtNotchAndDissolvesOutside() started.
+◇ Test tallerNotchGrowsExpandedPanel() started.
+➜ Test idsNeverRepeatAcrossResetAndTempoSwitch() skipped.
+◇ Test closePaletteColorsAreSeparated() started.
+◇ Test gainScalesAndStaysInRange() started.
+◇ Test pointerOverWingsAndMenuBarIsIgnored() started.
+➜ Test predictedBeatKeepsIdWhenNudged() skipped.
+◇ Test otherAppsAndLayersAreIgnored() started.
+◇ Test loudWaveBlendsTwoPaletteColors() started.
+◇ Test externalOnlyGivesPill() started.
+◇ Test motionDependsOnLoudness() started.
+◇ Test ordinaryWindowsDoNotCoverScreen() started.
+◇ Test windowServerRectToAppKit() started.
+◇ Test envelopePeaksWhereSpecified() started.
+◇ Test pillExpandedIsCompact() started.
+◇ Test negativeAuxiliaryWidthIsGuarded() started.
+◇ Test shiftedWrapsBoth() started.
+◇ Test advanceAcrossWrapIsContinuous() started.
+◇ Test panelIsSymmetricWithoutCenterSeam() started.
+◇ Test hoverZoneExcludesWings() started.
+◇ Test kicksDoNotPumpCrestSpeed() started.
+◇ Test gradientFlowsOutwardAndLoops() started.
+◇ Test steadyInputGivesNoFlux() started.
+◇ Test ordinaryWindowsWithMenuBarAreNotFullscreen() started.
+◇ Test pointerOverCollapsedNotchNeedsNoPolling() started.
+◇ Test lagAndWeightPerElement() started.
+◇ Test maxFilterIgnoresMovesToANeighbour() started.
+◇ Test fakeNotchOnPlainScreen() started.
+◇ Test collapsedNeverAcceptsClicks() started.
+◇ Test paintStopsSpanTheWave() started.
+◇ Test panelFrameFitsTripleGlow() started.
+◇ Test paintSurvivesBadInput() started.
+◇ Test pulseInhalesQuicklyAndExhalesSlowly() started.
+◇ Test motionIgnoresNonFiniteInput() started.
+◇ Test crestsTravelOutward() started.
+◇ Test zeroAmplitudeIsFlat() started.
+◇ Test samplesRepeatEveryFullTurn() started.
+◇ Test panelCrestsMoveAtWingSpeedInPoints() started.
+◇ Test panelRunsThroughCenterSymmetrically() started.
+◇ Test pulseIgnoresInvalidInput() started.
+◇ Test harmonicHasOwnAccumulator() started.
+◇ Test wingSwingIsBoostedWithSoftCap() started.
+✔ Test copyWindowCoversBasicCases() passed after 0.774 seconds.
+◇ Test case passing 1 argument phase → 0.37 to noDuplicateRenderFrames(phase:) started.
+◇ Test case passing 1 argument phase → 0.02 to noDuplicateRenderFrames(phase:) started.
+◇ Test case passing 1 argument micros → "0" to absurdDurationIsNil(micros:) started.
+◇ Test case passing 1 argument micros → "-5" to absurdDurationIsNil(micros:) started.
+◇ Test case passing 1 argument micros → "1e300" to absurdDurationIsNil(micros:) started.
+◇ Test case passing 1 argument micros → "86400000001" to absurdDurationIsNil(micros:) started.
+✔ Test feedMonitorNoticesWriterThatStoppedWithCopyWindow() passed after 1.652 seconds.
+✔ Test copyWindowRejectsOverwrittenOrFuture() passed after 1.655 seconds.
+◇ Test case passing 1 argument age → 0.25 to staleEventStaysDark(age:) started.
+◇ Test case passing 1 argument age → 1.0 to staleEventStaysDark(age:) started.
+✔ Test writerCountTracksAttachAndPeak() passed after 1.810 seconds.
+✔ Test denormalInputHasNoNaN() passed after 2.376 seconds.
+✔ Test sineAtBinCenterGivesUnitPeak() passed after 2.376 seconds.
+✔ Test leakageFarFromPeakIsSmall() passed after 2.850 seconds.
+✔ Test copyWindowEndingAtIndex() passed after 2.851 seconds.
+✔ Test amplitudeScalesLinearly() passed after 2.852 seconds.
+✔ Test resetClearsStamp() passed after 2.852 seconds.
+✔ Test feedMonitorStartsFresh() passed after 3.651 seconds.
+✔ Test roundsCapacityUpToPowerOfTwo() passed after 3.726 seconds.
+✔ Test stampRoundTrips() passed after 4.472 seconds.
+✔ Test silenceGivesZeros() passed after 8.033 seconds.
+✔ Test garbageGivesNil() passed after 9.988 seconds.
+✔ Test solidPNGShrinksTo64AndKeepsColor() passed after 10.007 seconds.
+✔ Test absurdDurationIsDropped() passed after 10.026 seconds.
+✔ Test analysisOfSolidArtworkGivesImageAndThreeColors() passed after 10.026 seconds.
+✔ Test lineSplitterKeepsOrderAcrossChunks() passed after 10.026 seconds.
+✔ Test commandIDsMatchAdapterReadme() passed after 10.026 seconds.
+✔ Test snapshotArtworkGivesItsOwnPalette() passed after 10.027 seconds.
+✔ Test unstampedWritesStillProduceFrames() passed after 10.026 seconds.
+✔ Test ringResetRestartsProcessing() passed after 10.027 seconds.
+✔ Test idleProcessesOneHopPerWake() passed after 10.027 seconds.
+✔ Test zeroRunGrowsOnZerosAndResetsOnClick() passed after 10.028 seconds.
+✔ Test scheduleRoundTripsAndResets() passed after 10.028 seconds.
+✔ Test gateNeedsHoldTimeToToggle() passed after 10.028 seconds.
+✔ Test interpolatesBetweenNeighbours() passed after 10.028 seconds.
+✔ Test noDuplicateRenderFrames(phase:) with 2 test cases passed after 10.028 seconds.
+✔ Test shortBlipDoesNotResetHoldTimer() passed after 10.029 seconds.
+✔ Test keepsLast128() passed after 10.028 seconds.
+✔ Test publishAfterResetStartsNewHistory() passed after 10.028 seconds.
+✔ Test sameTimeReplacesNewest() passed after 10.028 seconds.
+✔ Test interpolatedClampsFraction() passed after 10.028 seconds.
+✔ Test interpolatesEveryField() passed after 10.029 seconds.
+✔ Test resetHoldsOneFrameEverywhere() passed after 10.029 seconds.
+✔ Test silentFrameShape() passed after 10.029 seconds.
+✔ Test sequenceCountsPublishes() passed after 10.029 seconds.
+✔ Test olderTimeRestartsHistory() passed after 10.029 seconds.
+✔ Test clampsOutsideHistory() passed after 10.029 seconds.
+✔ Test numbersAndBooleansAcceptAlternateForms() passed after 10.029 seconds.
+✔ Test emptyPayloadGivesNil() passed after 10.029 seconds.
+✔ Test diffMergesAndNullDeletes() passed after 10.029 seconds.
+✔ Test artworkArrivingBeforeTitleBelongsToThatTrack() passed after 10.029 seconds.
+✔ Test elapsedWithoutTimestampOrElapsed() passed after 10.029 seconds.
+✔ Test absurdDurationIsNil(micros:) with 4 test cases passed after 10.029 seconds.
+✔ Test missingTitleGivesNil() passed after 10.029 seconds.
+✔ Test fullPayloadParses() passed after 10.029 seconds.
+✔ Test emptyDiffKeepsState() passed after 10.029 seconds.
+✔ Test invalidJSONThrowsAndKeepsState() passed after 10.029 seconds.
+✔ Test dayLongDurationIsKept() passed after 10.029 seconds.
+✔ Test elapsedAdvancesOnlyWhilePlaying() passed after 10.029 seconds.
+✔ Test circularDifferenceWrapsIntoHalfPeriod() passed after 10.029 seconds.
+✔ Test selectFindsTheRank() passed after 10.029 seconds.
+✔ Test artworkSurvivesTemporaryNilState() passed after 10.029 seconds.
+✔ Test nonDiffReplacesState() passed after 10.029 seconds.
+✔ Test artworkDroppedWhenArtistChanges() passed after 10.029 seconds.
+✔ Test invalidBase64GivesNilArtwork() passed after 10.029 seconds.
+✔ Test otherTypesAndBlankLinesAreIgnored() passed after 10.029 seconds.
+✔ Test staleArtworkIsDroppedOnTrackChange() passed after 10.029 seconds.
+✔ Test collapsesAfterPointerLeaves() passed after 10.028 seconds.
+✔ Test frameStoreReturnsLastPublished() passed after 10.028 seconds.
+✔ Test hidesAfterHideDelayOfSilence() passed after 10.028 seconds.
+✔ Test doesNotExpandWithoutAnything() passed after 10.028 seconds.
+✔ Test fullscreenHidesImmediately() passed after 10.031 seconds.
+✔ Test silenceTimerResetsWhenMusicResumes() passed after 10.031 seconds.
+✔ Test showsWhenAudioStarts() passed after 10.031 seconds.
+✔ Test hoverExpandsAfterDelay() passed after 10.031 seconds.
+✔ Test collapsesToHiddenWhenNoContent() passed after 10.031 seconds.
+✔ Test transitionKeepsBothWaveLayers() passed after 10.031 seconds.
+✔ Test userPauseHidesImmediately() passed after 10.031 seconds.
+✔ Test briefHoverDoesNotExpand() passed after 10.031 seconds.
+✔ Test parkedPointerCountsOnlyOnceIslandCanExpand() passed after 10.031 seconds.
+✔ Test pointerDeadlineTracksExpandAndCollapse() passed after 10.031 seconds.
+✔ Test expandsOnPauseWithLastTrack() passed after 10.031 seconds.
+✔ Test appWithoutPathKeyedByBundleID() passed after 10.031 seconds.
+✔ Test browserListIsFixed() passed after 10.031 seconds.
+✔ Test artworkSurvivesBriefDisappearance() passed after 10.032 seconds.
+✔ Test outputtingAppsComeFirstInStableOrder() passed after 10.031 seconds.
+✔ Test keepsOrderAndDropsRepeats() passed after 10.031 seconds.
+✔ Test selectedOutsideListsGoesToOther() passed after 10.031 seconds.
+✔ Test systemWideNeverListedAsApp() passed after 10.031 seconds.
+✔ Test emptyBaselineWakesOnFirstOutput() passed after 10.031 seconds.
+✔ Test comparesPathsInCanonicalForm() passed after 10.031 seconds.
+✔ Test wakesOnlyWhenAProcessStartsOutput() passed after 10.031 seconds.
+✔ Test selectedReplacesSameAppWithOtherName() passed after 10.031 seconds.
+✔ Test needsARealLevelRise() passed after 10.031 seconds.
+✔ Test firesOnceOnARiseAndHoldsTheCombineWindow() passed after 10.031 seconds.
+✔ Test customPaletteTurnsHue() passed after 10.031 seconds.
+✔ Test lineTable() passed after 10.031 seconds.
+✔ Test presetsAreDistinct() passed after 10.031 seconds.
+✔ Test clampsRanges() passed after 10.031 seconds.
+✔ Test paletteFollowsMode() passed after 10.031 seconds.
+✔ Test codableRoundTrip() passed after 10.031 seconds.
+✔ Test velocityStartsFromRest() passed after 10.031 seconds.
+✔ Test defaultsMatchSpec() passed after 10.031 seconds.
+✔ Test fallReachesHalfIn140ms() passed after 10.031 seconds.
+✔ Test riseReachesHalfIn37ms() passed after 10.031 seconds.
+✔ Test resetStopsTheSpring() passed after 10.031 seconds.
+✔ Test frameRateIndependent() passed after 10.031 seconds.
+✔ Test neverOvershoots() passed after 10.031 seconds.
+✔ Test ignoresInvalidInput() passed after 10.031 seconds.
+✔ Test bassAccentClamps() passed after 10.031 seconds.
+✔ Test ignoresNonFiniteInput() passed after 10.031 seconds.
+✔ Test peaksAtLeadTime() passed after 10.031 seconds.
+✔ Test iconNamesCoverEveryState() passed after 10.031 seconds.
+✔ Test staleEventStaysDark(age:) with 2 test cases passed after 10.031 seconds.
+✔ Test shiftKeepsIds() passed after 10.031 seconds.
+✔ Test soundProblemWinsOverPause() passed after 10.031 seconds.
+✔ Test unrelatedTempoSwitchesQuicklyLater() passed after 10.031 seconds.
+✔ Test neverExceedsOne() passed after 10.031 seconds.
+✔ Test outliersThatDisagreeDoNotSwitch() passed after 10.031 seconds.
+✔ Test resetForgetsEverything() passed after 10.031 seconds.
+✔ Test relatedAgreementNeedsTwelveOfTheLastSixteen() passed after 10.031 seconds.
+✔ Test lateEventStartsBright() passed after 10.031 seconds.
+✔ Test ignoresInvalidPeriods() passed after 10.031 seconds.
+✔ Test forgetsOldIds() passed after 10.031 seconds.
+✔ Test relatedAgreementCountsOverTheWindow() passed after 10.031 seconds.
+✔ Test decayFollowsTempo() passed after 10.031 seconds.
+✔ Test waitsForMinimumHistory() passed after 10.031 seconds.
+✔ Test silenceGivesNoTempo() passed after 10.031 seconds.
+✔ Test ignoresSingleOutlier() passed after 10.031 seconds.
+✔ Test relatedRatioNeedsLongAgreementOnceEstablished() passed after 10.031 seconds.
+✔ Test sameIdDoesNotFlashTwice() passed after 10.031 seconds.
+✔ Test relatedRatioSwitchesQuicklyAtFirst() passed after 10.031 seconds.
+✔ Test reconfigureStartsOverAtTheNewRate() passed after 10.031 seconds.
+✔ Test movesTwentyPercentTowardNearEstimates() passed after 10.031 seconds.
+✔ Test zeroDtKeepsValue() passed after 10.055 seconds.
+✔ Test releaseDecaysToOneOverE() passed after 10.055 seconds.
+✔ Test attackReachesTimeConstantFraction() passed after 10.055 seconds.
+✔ Test resetSetsValue() passed after 10.055 seconds.
+✔ Test suspendedCaptureResumesOnSoundOrPlayback() passed after 10.055 seconds.
+✔ Test soundResetsSilenceTimer() passed after 10.055 seconds.
+✔ Test unavailableAdapterIsNeverSuspended() passed after 10.055 seconds.
+✔ Test outputtingSourceProcessHoldsCapture() passed after 10.055 seconds.
+✔ Test selfWakeRightAfterSuspendIsNotSuspendedAgain() passed after 10.055 seconds.
+✔ Test sourceWithNowPlayingIsSuspendedAfterTenSeconds() passed after 10.055 seconds.
+✔ Test systemWideIsNeverSuspended() passed after 10.056 seconds.
+✔ Test sourceWithoutNowPlayingIsNeverSuspended() passed after 10.059 seconds.
+✔ Test suspendedCaptureResumesWhenNowPlayingCanNoLongerTell() passed after 10.059 seconds.
+✔ Test silenceIsCountedAnewAfterResume() passed after 10.059 seconds.
+✔ Test sixHundredTransformsAreFast() passed after 10.068 seconds.
+✔ Test failedStartRetriesFastThenSlowly() passed after 10.046 seconds.
+✔ Test hintsSeparateDeniedAccessFromStalledCapture() passed after 10.045 seconds.
+✔ Test onlyReturningSoundResetsWatchdog() passed after 10.046 seconds.
+✔ Test watchdogWaitsForSoundingSourceLongZerosAndNoPendingRebuild() passed after 10.046 seconds.
+✔ Test watchdogRebuildsFastFiveTimesThenSlowly() passed after 10.046 seconds.
+✔ Test resetClearsEverything() passed after 10.046 seconds.
+✔ Test standardTimingMatchesSpec() passed after 10.046 seconds.
+✔ Test filtersStampJitter() passed after 10.035 seconds.
+✔ Test noTimeBeforeTheFirstAnchor() passed after 10.035 seconds.
+✔ Test resyncsOnJump() passed after 10.035 seconds.
+✔ Test followsSlowDrift() passed after 10.035 seconds.
+✔ Test picksOnlyOrphansRunningThisBundlesScript() passed after 10.034 seconds.
+✔ Test matchesChromiumHelperByBundlePrefix() passed after 10.034 seconds.
+✔ Test neverPicksItself() passed after 10.033 seconds.
+✔ Test safariIncludesWebKitGPU() passed after 10.033 seconds.
+✔ Test audioSourceCodableRoundTrip() passed after 10.033 seconds.
+✔ Test resultIsSortedAndUnique() passed after 10.033 seconds.
+✔ Test doesNotMatchSimilarPrefix() passed after 10.033 seconds.
+✔ Test trailingSlashInBundlePathIsNormalized() passed after 10.033 seconds.
+✔ Test bundleIDBelongsByEqualityOrDottedPrefix() passed after 10.033 seconds.
+✔ Test nowPlayingBelongsBySameBundleRules() passed after 10.033 seconds.
+✔ Test systemWideMatchesNothing() passed after 10.033 seconds.
+✔ Test rebuildWhenHelperRespawns() passed after 10.033 seconds.
+✔ Test matchesElectronHelperInsideBundle() passed after 10.033 seconds.
+✔ Test emptyBundlePathAndBundleIDMatchNothing() passed after 10.033 seconds.
+✔ Test matchesFirefoxPluginContainer() passed after 10.033 seconds.
+✔ Test yandexCandidates() passed after 10.033 seconds.
+✔ Test matchesPathWithDifferentUnicodeNormalization() passed after 10.033 seconds.
+✔ Test edgeFrequencyLookup() passed after 10.033 seconds.
+✔ Test layerAssignment() passed after 10.033 seconds.
+✔ Test layersPartitionAllBands() passed after 10.033 seconds.
+✔ Test emptyBandIsInterpolatedNotCopied() passed after 10.033 seconds.
+✔ Test sine1kHzLandsInMidLayer() passed after 10.033 seconds.
+✔ Test emptyBandsMatchSampleRate() passed after 10.033 seconds.
+✔ Test lowestBandsHaveValuesEvenWithoutBins() passed after 10.033 seconds.
+✔ Test edgesAreLogSpaced() passed after 10.033 seconds.
+✔ Test silenceGivesFloor() passed after 10.033 seconds.
+✔ Test missingDemoValueGivesNil() passed after 10.032 seconds.
+✔ Test flagAfterDemoIsNotTakenAsValue() passed after 10.033 seconds.
+✔ Test outputLatencyBuiltInSpeakers() passed after 10.033 seconds.
+✔ Test latencyModeCodableRoundTrip() passed after 10.033 seconds.
+✔ Test outputLatencyManualIsMilliseconds() passed after 10.033 seconds.
+✔ Test presentationLeadIsTwoRefreshes() passed after 10.033 seconds.
+✔ Test outputLatencyBluetoothAddsFortyMs() passed after 10.033 seconds.
+✔ Test unreadableSubDevicesStillSkipStereoMicrophone() passed after 10.033 seconds.
+✔ Test outputLatencyZeroRateIsZero() passed after 10.033 seconds.
+✔ Test ignoresUnknownArguments() passed after 10.033 seconds.
+✔ Test outputLatencyClampedToHalfSecond() passed after 10.033 seconds.
+✔ Test invalidExitAfterGivesNil() passed after 10.033 seconds.
+✔ Test emptyArgumentsGiveDefaults() passed after 10.033 seconds.
+✔ Test parsesAllFlags() passed after 10.033 seconds.
+✔ Test speakersWithoutInputsGiveTheOnlyStream() passed after 10.033 seconds.
+✔ Test integerExitAfterIsAccepted() passed after 10.033 seconds.
+✔ Test allStreamsBelongToSubDeviceFail() passed after 10.033 seconds.
+✔ Test channelMismatchFallsBackToKnownSubDeviceCount() passed after 10.033 seconds.
+✔ Test tooFewChannelsFail() passed after 10.033 seconds.
+✔ Test trailingStreamsThatOvershootTapChannelsFail() passed after 10.033 seconds.
+✔ Test unknownTapFormatAndUnreadableSubDevicesFail() passed after 10.033 seconds.
+✔ Test headsetMicrophoneComesFirst() passed after 10.033 seconds.
+✔ Test unknownTapFormatUsesSubDeviceCount() passed after 10.033 seconds.
+✔ Test tapSplitIntoMonoStreamsIsAccumulatedFromTheEnd() passed after 10.033 seconds.
+✔ Test zeroChannelStreamBeforeTapIsNotIncluded() passed after 10.033 seconds.
+✔ Test noStreamsFail() passed after 10.033 seconds.
+✔ Test mixEndpoints() passed after 10.033 seconds.
+✔ Test splitMixIsDeterministic() passed after 10.033 seconds.
+✔ Test knownOKLabValue() passed after 10.033 seconds.
+✔ Test oklabRoundTrip() passed after 10.032 seconds.
+✔ Test opposingHuesStillGiveThreeColors() passed after 10.032 seconds.
+✔ Test grayscaleImageFallsBack() passed after 10.032 seconds.
+✔ Test alwaysThreeColors() passed after 10.032 seconds.
+✔ Test retargetStartsFromWhatIsShown() passed after 10.032 seconds.
+✔ Test darkColorsAreLiftedInGamut() passed after 10.032 seconds.
+✔ Test fadeSurvivesOddClocks() passed after 10.032 seconds.
+✔ Test fadeTakesPointEightSeconds() passed after 10.032 seconds.
+✔ Test fadeHoldsInitialPalette() passed after 10.033 seconds.
+✔ Test transparentImageFallsBack() passed after 10.033 seconds.
+✔ Test extractsDominantColors() passed after 10.032 seconds.
+✔ Test paddingAlwaysYieldsThreeFiniteColors() passed after 10.033 seconds.
+✔ Test medianOfRecentIntervals() passed after 10.032 seconds.
+✔ Test bucketsIntervals() passed after 10.032 seconds.
+✔ Test autoModeEqualizesQuietAndLoud() passed after 10.032 seconds.
+✔ Test kicksPumpTheBassLayer() passed after 10.032 seconds.
+✔ Test quietHissStaysSmall() passed after 10.034 seconds.
+✔ Test absoluteModeFollowsLoudness() passed after 10.034 seconds.
+✔ Test transitionWindow() passed after 10.034 seconds.
+✔ Test outputAlwaysInUnitRange() passed after 10.034 seconds.
+✔ Test silenceIsFlat() passed after 10.034 seconds.
+✔ Test refreshPeriodFromScreenRate() passed after 10.034 seconds.
+✔ Test systemVolumeScalesOutput() passed after 10.034 seconds.
+✔ Test invalidInputDoesNotPoisonPeak() passed after 10.034 seconds.
+✔ Test skipsLongGaps() passed after 10.034 seconds.
+✔ Test keepsLast3600() passed after 10.034 seconds.
+✔ Test medianSpansBuckets() passed after 10.034 seconds.
+✔ Test countsAnalysisFrames() passed after 10.034 seconds.
+✔ Test sigmaOfIntervalsAndTimeline() passed after 10.034 seconds.
+✔ Test ignoresInvalidTime() passed after 10.034 seconds.
+✔ Test samplesGoToTheCurrentBucket() passed after 10.034 seconds.
+✔ Test summaryText() passed after 10.034 seconds.
+✔ Test pillHoverZonesIncludeScreenTopEdge() passed after 10.034 seconds.
+✔ Test wingWidthIsClamped() passed after 10.034 seconds.
+✔ Test notchOnScreenWithOffsetOrigin() passed after 10.034 seconds.
+✔ Test pillExpandedHangsFromPillTop() passed after 10.034 seconds.
+✔ Test rawLevelIgnoresSensitivity() passed after 10.034 seconds.
+✔ Test windowBelowNotchCoversScreen() passed after 10.034 seconds.
+✔ Test envelopeDecaysWithin200ms() passed after 10.034 seconds.
+✔ Test contentClearsNotchByAtLeast12() passed after 10.034 seconds.
+✔ Test fullFrameWindowCoversScreen() passed after 10.034 seconds.
+✔ Test spectrumIntoMatchesArrayVersion() passed after 10.034 seconds.
+✔ Test panelFrameAtDefaultsMatches090() passed after 10.034 seconds.
+✔ Test kickLevelIsKickBinPower() passed after 10.034 seconds.
+✔ Test noNaNOnZerosAndDenormals() passed after 10.034 seconds.
+✔ Test windowServerRectOnSecondaryScreenAbove() passed after 10.034 seconds.
+✔ Test framesCarryAudibleTimeAndScheduleFollowsClicks() passed after 10.073 seconds.
+✔ Test bassSineDrivesBassLayer() passed after 10.034 seconds.
+✔ Test levelStepOverride() passed after 10.034 seconds.
+✔ Test configScalesWithRate() passed after 10.034 seconds.
+✔ Test resetClearsAutoLevelPeaks() passed after 10.034 seconds.
+✔ Test frameTimeIsWindowCentre() passed after 10.034 seconds.
+✔ Test reconfigureKeepsBandForSineAfterRateChange() passed after 10.034 seconds.
+✔ Test expandedAcceptsClicksOnlyInsideIsland() passed after 10.034 seconds.
+✔ Test hoverZoneIncludesScreenTopEdge() passed after 10.035 seconds.
+✔ Test hihatNoiseDrivesHighLayer() passed after 10.036 seconds.
+✔ Test fakeNotchUsesFirstScreen() passed after 10.035 seconds.
+✔ Test silenceDecaysToFlat() passed after 10.035 seconds.
+✔ Test shoulderStripsDoNotAcceptClicks() passed after 10.035 seconds.
+✔ Test collapsedIncludesWings() passed after 10.035 seconds.
+✔ Test asymmetricAuxiliaryAreas() passed after 10.035 seconds.
+✔ Test emptyScreensGiveNil() passed after 10.035 seconds.
+✔ Test menuBarSlidOutAboveScreenDoesNotCount() passed after 10.035 seconds.
+✔ Test panelIsClampedToScreen() passed after 10.035 seconds.
+✔ Test panelContainsEverything() passed after 10.034 seconds.
+✔ Test prefersBuiltInNotchedScreen() passed after 10.034 seconds.
+✔ Test notchFromAuxiliaryAreas() passed after 10.034 seconds.
+✔ Test trackForSourceKeepsAdapterWorking() passed after 10.034 seconds.
+✔ Test expandedHangsFromTop() passed after 10.034 seconds.
+✔ Test suppressedIslandNeitherPollsNorAcceptsClicks() passed after 10.034 seconds.
+✔ Test twoMinutesOfSoundWithoutTrackMarksAdapterSilent() passed after 10.034 seconds.
+✔ Test waveIsZeroAtEdges() passed after 10.034 seconds.
+✔ Test waveStaysInRange() passed after 10.034 seconds.
+✔ Test resetStartsOver() passed after 10.034 seconds.
+✔ Test longGapCountsAsOneStep() passed after 10.034 seconds.
+✔ Test onlyAudibleTimeCounts() passed after 10.034 seconds.
+✔ Test unavailableAdapterIsNotCounted() passed after 10.034 seconds.
+✔ Test collapsedPillHasNoWings() passed after 10.034 seconds.
+✔ Test appliesOnlyToAppsSeenInNowPlaying() passed after 10.034 seconds.
+✔ Test gradientLocationsResolveBothFades() passed after 10.034 seconds.
+✔ Test panelFrameFitsWidestWing() passed after 10.034 seconds.
+✔ Test lightnessIsCapped() passed after 10.033 seconds.
+✔ Test pulseStaysAtRestInSilence() passed after 10.033 seconds.
+✔ Test zoomedWindowUnderMenuBarIsNotFullscreen() passed after 10.034 seconds.
+✔ Test crestSpeedFollowsSlowLoudness() passed after 10.033 seconds.
+✔ Test pulseDoesNotDependOnFrameRate() passed after 10.033 seconds.
+✔ Test silentWaveIsDimButKeepsTint() passed after 10.033 seconds.
+✔ Test wingIsLimitedToAuxiliaryAreaAndPassesClicks() passed after 10.034 seconds.
+✔ Test hugeStepStaysFinite() passed after 10.033 seconds.
+✔ Test degenerateAuxiliaryWidthsFallBackToPill() passed after 10.033 seconds.
+✔ Test menuBarOfOtherDisplayDoesNotCount() passed after 10.033 seconds.
+✔ Test coveringWindowWithoutMenuBarIsFullscreen() passed after 10.033 seconds.
+✔ Test glowColorIsLightAndSoftlyTinted() passed after 10.033 seconds.
+✔ Test wingStartsBrightAtNotchAndDissolvesOutside() passed after 10.033 seconds.
+✔ Test tallerNotchGrowsExpandedPanel() passed after 10.033 seconds.
+✔ Test closePaletteColorsAreSeparated() passed after 10.033 seconds.
+✔ Test pointerOverWingsAndMenuBarIsIgnored() passed after 10.033 seconds.
+✔ Test gainScalesAndStaysInRange() passed after 10.033 seconds.
+✔ Test otherAppsAndLayersAreIgnored() passed after 10.033 seconds.
+✔ Test externalOnlyGivesPill() passed after 10.033 seconds.
+✔ Test loudWaveBlendsTwoPaletteColors() passed after 10.033 seconds.
+✔ Test motionDependsOnLoudness() passed after 10.033 seconds.
+✔ Test ordinaryWindowsDoNotCoverScreen() passed after 10.033 seconds.
+✔ Test envelopePeaksWhereSpecified() passed after 10.033 seconds.
+✔ Test windowServerRectToAppKit() passed after 10.033 seconds.
+✔ Test pillExpandedIsCompact() passed after 10.033 seconds.
+✔ Test negativeAuxiliaryWidthIsGuarded() passed after 10.033 seconds.
+✔ Test advanceAcrossWrapIsContinuous() passed after 10.033 seconds.
+✔ Test shiftedWrapsBoth() passed after 10.033 seconds.
+✔ Test panelIsSymmetricWithoutCenterSeam() passed after 10.033 seconds.
+✔ Test kicksDoNotPumpCrestSpeed() passed after 10.033 seconds.
+✔ Test hoverZoneExcludesWings() passed after 10.033 seconds.
+✔ Test gradientFlowsOutwardAndLoops() passed after 10.033 seconds.
+✔ Test steadyInputGivesNoFlux() passed after 10.033 seconds.
+✔ Test ordinaryWindowsWithMenuBarAreNotFullscreen() passed after 10.033 seconds.
+✔ Test pointerOverCollapsedNotchNeedsNoPolling() passed after 10.033 seconds.
+✔ Test lagAndWeightPerElement() passed after 10.033 seconds.
+✔ Test fakeNotchOnPlainScreen() passed after 10.033 seconds.
+✔ Test maxFilterIgnoresMovesToANeighbour() passed after 10.033 seconds.
+✔ Test collapsedNeverAcceptsClicks() passed after 10.033 seconds.
+✔ Test paintStopsSpanTheWave() passed after 10.033 seconds.
+✔ Test panelFrameFitsTripleGlow() passed after 10.033 seconds.
+✔ Test pulseInhalesQuicklyAndExhalesSlowly() passed after 10.033 seconds.
+✔ Test paintSurvivesBadInput() passed after 10.033 seconds.
+✔ Test motionIgnoresNonFiniteInput() passed after 10.033 seconds.
+✔ Test crestsTravelOutward() passed after 10.033 seconds.
+✔ Test zeroAmplitudeIsFlat() passed after 10.033 seconds.
+✔ Test samplesRepeatEveryFullTurn() passed after 10.033 seconds.
+✔ Test panelCrestsMoveAtWingSpeedInPoints() passed after 10.033 seconds.
+✔ Test panelRunsThroughCenterSymmetrically() passed after 10.006 seconds.
+✔ Test pulseIgnoresInvalidInput() passed after 10.006 seconds.
+✔ Test harmonicHasOwnAccumulator() passed after 10.006 seconds.
+✔ Test wingSwingIsBoostedWithSoftCap() passed after 9.982 seconds.
+✔ Test emptyBundleIsUnavailable() passed after 10.080 seconds.
+✔ Test onlyAvailableAdapterCanBeMarkedSilent() passed after 10.080 seconds.
+✔ Test iconSymbolsExistInSystem() passed after 10.076 seconds.
+✔ Test processListSnapshotHasValidPIDs() passed after 10.069 seconds.
+✔ Test outputDeviceMonitorReadsDeviceOrUnknown() passed after 10.069 seconds.
+✔ Test phaseStaysWrapped() passed after 10.053 seconds.
+✔ Suite ArtworkPixelsTests passed after 10.102 seconds.
+✔ Test lineDecoderParsesStreamOffMain() passed after 10.095 seconds.
+✔ Suite AnalysisEngineTimingTests passed after 10.102 seconds.
+✔ Suite FrameStoreTests passed after 10.102 seconds.
+✔ Suite ActivityGateTests passed after 10.102 seconds.
+✔ Suite NowPlayingTests passed after 10.102 seconds.
+✔ Suite BeatTrackerPartsTests passed after 10.102 seconds.
+✔ Suite IslandStateMachineTests passed after 10.102 seconds.
+✔ Suite SourceChoicesTests passed after 10.102 seconds.
+✔ Suite OutputStartDetectorTests passed after 10.102 seconds.
+✔ Suite OnlinePeakPickerTests passed after 10.102 seconds.
+✔ Suite WaveAppearanceTests passed after 10.102 seconds.
+✔ Suite LevelSpringTests passed after 10.102 seconds.
+✔ Suite BeatGlowTests passed after 10.103 seconds.
+✔ Suite TempoStickinessTests passed after 10.103 seconds.
+✔ Suite AttackReleaseTests passed after 10.103 seconds.
+✔ Suite IdleCapturePolicyTests passed after 10.103 seconds.
+✔ Test idleEngineTicksAtFifteenHertz() passed after 10.090 seconds.
+✔ Suite CaptureRecoveryTests passed after 10.103 seconds.
+✔ Suite HostClockTests passed after 10.103 seconds.
+✔ Suite OrphanedAdapterProcessesTests passed after 10.103 seconds.
+✔ Suite ProcessMatcherTests passed after 10.103 seconds.
+✔ Suite BandMapperTests passed after 10.103 seconds.
+✔ Suite LaunchArgumentsTests passed after 10.103 seconds.
+✔ Suite LatencyTests passed after 10.103 seconds.
+✔ Suite TapStreamLayoutTests passed after 10.103 seconds.
+✔ Suite PaletteTests passed after 10.103 seconds.
+✔ Suite RenderPacingTests passed after 10.103 seconds.
+✔ Suite LevelProcessorTests passed after 10.103 seconds.
+✔ Suite NotchGeometryTests passed after 10.105 seconds.
+✔ Test silenceGrowsZeroRun() passed after 10.080 seconds.
+✔ Test demoAudioDrivesAnalysis() passed after 10.094 seconds.
+✔ Suite AdapterSilenceMonitorTests passed after 10.105 seconds.
+✔ Suite SuperFluxTests passed after 10.105 seconds.
+✔ Suite MenuBarIconTests passed after 10.107 seconds.
+✔ Test copyWindowNeverTearsMonotonicRamp() passed after 10.103 seconds.
+✔ Test stampIsNeverTorn() passed after 10.102 seconds.
+✔ Suite WaveShapeTests passed after 10.106 seconds.
+✔ Test resetOnsetsKeepsLevels() passed after 10.670 seconds.
+✔ Suite StreamAnalyzerTests passed after 10.715 seconds.
+✔ Test orphanedStreamFromPreviousRunIsTerminated() passed after 11.713 seconds.
+✔ Test quickStreamDeathsMakeAdapterUnavailable() passed after 11.715 seconds.
+✔ Test longLivedStreamDeathsDoNotAccumulate() passed after 11.718 seconds.
+✔ Test testCacheIsKeyedByOSBuild() passed after 11.725 seconds.
+✔ Test failingTapIsRetriedSlowlyAfterFastRetries() passed after 11.723 seconds.
+◇ Test zeroWatchdogKeepsRebuildingSlowlyPastFiveAttempts() started.
+✔ Test persistedPauseHoldsFromStart() passed after 11.729 seconds.
+✔ Test pauseStopsAndResumesDemo() passed after 11.729 seconds.
+✔ Test coverPaletteOnlyWhileNowPlayingWorks() passed after 11.728 seconds.
+✔ Test panelTrackNeedsNowPlayingOfSelectedSource() passed after 11.729 seconds.
+✔ Test artworkSourceNeedsNowPlaying() passed after 11.729 seconds.
+✔ Test glowFollowsScheduleAtPresentationTime() passed after 11.727 seconds.
+✔ Test diagnosticsHaveRhythmSection() passed after 11.727 seconds.
+✔ Test previewKeepsFrameValues() passed after 11.727 seconds.
+✔ Test colorModeFadesLikeNewArtwork() passed after 11.727 seconds.
+✔ Test diagnosticsHaveRenderSection() passed after 11.727 seconds.
+✔ Test interpolatesPublishedFrames() passed after 11.727 seconds.
+✔ Test twoLinesAreBassAndHigh() passed after 11.711 seconds.
+✔ Test resolvesDefaultWhileExplicitSourceIsSet() passed after 11.725 seconds.
+✔ Test oneLineShowsOverallLevel() passed after 11.710 seconds.
+✔ Test appearanceCarriesThicknessFillAndGain() passed after 11.700 seconds.
+✔ Test upgradeFrom090KeepsValuesAndWritesNothing() passed after 11.700 seconds.
+✔ Test echoesScaleLevelAndOpacity() passed after 11.700 seconds.
+✔ Test appearanceDefaultsAndClamps() passed after 11.699 seconds.
+✔ Test nowPlayingSourceHistoryPersists() passed after 11.699 seconds.
+✔ Test nonFiniteValuesFallBackToDefaults() passed after 11.699 seconds.
+✔ Test syncOffsetDefaultsAndClamps() passed after 11.699 seconds.
+✔ Test everyFieldSurvivesReload() passed after 11.699 seconds.
+✔ Test storedGarbageIsClampedOrIgnored() passed after 11.699 seconds.
+✔ Test observationFiresOnlyForRealChanges() passed after 11.699 seconds.
+✔ Test appearanceKeysPersist() passed after 11.699 seconds.
+✔ Test keysUsePrefixAndEnumsAreJSON() passed after 11.699 seconds.
+✔ Test settersClampRanges() passed after 11.699 seconds.
+✔ Test panelPassesClicksAndStaysAboveMenuBar() passed after 11.698 seconds.
+✔ Test garbageColorModeFallsBackToArtwork() passed after 11.699 seconds.
+✔ Suite AppModelPauseTests passed after 11.739 seconds.
+✔ Suite AppModelArtworkTests passed after 11.739 seconds.
+✔ Suite AppModelRenderTests passed after 11.739 seconds.
+✔ Suite WaveSetTests passed after 11.739 seconds.
+✔ Suite AppModelDefaultSourceTests passed after 11.739 seconds.
+✔ Suite NotchPanelTests passed after 11.739 seconds.
+✔ Test defaultsOnEmptyStore() passed after 11.699 seconds.
+✔ Suite AppSettingsTests passed after 11.739 seconds.
+✔ Test silentAdapterStaysInFallbackUntilSourceTrackOrRestart() passed after 11.877 seconds.
+✔ Test hungTestIsKilledAndStreamStillStarts() passed after 12.076 seconds.
+✔ Test restartHoldExpires() passed after 12.220 seconds.
+✔ Test restartKeepsTrackUntilNewPayload() passed after 12.316 seconds.
+✔ Suite MediaRemoteAdapterTests passed after 12.323 seconds.
+✔ Test pointerExpandsAndCollapsesIslandAndReportsStateChanges() passed after 12.318 seconds.
+◇ Test sleepingScreensSlowAnalysisWhileMusicPlays() started.
+✔ Test demoStartStopCyclesLeakNothing() passed after 12.957 seconds.
+◇ Test sleepRestoresDemoWithItsFile() started.
+✔ Test sleepRestoresDemoWithItsFile() passed after 0.035 seconds.
+◇ Test sleepKeepsPausedDemoPaused() started.
+✔ Test sleepKeepsPausedDemoPaused() passed after 0.023 seconds.
+◇ Test sleepLeavesStoppedPipelineStopped() started.
+✔ Test sleepLeavesStoppedPipelineStopped() passed after 0.007 seconds.
+◇ Test modelSleepStopsDemoAndWakeRestoresIt() started.
+✔ Test sleepingScreensSlowAnalysisWhileMusicPlays() passed after 1.104 seconds.
+✔ Suite AppModelIslandTests passed after 13.431 seconds.
+✔ Test stalledFeedDecaysToSilence() passed after 13.868 seconds.
+✔ Suite CoreAudioSmokeTests passed after 13.894 seconds.
+✔ Test modelSleepStopsDemoAndWakeRestoresIt() passed after 1.046 seconds.
+◇ Test screenLockSuppressesIsland() started.
+✔ Test screenLockSuppressesIsland() passed after 1.418 seconds.
+✔ Suite PipelineLifecycleTests passed after 15.496 seconds.
+✔ Test zeroWatchdogKeepsRebuildingSlowlyPastFiveAttempts() passed after 6.810 seconds.
+✔ Suite CaptureRecoveryPipelineTests passed after 18.543 seconds.
+SnapshotRendererTests: renderAll 22.186515375 seconds, whole test 22.759463209000003 seconds, longest main thread hold 1.413256 seconds
+✔ Test rendersAllSnapshotsWithVisibleWaves() passed after 25.579 seconds.
+✔ Suite SnapshotRendererTests passed after 25.620 seconds.
+✔ Test run with 448 tests in 50 suites passed after 25.623 seconds.
