@@ -78,6 +78,10 @@ final class AudioPipeline {
                 resume(reason: "смена источника")
                 return
             }
+            // Ждущий повтор или пауза сторожа относились к прежнему источнику: новый собирается
+            // сразу, а не после них (до 4 с).
+            rebuildTask?.cancel()
+            rebuildTask = nil
             processesChanged()
             rebuild(reason: "смена источника")
         }
