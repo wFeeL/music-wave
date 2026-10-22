@@ -4,7 +4,7 @@
 # скачан в ci-out/. Окружение: GH_TOKEN, CI_OUTCOME и MODE (в release.yml еще RELEASE_OUTCOME).
 # Каждая попытка заново клонирует ветку (или создает orphan при первом запуске), до пяти попыток.
 # Код 0 при успехе, 1 после пяти неудачных попыток. Рассчитан на bash 3.2 и BSD-утилиты, работает
-# и на Linux-раннере (tester.yml).
+# и на Linux-раннере (в том числе ubuntu-задачей publish).
 set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
@@ -67,7 +67,7 @@ publish_once() { # рабочий каталог
 
     mkdir -p "$repo/$RUN_DIR" || return 1
     if [[ -d "$OUT" ]]; then
-        # ditto есть только в macOS; tester.yml публикует с ubuntu.
+        # ditto есть только в macOS; задача publish работает на ubuntu.
         if command -v ditto > /dev/null 2>&1; then
             ditto "$OUT" "$repo/$RUN_DIR" || return 1
         else

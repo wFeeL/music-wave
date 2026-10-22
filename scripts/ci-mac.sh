@@ -442,8 +442,14 @@ adapter_build() {
 
 # Подпись одной копии приложения. Ключ попадает в окружение только sign.sh; имя функции, а не
 # значения, попадает в строку "== step" лога, поэтому в sign.txt секретов нет.
+#
+# sign.sh идет с фиксированным системным PATH и системным bash: security, codesign, base64,
+# openssl, awk, uuidgen, tr и sed лежат в /usr/bin и /bin, и программы из каталогов, которые
+# ранние шаги могли дополнить (/opt/homebrew/bin, /usr/local/bin), их подменить не могут.
 sign_app() { # app
-    SIGNING_P12_BASE64=$SIGN_P12_B64 SIGNING_P12_PASSWORD=$SIGN_P12_PW bash scripts/sign.sh "$1"
+    env PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        SIGNING_P12_BASE64="$SIGN_P12_B64" SIGNING_P12_PASSWORD="$SIGN_P12_PW" \
+        /bin/bash scripts/sign.sh "$1"
 }
 
 # Бандл без подписи. Помечает bundle-ok, если он собран.
