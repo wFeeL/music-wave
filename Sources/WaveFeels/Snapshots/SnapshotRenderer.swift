@@ -29,7 +29,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// цвет, заливку с толщиной и размахом, одну и шесть волн, свечение радиусом 3×.
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
-    /// Размер экрана снимка, pt: панель целиком, с запасом под свечение радиусом 3×.
+    /// Размер экрана снимка, pt: панель с крыльями 200 pt и свечением радиусом 3× целиком.
     static let screenSize = CGSize(width: 760, height: 300)
     static let notchSize = CGSize(width: 185, height: 32)
     /// Строка меню внешнего монитора без выреза.
@@ -345,7 +345,11 @@ enum SnapshotRenderer {
             time: moment.time,
             nowPlayingAvailable: scene.nowPlaying
         )
-        let layout = scene.pill ? pillLayout : notchLayout
+        // Рамка панели по крылу и радиусу свечения сцены, как у окна в работе.
+        var sized = scene.pill ? pillLayout : notchLayout
+        sized.wingWidth = CGFloat(scene.appearance.wingWidth)
+        sized.glowRadius = scene.appearance.glowRadius
+        let layout = sized
         let time = moment.time
         let content = SnapshotBackdrop(
             layout: layout,

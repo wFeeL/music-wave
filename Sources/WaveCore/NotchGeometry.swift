@@ -40,16 +40,25 @@ public struct NotchLayout: Sendable, Equatable {
     /// с узкой стороны минус `NotchGeometry.wingAuxMargin`, не больше `maxWingWidth`.
     /// У условного выреза и капсулы: `maxWingWidth`.
     public var wingLimit: CGFloat
+    /// Ширина крыла из настроек сейчас (ограничивается в `collapsedIsland`). По ней панель
+    /// ровно такой ширины, какая нужна, а не под самое широкое крыло.
+    public var wingWidth: CGFloat
+    /// «Радиус свечения» из настроек сейчас: по нему запас панели под свечение.
+    public var glowRadius: Double
 
     public init(
         screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect,
-        wingLimit: CGFloat = NotchGeometry.maxWingWidth
+        wingLimit: CGFloat = NotchGeometry.maxWingWidth,
+        wingWidth: CGFloat = CGFloat(WaveAppearance.standard.wingWidth),
+        glowRadius: Double = WaveAppearance.standard.glowRadius
     ) {
         self.screenID = screenID
         self.screenFrame = screenFrame
         self.hasNotch = hasNotch
         self.notch = notch
         self.wingLimit = wingLimit
+        self.wingWidth = wingWidth
+        self.glowRadius = glowRadius
     }
 
     /// Свернутый остров: вырез плюс крылья по бокам, крыло не шире `wingLimit` и
@@ -96,15 +105,18 @@ public struct NotchLayout: Sendable, Equatable {
         hasNotch ? expandedIsland.insetBy(dx: NotchGeometry.expandedShoulderRadius, dy: 0) : expandedIsland
     }
 
-    /// Рамка панели: раскрытый и самый широкий допустимый свернутый остров плюс запас снизу
-    /// под свечение и по бокам под тень и «вздох», по горизонтали не выходит за экран.
+    /// Рамка панели: раскрытый и свернутый остров с текущим крылом плюс запас снизу под
+    /// свечение текущего радиуса (`NotchGeometry.glowMargin(radius:)`) и по бокам под тень и
+    /// «вздох», по горизонтали не выходит за экран. Окно не больше, чем нужно сейчас: прозрачная
+    /// площадь тоже стоит времени композитору. При настройках по умолчанию рамка та же, что в 0.9.0.
     public var panelFrame: CGRect {
-        let union = expandedIsland.union(collapsedIsland(wingWidth: NotchGeometry.maxWingWidth))
+        let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth))
+        let glow = NotchGeometry.glowMargin(radius: glowRadius)
         let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
         let maxX = min(union.maxX + NotchGeometry.panelSideMargin, screenFrame.maxX)
         return CGRect(
-            x: minX, y: union.minY - NotchGeometry.glowMargin,
-            width: max(maxX - minX, 0), height: union.height + NotchGeometry.glowMargin
+            x: minX, y: union.minY - glow,
+            width: max(maxX - minX, 0), height: union.height + glow
         )
     }
 
@@ -175,9 +187,17 @@ public enum NotchGeometry {
     public static let wingAuxMargin: CGFloat = 8
     /// Насколько зона наведения выступает выше верха экрана.
     static let hoverTopOvershoot: CGFloat = 2
-    /// Запас под панелью для свечения: три радиуса при «Радиусе свечения» 3× (размытие 42 pt
-    /// плюс сам эллипс).
-    public static let glowMargin: CGFloat = 108
+    /// Запас под панелью для свечения при «Радиусе свечения» 1× (как в 0.9.0): свечение
+    /// размыто на 14 pt и уходит ниже острова примерно на три радиуса размытия.
+    public static let glowMargin: CGFloat = 40
+
+    /// Запас под свечение радиуса `radius`: `glowMargin × radius`, радиус в 1...3 (меньший
+    /// радиус окно не сужает, не конечный считается 1×). При 3× размытие 42 pt, свечение
+    /// уходит ниже острова на 3 × 42 - 6 = 120 pt.
+    public static func glowMargin(radius: Double) -> CGFloat {
+        let radius = radius.isFinite ? min(max(radius, 1), WaveAppearance.Limits.glowRadius.upperBound) : 1
+        return glowMargin * CGFloat(radius)
+    }
     /// Запас панели по бокам: тень раскрытого острова и «вздох» не обрезаются краем окна.
     public static let panelSideMargin: CGFloat = 24
     /// Отступ капсулы от строки меню на экране без выреза.

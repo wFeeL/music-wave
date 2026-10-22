@@ -55,7 +55,7 @@ struct IslandView: View {
     var body: some View {
         let state = model.islandState
         let panel = layout.panelFrame
-        let geometry = IslandGeometry(layout: layout, wingWidth: CGFloat(model.settings.wingWidth))
+        let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         ZStack(alignment: .topLeading) {
             Group {
                 if let clock {
@@ -77,8 +77,11 @@ struct IslandView: View {
         }
         .frame(width: panel.width, height: panel.height, alignment: .topLeading)
         .ignoresSafeArea()
+        // Окно уже встало на новую рамку: сдвиг координат внутри нее не анимируется, иначе
+        // остров съехал бы и вернулся. Ближний к виду модификатор главнее внешних.
+        .animation(nil, value: panel)
         .animation(state == .expanded ? Self.expandAnimation : Self.collapseAnimation, value: state)
-        .animation(Self.collapseAnimation, value: model.settings.wingWidth)
+        .animation(Self.collapseAnimation, value: layout.wingWidth)
     }
 
     // MARK: - Содержимое панели

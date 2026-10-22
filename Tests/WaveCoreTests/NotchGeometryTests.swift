@@ -199,7 +199,8 @@ struct NotchGeometryTests {
     }
 
     @Test func panelContainsEverything() throws {
-        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        var layout = try #require(NotchGeometry.layout(for: [notched()]))
+        layout.wingWidth = NotchGeometry.maxWingWidth
         let panel = layout.panelFrame
         #expect(panel.contains(layout.expandedIsland))
         #expect(panel.contains(layout.collapsedIsland(wingWidth: NotchGeometry.maxWingWidth)))
@@ -250,15 +251,72 @@ struct NotchGeometryTests {
         #expect(layout.collapsedIsland(wingWidth: 120) == layout.notch)
     }
 
-    @Test func panelFrameFitsWidestWingAndGlow() throws {
-        #expect(NotchGeometry.glowMargin == 108)
+    /// При настройках по умолчанию (крыло 64 pt, радиус 1×) панель того же размера, что в
+    /// 0.9.0: 534 × 210 pt (раскрытый остров 486 × 170, по 24 pt по бокам, 40 pt под свечение).
+    @Test func panelFrameAtDefaultsMatches090() throws {
+        #expect(NotchGeometry.glowMargin == 40)
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        #expect(layout.wingWidth == 64)
+        #expect(layout.glowRadius == 1)
+        let panel = layout.panelFrame
+        #expect(panel.size == CGSize(width: 534, height: 210))
+        #expect(panel.midX == layout.notch.midX)
+        #expect(panel.maxY == 956)
+        #expect(panel.contains(layout.collapsedIsland(wingWidth: 64)))
+        // Узкий радиус окно не сужает, мусор считается 1×.
+        for radius in [0.5, -1, .nan, .infinity] {
+            var other = layout
+            other.glowRadius = radius
+            #expect(other.panelFrame == panel, "радиус \(radius)")
+        }
+        // Крыло до 150 pt уже раскрытого острова: ширина та же.
+        var wider = layout
+        wider.wingWidth = 150
+        #expect(wider.panelFrame == panel)
+        // Панель капсулы при настройках по умолчанию тоже как в 0.9.0.
+        let pill = try #require(NotchGeometry.layout(for: [external()]))
+        #expect(pill.panelFrame.size == CGSize(width: 468 + 48, height: 150 + 40))
+    }
+
+    /// Свечение радиусом 3× помещается: размытие 42 pt (14 × 3) уходит ниже острова примерно на
+    /// три радиуса минус подъем 6 pt.
+    @Test func panelFrameFitsTripleGlow() throws {
+        var layout = try #require(NotchGeometry.layout(for: [notched()]))
+        layout.glowRadius = 3
+        let panel = layout.panelFrame
+        let blur: CGFloat = 14 * 3
+        #expect(layout.expandedIsland.minY - panel.minY >= 3 * blur - 6)
+        #expect(panel.minY == layout.expandedIsland.minY - 120)
+        #expect(panel.maxY == 956)
+        #expect(panel.width == 534)
+        layout.glowRadius = 9
+        #expect(layout.panelFrame == panel)
+    }
+
+    /// Крылья 200 pt помещаются целиком с запасом по бокам, высота не меняется.
+    @Test func panelFrameFitsWidestWing() throws {
+        var layout = try #require(NotchGeometry.layout(for: [notched()]))
+        layout.wingWidth = 200
         let widest = layout.collapsedIsland(wingWidth: 200)
-        let union = layout.expandedIsland.union(widest)
         let panel = layout.panelFrame
         #expect(panel.contains(widest))
-        #expect(panel.minY == union.minY - 108)
-        #expect(panel.maxY == union.maxY)
+        #expect(panel.minX == widest.minX - 24)
+        #expect(panel.maxX == widest.maxX + 24)
+        #expect(abs(panel.width - (185 + 400 + 48)) < 1e-9)
+        #expect(panel.height == 210)
+        // Крыло шире свободной области ограничено ею, и панель вместе с ним.
+        let narrow = try #require(NotchGeometry.layout(for: [notched(left: 150, right: 300)]))
+        var limited = narrow
+        limited.wingWidth = 200
+        #expect(limited.panelFrame.contains(narrow.collapsedIsland(wingWidth: 142)))
+        var atLimit = narrow
+        atLimit.wingWidth = 142
+        #expect(limited.panelFrame == atLimit.panelFrame)
+        // Клики и наведение от крыльев и панели не зависят.
+        let rightWing = CGPoint(x: layout.notch.maxX + 100, y: layout.notch.midY)
+        #expect(!layout.pointer(at: rightWing, state: .collapsed).inHoverZone)
+        #expect(!layout.pointer(at: rightWing, state: .collapsed).acceptsClicks)
+        #expect(layout.expandedClickArea == NotchGeometry.layout(for: [notched()])?.expandedClickArea)
     }
 
     @Test func collapsedPillHasNoWings() throws {
