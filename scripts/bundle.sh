@@ -14,6 +14,8 @@
 # если Icon Composer на месте, icon-macos26.png (как .icon рисует система) и варианты
 # icon-macos26-dark.png, -clear.png, -tinted.png.
 # С $RELEASE без AppIcon.icns сборка падает.
+# В Info.plist пишутся WFCommit (короткий хэш: $WF_COMMIT, иначе git, иначе unknown) и
+# WFSwiftVersion (из swift --version), их показывает «Диагностика», строка «Сборка».
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -58,6 +60,28 @@ cp "$BINARY" "$CONTENTS/MacOS/WaveFeels"
 cp Resources/Info.plist "$CONTENTS/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$CONTENTS/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD" "$CONTENTS/Info.plist"
+
+# Коммит сборки для «Диагностики»: $WF_COMMIT, иначе короткий хэш из git (только если корень
+# репозитория свой, а не чужой, внутри которого распакован архив), иначе хэш, который git archive
+# подставил в scripts/archive-commit.txt (архив GitHub, см. .gitattributes), иначе unknown.
+COMMIT=${WF_COMMIT:-}
+if [[ -z "$COMMIT" && -e .git ]] && command -v git > /dev/null 2>&1; then
+    COMMIT=$(git rev-parse --short HEAD 2> /dev/null || true)
+fi
+if [[ -z "$COMMIT" && -f scripts/archive-commit.txt ]]; then
+    ARCHIVED=$(head -n 1 scripts/archive-commit.txt | tr -d '[:space:]')
+    if [[ "$ARCHIVED" =~ ^[0-9a-f]{7,40}$ ]]; then
+        COMMIT=$ARCHIVED
+    fi
+fi
+COMMIT=${COMMIT:-unknown}
+# Версия компилятора: число после "Swift version" в swift --version (первая строка может быть
+# версией swift-driver).
+SWIFT_VERSION=$({ swift --version 2>&1 || true; } |
+    sed -nE 's/.*Swift version ([0-9]+(\.[0-9]+)*).*/\1/p' | head -n 1) || SWIFT_VERSION=""
+SWIFT_VERSION=${SWIFT_VERSION:-unknown}
+plutil -replace WFCommit -string "$COMMIT" "$CONTENTS/Info.plist"
+plutil -replace WFSwiftVersion -string "$SWIFT_VERSION" "$CONTENTS/Info.plist"
 plutil -lint "$CONTENTS/Info.plist"
 
 # Рисует иконку в каталог $1. В `if !` set -e не действует, поэтому шаги связаны через &&.
@@ -168,5 +192,5 @@ if [[ -f "$ADAPTER_DIR/MediaRemoteAdapterTestClient" ]]; then
     cp "$ADAPTER_DIR/MediaRemoteAdapterTestClient" "$CONTENTS/Helpers/MediaRemoteAdapterTestClient"
 fi
 
-echo "bundled $APP (version $VERSION, build $BUILD)"
+echo "bundled $APP (version $VERSION, build $BUILD, commit $COMMIT, Swift $SWIFT_VERSION)"
 find "$APP" -print | sort

@@ -1,0 +1,3 @@
+# В архиве GitHub (Download ZIP) git archive подставляет сюда короткий хэш коммита: так сборка
+# без .git (build-local.sh из архива) знает свой коммит.
+scripts/archive-commit.txt export-subst
