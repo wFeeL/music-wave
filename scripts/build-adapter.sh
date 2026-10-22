@@ -3,7 +3,9 @@
 # и кладет части для бандла в dist/adapter/:
 #   mediaremote-adapter.pl, MediaRemoteAdapter.framework, MediaRemoteAdapterTestClient, LICENSE.
 # bundle.sh раскладывает их по Contents/Resources/Adapter, Contents/Frameworks, Contents/Helpers.
-# Исходники клонируются в .build/adapter-src. Сборка (cmake) работает только на macOS.
+# Исходники клонируются в .build/adapter-src. В CI (задана CI) каталог всегда начинается заново;
+# везде перед checkout проверяется, что origin каталога равен REPO, иначе ошибка.
+# Сборка (cmake) работает только на macOS.
 # Скрипт рассчитан на bash 3.2 и BSD-утилиты.
 set -euo pipefail
 
@@ -22,10 +24,20 @@ fi
 # Старые части не должны попасть в бандл, если сборка ниже упадет.
 rm -rf "$OUT"
 
+# В CI исходники всегда свежие: каталог от прошлой сборки или кэша не используется.
+if [[ -n "${CI:-}" ]]; then
+    rm -rf "$SRC"
+fi
 if [[ ! -d "$SRC/.git" ]]; then
     rm -rf "$SRC"
     mkdir -p "$(dirname "$SRC")"
     git clone --quiet "$REPO" "$SRC"
+fi
+# Старая копия с другим origin не должна подменить источник кода.
+ACTUAL_ORIGIN=$(git -C "$SRC" remote get-url origin 2> /dev/null || true)
+if [[ "$ACTUAL_ORIGIN" != "$REPO" ]]; then
+    echo "error: $SRC has origin '$ACTUAL_ORIGIN', expected '$REPO'" >&2
+    exit 1
 fi
 if ! git -C "$SRC" cat-file -e "$COMMIT^{commit}" 2>/dev/null; then
     git -C "$SRC" fetch --quiet origin

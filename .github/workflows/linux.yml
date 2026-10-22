@@ -1,0 +1,27 @@
+name: linux
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'Sources/WaveCore/**'
+      - 'Tests/WaveCoreTests/**'
+      - 'Sources/wave-eval/**'
+      - 'Package.swift'
+      - '.github/workflows/linux.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: 'linux-${{ github.ref }}'
+  cancel-in-progress: true
+defaults: {run: {shell: bash}}
+jobs:
+  test:
+    # На Linux собираются WaveCore, wave-eval и WaveCoreTests; приложение только на macOS.
+    runs-on: ubuntu-latest
+    container: swift:6.3-noble
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: {persist-credentials: false}
+      - run: swift --version
+      - run: swift test --filter WaveCoreTests

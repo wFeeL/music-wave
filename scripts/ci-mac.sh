@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
-# Все шаги mac-сборки в одном месте. Использование: scripts/ci-mac.sh <fast|snap|full>
+# Все шаги mac-сборки в одном месте. Использование:
+#   scripts/ci-mac.sh <fast|snap|full>                 все фазы подряд (локальный запуск)
+#   scripts/ci-mac.sh build <fast|snap|full>           без секретов: адаптер, сборка, тесты, бандл
+#   scripts/ci-mac.sh sign <fast|snap|full>            подпись бандла (единственная фаза с ключом)
+#   scripts/ci-mac.sh check <fast|snap|full>           снимки, пробный запуск, замер CPU, zip
+#   scripts/ci-mac.sh sign-and-check <fast|snap|full>  фазы sign и check одним вызовом
+# Режимы:
 #   fast: swift build --build-tests, swift test --skip-build
 #   snap: swift build -c release, bundle.sh, sign.sh, снимки и пробный запуск из бандла
 #   full: адаптер, release-сборка, тесты, бандл, подпись, снимки, пробный запуск, замер CPU, zip
+# Фазы нужны, чтобы секреты подписи попадали только в шаг подписи: в workflow каждая фаза идет
+# отдельным шагом, а шаги build и check ключа не получают. Скрипт сам убирает SIGNING_P12_BASE64
+# и SIGNING_P12_PASSWORD из своего окружения при старте и отдает их только sign.sh (sign_app).
+# Состояние между фазами лежит в ci-out/ (.state, .steps.md, .duration): фаза build очищает
+# каталог, остальные дописывают. Если build не дошла до конца, sign и check это отмечают и падают.
 # С RELEASE=1 (release.yml) режим full дополнительно собирает вторую копию для проверки обновления:
-# тот же бинарник, CFBundleVersion "<номер запуска>1", dist/update-test/WaveFeels.app, подпись и
-# архив dist/WaveFeels-<тег>-update-test.zip. Designated requirement обеих копий пишется в sign.txt.
+# тот же бинарник, CFBundleVersion "<номер запуска>1", dist/update-test/WaveFeels.app (фаза build),
+# ее подпись (фаза sign) и архив dist/WaveFeels-<тег>-update-test.zip (фаза check).
+# Designated requirement обеих копий пишется в sign.txt.
 # Результаты в ci-out/: summary.md, errors.txt, build.log, test.log, sign.txt, snapshots/, cpu.txt,
 # cpu-sample*.txt; с SAMPLE_TESTS=1 еще test-sample.txt и test-sample-2.txt (стеки процесса тестов).
 # С CPU_MAX=1 режим full после обычного замера CPU (набор настроек default) отдельным шагом
@@ -18,27 +30,69 @@
 # Скрипт рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 
-MODE=${1:-fast}
+usage() {
+    echo "usage: $0 [build|sign|check|sign-and-check] <fast|snap|full>" >&2
+    exit 2
+}
+
+case "${1:-fast}" in
+    fast | snap | full)
+        PHASES="build sign check"
+        MODE=${1:-fast}
+        ;;
+    build | sign | check)
+        PHASES=$1
+        MODE=${2:-fast}
+        ;;
+    sign-and-check)
+        PHASES="sign check"
+        MODE=${2:-fast}
+        ;;
+    *) usage ;;
+esac
 case "$MODE" in
     fast | snap | full) ;;
-    *)
-        echo "usage: $0 <fast|snap|full>" >&2
-        exit 2
-        ;;
+    *) usage ;;
 esac
+
+# Ключ подписи забирается из окружения сразу: build и check его не видят (и их дочерние
+# процессы тоже), sign.sh получает его только через sign_app. Пустая строка значит "не задан".
+SIGN_P12_B64=${SIGNING_P12_BASE64:-}
+SIGN_P12_PW=${SIGNING_P12_PASSWORD:-}
+unset SIGNING_P12_BASE64 SIGNING_P12_PASSWORD
 
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$PWD
 OUT="$ROOT/ci-out"
 export OUT
-rm -rf "$OUT"
-mkdir -p "$OUT/snapshots"
+case " $PHASES " in
+    *" build "*)
+        rm -rf "$OUT"
+        mkdir -p "$OUT/snapshots"
+        ;;
+    *)
+        if [[ ! -d "$OUT" ]]; then
+            echo "error: $OUT not found, run the build phase first" >&2
+            exit 1
+        fi
+        ;;
+esac
 
 SUMMARY="$OUT/summary.md"
 STEPS="$OUT/.steps.md"
-: > "$STEPS"
+STATE="$OUT/.state"
+DURATION_FILE="$OUT/.duration"
+touch "$STEPS" "$STATE"
 START=$SECONDS
 FAILED=0
+
+mark() { # отметка состояния, видимая следующим фазам
+    echo "$1" >> "$STATE"
+}
+
+marked() { # 0, если отметка стоит
+    grep -qx "$1" "$STATE" 2> /dev/null
+}
 
 REF=${GITHUB_REF_NAME:-local}
 REF_SAFE=$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '-')
@@ -207,10 +261,21 @@ write_errors() {
 }
 
 finish() {
-    local result=success
+    local result=success total prev=0 phase
     if [[ $FAILED -ne 0 ]]; then
+        touch "$OUT/.failed"
+    fi
+    if [[ -f "$OUT/.failed" ]]; then
         result=failure
     fi
+    for phase in $PHASES; do
+        mark "phase-$phase"
+    done
+    if [[ -f "$DURATION_FILE" ]]; then
+        prev=$(cat "$DURATION_FILE")
+    fi
+    total=$((prev + SECONDS - START))
+    echo "$total" > "$DURATION_FILE"
     write_errors
     {
         echo "# WaveFeels mac CI: $MODE"
@@ -220,7 +285,8 @@ finish() {
         echo "- sha: $SHA"
         echo "- run: ${GITHUB_RUN_NUMBER:-local} attempt ${GITHUB_RUN_ATTEMPT:-1}"
         echo "- app version: $VERSION (build $BUILD)"
-        echo "- duration: $((SECONDS - START)) s"
+        echo "- duration: $total s"
+        echo "- phases run: $(grep '^phase-' "$STATE" | sed 's/^phase-//' | tr '\n' ' ')"
         echo
         echo "## Steps"
         echo
@@ -242,7 +308,10 @@ finish() {
         head -n 40 "$OUT/errors.txt"
         echo '```'
     } > "$SUMMARY"
-    rm -f "$STEPS" "$OUT"/.timeout-*
+    rm -f "$OUT"/.timeout-*
+    if marked phase-build && marked phase-check; then
+        rm -f "$STEPS" "$STATE" "$DURATION_FILE" "$OUT/.failed"
+    fi
     echo
     cat "$SUMMARY"
     if [[ $FAILED -ne 0 ]]; then
@@ -271,8 +340,6 @@ if [[ -n "${DEVELOPER_DIR:-}" && ! -d "$DEVELOPER_DIR" ]]; then
 fi
 
 trap finish EXIT
-
-run_step toolchain 60 "$OUT/toolchain.txt" toolchain_info
 
 # --- снимки стеков процесса тестов ---
 
@@ -363,19 +430,44 @@ step_release() {
     run_step build-release "$LIMIT_BUILD" "$OUT/build.log" swift build -c release
 }
 
-# Бандл, подпись, снимки и пробный запуск из бандла. Возвращает 0, если бандл подписан.
+# Сборка адаптера: чужой код, поэтому идет без файлов команд GitHub Actions (через них шаг мог бы
+# подложить переменные и PATH следующим шагам) и без токенов раннера. Секретов подписи в этой
+# фазе в окружении уже нет.
+adapter_build() {
+    env -u GITHUB_ENV -u GITHUB_PATH -u GITHUB_OUTPUT -u GITHUB_STATE -u GITHUB_STEP_SUMMARY \
+        -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RUNTIME_URL -u ACTIONS_RESULTS_URL \
+        -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+        bash scripts/build-adapter.sh
+}
+
+# Подпись одной копии приложения. Ключ попадает в окружение только sign.sh; имя функции, а не
+# значения, попадает в строку "== step" лога, поэтому в sign.txt секретов нет.
+sign_app() { # app
+    SIGNING_P12_BASE64=$SIGN_P12_B64 SIGNING_P12_PASSWORD=$SIGN_P12_PW bash scripts/sign.sh "$1"
+}
+
+# Бандл без подписи. Помечает bundle-ok, если он собран.
 step_bundle() {
-    if ! run_step bundle "$LIMIT_BUNDLE" "$OUT/bundle.log" \
+    if run_step bundle "$LIMIT_BUNDLE" "$OUT/bundle.log" \
         env ICON_SNAPSHOT_DIR="$OUT/snapshots" bash scripts/bundle.sh "$VERSION" "$BUILD"; then
-        skip sign "bundle failed"
-        skip snapshots "bundle failed"
-        skip smoke "bundle failed"
-        return 1
+        mark bundle-ok
+        return 0
     fi
-    local signed=0
-    if run_step sign "$LIMIT_SIGN" "$OUT/sign.txt" bash scripts/sign.sh "$APP"; then
-        signed=1
+    skip sign "bundle failed"
+    skip snapshots "bundle failed"
+    skip smoke "bundle failed"
+    return 1
+}
+
+# Подпись основного бандла (фаза sign). Помечает signed при успехе.
+step_sign() {
+    if run_step sign "$LIMIT_SIGN" "$OUT/sign.txt" sign_app "$APP"; then
+        mark signed
     fi
+}
+
+# Снимки и пробный запуск из бандла (фаза check).
+step_snapshots_smoke() {
     if has_snapshot_renderer; then
         run_step snapshots "$LIMIT_SNAPSHOTS" "$OUT/snapshots.log" render_snapshots
     else
@@ -385,7 +477,6 @@ step_bundle() {
     if [[ -f "$APP_LOG" ]]; then
         cp "$APP_LOG" "$OUT/app.log"
     fi
-    [[ $signed -eq 1 ]]
 }
 
 # Печатает designated requirement обеих копий: по нему TCC узнает приложение после обновления.
@@ -402,21 +493,25 @@ log_requirements() { # основное приложение, копия для 
     fi
 }
 
-# Вторая копия для проверки обновления. Возвращает 0, если она собрана и подписана.
-step_update_test() {
-    if ! run_step bundle-update-test "$LIMIT_BUNDLE" "$OUT/bundle.log" \
+# Вторая копия для проверки обновления, фаза build: только бандл. Помечает update-bundle-ok.
+step_update_bundle() {
+    if run_step bundle-update-test "$LIMIT_BUNDLE" "$OUT/bundle.log" \
         bash scripts/bundle.sh "$VERSION" "$UPDATE_BUILD" "$UPDATE_APP"; then
+        mark update-bundle-ok
+    else
         skip sign-update-test "bundle failed"
         skip zip-update-test "bundle failed"
-        return 1
     fi
-    if ! run_step sign-update-test "$LIMIT_SIGN" "$OUT/sign.txt" bash scripts/sign.sh "$UPDATE_APP"; then
+}
+
+# Подпись второй копии и сверка требований, фаза sign. Помечает update-signed.
+step_update_sign() {
+    if run_step sign-update-test "$LIMIT_SIGN" "$OUT/sign.txt" sign_app "$UPDATE_APP"; then
+        mark update-signed
+        run_step requirements "$LIMIT_SMALL" "$OUT/sign.txt" log_requirements "$APP" "$UPDATE_APP"
+    else
         skip zip-update-test "sign failed"
-        return 1
     fi
-    run_step requirements "$LIMIT_SMALL" "$OUT/sign.txt" log_requirements "$APP" "$UPDATE_APP"
-    run_step zip-update-test "$LIMIT_SMALL" "$OUT/zip.log" \
-        ditto -c -k --keepParent "$UPDATE_APP" "$ROOT/dist/WaveFeels-$REF_SAFE-update-test.zip"
 }
 
 skip_bundle() { # причина
@@ -426,62 +521,120 @@ skip_bundle() { # причина
     skip smoke "$1"
 }
 
-case "$MODE" in
-    fast)
-        step_tests
-        ;;
-    snap)
-        if step_release; then
-            step_bundle
-        else
-            skip_bundle "release build failed"
-        fi
-        ;;
-    full)
-        if [[ -f scripts/build-adapter.sh ]]; then
-            run_step adapter "$LIMIT_BUILD" "$OUT/adapter.log" bash scripts/build-adapter.sh
-        else
-            skip adapter "scripts/build-adapter.sh not present"
-        fi
-        release_ok=0
-        if step_release; then
-            release_ok=1
-        fi
-        step_tests
-        app_ok=0
-        if [[ $release_ok -eq 1 ]]; then
-            if step_bundle; then
-                app_ok=1
-            fi
-        else
-            skip_bundle "release build failed"
-        fi
-        if [[ $app_ok -eq 1 && -f scripts/cpu-probe.sh ]]; then
-            # Итог замера cpu-probe.sh пишет сам в cpu.txt и cpu-sample*.txt, здесь только вывод шага.
-            # Замер идет на наборе настроек default (--settings-suite), а не на настройках раннера.
-            run_step cpu "$LIMIT_CPU" "$OUT/cpu.log" bash scripts/cpu-probe.sh --preset default --sample "$APP"
-            # Набор max занимает еще около 95 с и в лимит шага cpu вместе с default не помещается,
-            # поэтому идет отдельным шагом и только с CPU_MAX=1.
-            if [[ "${CPU_MAX:-0}" == 1 ]]; then
-                run_step cpu-max "$LIMIT_CPU" "$OUT/cpu-max.log" bash scripts/cpu-probe.sh --preset max --sample "$APP"
-            fi
-        elif [[ $app_ok -eq 1 ]]; then
-            skip cpu "scripts/cpu-probe.sh not present"
-        else
-            skip cpu "no signed app"
-        fi
-        if [[ $app_ok -eq 1 ]]; then
-            run_step zip "$LIMIT_SMALL" "$OUT/zip.log" \
-                ditto -c -k --keepParent "$APP" "$ROOT/dist/WaveFeels-$REF_SAFE.zip"
-        else
-            skip zip "no signed app"
-        fi
-        if [[ -n "${RELEASE:-}" ]]; then
-            if [[ $app_ok -eq 1 ]]; then
-                step_update_test
+# --- фазы ---
+
+phase_build() {
+    run_step toolchain 60 "$OUT/toolchain.txt" toolchain_info
+    case "$MODE" in
+        fast)
+            step_tests
+            ;;
+        snap)
+            if step_release; then
+                step_bundle
             else
-                skip bundle-update-test "no signed app"
+                skip_bundle "release build failed"
             fi
+            ;;
+        full)
+            if [[ -f scripts/build-adapter.sh ]]; then
+                run_step adapter "$LIMIT_BUILD" "$OUT/adapter.log" adapter_build
+            else
+                skip adapter "scripts/build-adapter.sh not present"
+            fi
+            local release_ok=0
+            if step_release; then
+                release_ok=1
+            fi
+            step_tests
+            if [[ $release_ok -eq 1 ]]; then
+                if step_bundle && [[ -n "${RELEASE:-}" ]]; then
+                    step_update_bundle
+                fi
+            else
+                skip_bundle "release build failed"
+            fi
+            ;;
+    esac
+    mark build-done
+}
+
+# Фаза sign: единственная, где sign.sh получает ключ.
+phase_sign() {
+    if ! marked build-done; then
+        skip sign "build phase did not finish"
+        FAILED=1
+        return
+    fi
+    if [[ "$MODE" == fast ]]; then
+        return
+    fi
+    if ! marked bundle-ok; then
+        # build уже записала skip для sign.
+        return
+    fi
+    step_sign
+    if [[ "$MODE" == full && -n "${RELEASE:-}" ]] && marked update-bundle-ok; then
+        if marked signed; then
+            step_update_sign
+        else
+            skip sign-update-test "no signed app"
+            skip zip-update-test "no signed app"
         fi
-        ;;
-esac
+    fi
+}
+
+# Фаза check: запуск собранного приложения, замер, архивы. Ключа в окружении нет.
+phase_check() {
+    if ! marked build-done; then
+        skip snapshots "build phase did not finish"
+        FAILED=1
+        return
+    fi
+    if [[ "$MODE" == fast ]]; then
+        return
+    fi
+    if ! marked bundle-ok; then
+        return
+    fi
+    step_snapshots_smoke
+    if [[ "$MODE" != full ]]; then
+        return
+    fi
+    local app_ok=0
+    if marked signed; then
+        app_ok=1
+    fi
+    if [[ $app_ok -eq 1 && -f scripts/cpu-probe.sh ]]; then
+        # Итог замера cpu-probe.sh пишет сам в cpu.txt и cpu-sample*.txt, здесь только вывод шага.
+        # Замер идет на наборе настроек default (--settings-suite), а не на настройках раннера.
+        run_step cpu "$LIMIT_CPU" "$OUT/cpu.log" bash scripts/cpu-probe.sh --preset default --sample "$APP"
+        # Набор max занимает еще около 95 с и в лимит шага cpu вместе с default не помещается,
+        # поэтому идет отдельным шагом и только с CPU_MAX=1.
+        if [[ "${CPU_MAX:-0}" == 1 ]]; then
+            run_step cpu-max "$LIMIT_CPU" "$OUT/cpu-max.log" bash scripts/cpu-probe.sh --preset max --sample "$APP"
+        fi
+    elif [[ $app_ok -eq 1 ]]; then
+        skip cpu "scripts/cpu-probe.sh not present"
+    else
+        skip cpu "no signed app"
+    fi
+    if [[ $app_ok -eq 1 ]]; then
+        run_step zip "$LIMIT_SMALL" "$OUT/zip.log" \
+            ditto -c -k --keepParent "$APP" "$ROOT/dist/WaveFeels-$REF_SAFE.zip"
+    else
+        skip zip "no signed app"
+    fi
+    if [[ -n "${RELEASE:-}" ]] && marked update-signed; then
+        run_step zip-update-test "$LIMIT_SMALL" "$OUT/zip.log" \
+            ditto -c -k --keepParent "$UPDATE_APP" "$ROOT/dist/WaveFeels-$REF_SAFE-update-test.zip"
+    fi
+}
+
+for phase in $PHASES; do
+    case "$phase" in
+        build) phase_build ;;
+        sign) phase_sign ;;
+        check) phase_check ;;
+    esac
+done

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Публикует ci-out/ в ветку ci-results: runs/<UTC>-<sha7>-<workflow>-<mode>-a<attempt>/.
-# Запускается последним шагом workflow (if: always()) с GH_TOKEN, CI_OUTCOME и MODE в окружении (в release.yml еще RELEASE_OUTCOME).
+# Запускается задачей publish (if: always()), единственной с правом contents: write, после того как артефакт ci-out
+# скачан в ci-out/. Окружение: GH_TOKEN, CI_OUTCOME и MODE (в release.yml еще RELEASE_OUTCOME).
 # Каждая попытка заново клонирует ветку (или создает orphan при первом запуске), до пяти попыток.
 # Код 0 при успехе, 1 после пяти неудачных попыток. Рассчитан на bash 3.2 и BSD-утилиты, работает
 # и на Linux-раннере (tester.yml).

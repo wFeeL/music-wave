@@ -2,7 +2,8 @@ name: release
 on:
   push:
     tags: ['v*']
-permissions: {contents: write}
+# Права по умолчанию только на чтение. contents: write получает лишь задача publish.
+permissions: {contents: read}
 concurrency:
   group: 'release-${{ github.ref_name }}'
   cancel-in-progress: false
@@ -13,22 +14,76 @@ env:
   # Включает в ci-mac.sh вторую подписанную копию для проверки обновления.
   RELEASE: '1'
 jobs:
-  release:
+  build:
     runs-on: macos-26
-    timeout-minutes: 15
+    # Сумма лимитов шагов (9 + 1 + 2 + 5) плюс загрузка артефактов.
+    timeout-minutes: 19
     steps:
-      - uses: actions/checkout@v5
-      - id: ci
-        # Шаг падает раньше лимита задачи, чтобы публикации результатов хватило времени.
-        timeout-minutes: 12
-        run: bash scripts/ci-mac.sh "$MODE"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: {persist-credentials: false}
+      # Сборка адаптера (чужой код), сборка и тесты идут без секретов и с токеном только на чтение.
+      - id: build
+        timeout-minutes: 9
+        run: bash scripts/ci-mac.sh build "$MODE"
+      # Сборка могла изменить файлы в рабочей папке: перед шагом с ключом скрипты берутся из коммита.
+      - id: restore
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        run: |
+          git -c core.hooksPath=/dev/null checkout --force "$GITHUB_SHA" -- scripts signing Vendor
+          git -c core.hooksPath=/dev/null clean -ffdxq -- scripts signing Vendor
+      # Единственный шаг с ключом подписи.
+      - id: sign
+        if: ${{ !cancelled() && steps.restore.outcome == 'success' }}
+        timeout-minutes: 2
+        run: bash scripts/ci-mac.sh sign "$MODE"
         env: {SIGNING_P12_BASE64: '${{ secrets.SIGNING_P12_BASE64 }}', SIGNING_P12_PASSWORD: '${{ secrets.SIGNING_P12_PASSWORD }}', SIGNING_EXPECTED_LEAF: '${{ vars.SIGNING_EXPECTED_LEAF }}'}
+      - id: check
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: bash scripts/ci-mac.sh check "$MODE"
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ci-out
+          path: ci-out
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 7
+      # Архивы релиза уходят дальше только после успешной сборки, проверки и подписи.
+      - if: ${{ success() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: dist
+          path: dist/WaveFeels-${{ github.ref_name }}*.zip
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: {persist-credentials: false, sparse-checkout: scripts}
+      - if: ${{ needs.build.result == 'success' }}
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with: {name: dist, path: dist}
       - id: release
-        uses: softprops/action-gh-release@v2
+        if: ${{ needs.build.result == 'success' }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/WaveFeels-${{ github.ref_name }}*.zip
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
-      - if: always()
+      - if: ${{ always() }}
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        continue-on-error: true
+        with: {name: ci-out, path: ci-out}
+      - if: ${{ always() }}
         run: bash scripts/publish-ci-results.sh
-        env: {GH_TOKEN: '${{ github.token }}', CI_OUTCOME: '${{ steps.ci.outcome }}', RELEASE_OUTCOME: '${{ steps.release.outcome }}'}
+        env: {GH_TOKEN: '${{ github.token }}', CI_OUTCOME: '${{ needs.build.result }}', RELEASE_OUTCOME: '${{ steps.release.outcome }}'}
