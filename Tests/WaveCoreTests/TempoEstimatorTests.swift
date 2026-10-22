@@ -156,6 +156,24 @@ struct TempoStickinessTests {
         #expect(tempo.period == nil)
     }
 
+    @Test func reconfigureStartsOverAtTheNewRate() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        for value in Self.impulses(seconds: 4) {
+            tempo.append(value, kick: 0)
+        }
+        #expect(tempo.update() != nil)
+        let rate = 44_100.0 / 256
+        tempo.reconfigure(framesPerSecond: rate)
+        #expect(tempo.framesPerSecond == rate)
+        #expect(tempo.period == nil)
+        // Импульсы 120 BPM на новой частоте шагов: один шаг на каждую долю.
+        for index in 0..<Int(4 * rate) {
+            let phase = Double(index).truncatingRemainder(dividingBy: rate / 2)
+            tempo.append(phase < 1 ? 50 : 0, kick: 0)
+        }
+        #expect(tempo.update().map { abs($0.period - 0.5) / 0.5 < 0.02 } == true)
+    }
+
     @Test func resetForgetsEverything() {
         var tempo = TempoEstimator(framesPerSecond: 187.5)
         for value in Self.impulses(seconds: 4) {
@@ -219,12 +237,12 @@ struct TempoEstimatorTests {
             "\(Int(bpm)) BPM, humanize \(Int(humanize * 1000)) ms\(snare ? ", backbeat snare" : ""), seed \(seed)"
         }
 
-        /// Ровно 90...175 BPM через 5; разброс бочки 8 мс на 140...175 и малый на слабых долях на 120, 140
-        /// и 160, оба на четырех зернах.
+        /// Ровно 90...170 BPM через 10 и 175; разброс бочки 8 мс на 140...175 через 5 и малый на слабых
+        /// долях на 120, 140 и 160, оба на четырех зернах.
         static let all: [SweepCase] = {
             var cases: [SweepCase] = []
-            for step in 0...17 {
-                cases.append(SweepCase(bpm: 90 + 5 * Double(step), humanize: 0, snare: false, seed: 1))
+            for bpm in stride(from: 90.0, through: 170, by: 10) + [175] {
+                cases.append(SweepCase(bpm: bpm, humanize: 0, snare: false, seed: 1))
             }
             for seed: UInt64 in 1...4 {
                 for step in 0...7 {

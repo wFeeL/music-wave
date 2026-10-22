@@ -213,6 +213,12 @@ public struct TempoEstimator: Sendable {
         return TempoEstimate(period: current, switched: false)
     }
 
+    /// Новая частота шагов (смена частоты дискретизации): буферы и окна пересчитываются, история и
+    /// темп начинаются заново.
+    public mutating func reconfigure(framesPerSecond: Double) {
+        self = TempoEstimator(framesPerSecond: framesPerSecond)
+    }
+
     /// Пауза, перемотка или смена источника: история и темп начинаются заново.
     public mutating func reset() {
         for index in history.indices {

@@ -121,8 +121,8 @@ public struct BeatTracker: Sendable {
     /// smoothstep от `confirmLow` до `confirmHigh`.
     static let confirmWindow = 1.5
     static let confirmEpsilon: Float = 0.5
-    static let confirmLow: Float = 7
-    static let confirmHigh: Float = 10
+    static let confirmLow: Float = 6
+    static let confirmHigh: Float = 9
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
@@ -268,9 +268,26 @@ public struct BeatTracker: Sendable {
         past.removeAll(keepingCapacity: true)
     }
 
+    /// Новая частота шагов (смена частоты дискретизации): все состояние начинается заново, как после
+    /// `reset()`, а счетчики id продолжают расти, чтобы `BeatGlow` не принял новые события за старые.
+    public mutating func reconfigure(framesPerSecond: Double) {
+        precondition(framesPerSecond > 0, "framesPerSecond must be positive")
+        let beats = beatCounter
+        let onsets = onsetCounter
+        self = BeatTracker(framesPerSecond: framesPerSecond, parameters: parameters)
+        beatCounter = beats + 2
+        onsetCounter = onsets
+    }
+
     // MARK: Темп и фаза
 
     private mutating func updateTempo(_ estimate: TempoEstimate) {
+        // Период ФАПЧ каждые 0.25 с заменяется оценкой темпа, поэтому поправки `beta` между оценками
+        // не накапливаются и петля ведет себя как петля первого порядка: ошибка оценки периода δ за
+        // долю оставляет постоянный сдвиг фазы около δ / alpha (на 120 BPM оценка 0.4989 с вместо
+        // 0.5 с, доли предсказываются примерно на 5 мс раньше онсетов). Это укладывается в допуск
+        // среднего сдвига; если понадобится убрать смещение, оценка должна подтягивать T, а не
+        // заменять его (`beat-sync.md` 2.5).
         period = estimate.period
         let candidate = phaseCandidate(period: estimate.period)
         guard let nextBeat, !estimate.switched else {
@@ -391,7 +408,8 @@ public struct BeatTracker: Sendable {
     // MARK: Ворот, смесь и события
 
     private mutating func updateGate(_ levelDB: Float) {
-        let level = levelDB.isNaN ? Self.floorDB : max(levelDB, Self.floorDB)
+        // Бесконечность и NaN считаются полом, иначе удержание и P_long застряли бы на бесконечности.
+        let level = levelDB.isFinite ? max(levelDB, Self.floorDB) : Self.floorDB
         let fall: Float
         if let period {
             fall = parameters.gateFallPerBeatDB * Float(hopDuration / period)

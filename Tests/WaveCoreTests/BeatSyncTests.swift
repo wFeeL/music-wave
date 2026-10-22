@@ -5,6 +5,13 @@ import Testing
 /// Критерии попадания в бит (`design-v1.md` §2, `beat-sync.md` 3.3) на синтетических барабанах через
 /// всю цепочку `SyncHarness`: 48 кГц, 24 с, рендер 60 Гц, задержка вывода 20 мс, если не сказано иное.
 /// F-мера, сдвиги и ложные вспышки считаются после первых 2 с. Только Linux, как остальные сцены.
+///
+/// Разброс сдвига на 60 Гц зависит от фазы рендера: при темпе, кратном кадрам (90, 100, 120 BPM),
+/// квантование одинаково для каждой доли, и один прогон дает либо почти 0, либо переброс между двумя
+/// кадрами (до 8.3 мс). Поэтому захваченные сцены на 60 Гц показываются на `renderPhases` равномерных
+/// фазах: средний сдвиг проверяется на каждой с захвата, разброс по всем вместе, а дрожание самих
+/// предсказаний отдельно по расписанию без квантования. Разброс меряется в установившемся режиме
+/// (через `settle` после захвата и перехода смеси), сходимость до него проверяется отдельно.
 @Suite(.enabled(if: TestPlatform.isLinux))
 struct BeatSyncTests {
     private static let from = 2.0
@@ -18,36 +25,122 @@ struct BeatSyncTests {
         }
     }
 
+    private static let renderPhases = 8
+    /// Сколько секунд после захвата (и перехода смеси) ФАПЧ сходится; разброс меряется после.
+    private static let settle = 4.0
+
+    /// Сцена через цепочку, показанная на `renderPhases` фазах рендера.
+    private static func runPhases(
+        _ scene: @escaping @Sendable () -> DrumScene, _ config: SyncHarness.Config = .init()
+    ) async -> (scene: DrumScene, results: [SyncResult]) {
+        await runOffCooperativePool {
+            let scene = scene()
+            return (scene, SyncHarness.run(scene: scene, config: config, renderPhases: renderPhases))
+        }
+    }
+
+    /// Захват на всех фазах: средний сдвиг каждой в -30...+10 мс; возвращает сдвиги всех фаз вместе.
+    private static func checkLockedPhases(
+        _ results: [SyncResult], beats: [Double], period: Double, label: String = ""
+    ) -> [Double] {
+        var pooled: [Double] = []
+        for (k, result) in results.enumerated() {
+            guard let from = lockedFrom(result, period: period) else {
+                Issue.record("\(label) phase \(k): no lock")
+                continue
+            }
+            let values = result.offsetValues(reference: result.audible(beats), from: from)
+            let offsets = SyncResult.meanAndSD(values)
+            #expect((-0.030...0.010).contains(offsets.mean), "\(label) phase \(k): \(describe(result, f: nil, offsets: offsets))")
+            pooled += values
+        }
+        return pooled
+    }
+
+    /// Начало проверки захваченных сдвигов: захват плюс переход смеси (`crossfadeBeats` долей).
+    private static func lockedFrom(_ result: SyncResult, period: Double) -> Double? {
+        result.lockTime.map { $0 + BeatTracker.Parameters().crossfadeBeats * period }
+    }
+
     private static func isNear(_ bpm: Double?, _ truth: Double, tolerance: Double = 0.04) -> Bool {
         bpm.map { abs($0 / truth - 1) < tolerance } ?? false
     }
 
     /// Сдвиги вспышек от слышимых долей после захвата и конца перехода смеси (`crossfadeBeats` долей).
     private static func lockedOffsets(_ result: SyncResult, beats: [Double], period: Double) -> (mean: Double, sd: Double)? {
-        guard let lock = result.lockTime else { return nil }
-        let crossfade = BeatTracker.Parameters().crossfadeBeats * period
-        return result.offsets(reference: result.audible(beats), from: lock + crossfade)
+        lockedFrom(result, period: period).map { result.offsets(reference: result.audible(beats), from: $0) }
     }
 
-    private static func describe(_ result: SyncResult, f: Double, offsets: (mean: Double, sd: Double)?) -> String {
+    private static func describe(_ result: SyncResult, f: Double?, offsets: (mean: Double, sd: Double)?) -> String {
         let lock = result.lockTime.map { String(format: "%.2f", $0) } ?? "none"
         let tempo = result.tempoBPM.map { String(format: "%.1f", $0) } ?? "none"
         let offset = offsets.map { String(format: "%+.1f ± %.1f ms", $0.mean * 1000, $0.sd * 1000) } ?? "n/a"
-        return String(format: "F %.3f, ", f) + "lock \(lock) s, tempo \(tempo), offset \(offset), events \(result.events.count)"
+        return (f.map { String(format: "F %.3f, ", $0) } ?? "") + "lock \(lock) s, tempo \(tempo), offset \(offset), events \(result.events.count)"
     }
 
     @Test(arguments: [90.0, 100, 120, 128, 140, 160])
     func steadyBeatLocksOnTime(bpm: Double) async {
-        let (scene, result) = await Self.run {
+        let (scene, results) = await Self.runPhases {
             bpm == 120 ? SharedScenes.steady120 : Drums.fourOnFloor(bpm: bpm, hats: .eighths)
         }
-        let f = result.fMeasure(reference: result.audible(scene.beats), tolerance: 0.05, from: Self.from)
-        let offsets = Self.lockedOffsets(result, beats: scene.beats, period: 60 / bpm)
-        let summary = Self.describe(result, f: f, offsets: offsets)
-        #expect(f >= 0.9, "\(summary)")
+        let period = 60 / bpm
+        let beats = results[0].audible(scene.beats)
+        for (k, result) in results.enumerated() {
+            let f = result.fMeasure(reference: beats, tolerance: 0.05, from: Self.from)
+            #expect(f >= 0.9, "phase \(k): \(Self.describe(result, f: f, offsets: nil))")
+        }
+        // Анализ от фазы рендера не зависит: захват, темп и предсказания одни на все фазы.
+        let result = results[0]
+        let summary = Self.describe(result, f: nil, offsets: nil)
         #expect(result.lockTime.map { $0 - scene.beats[0] <= 8 } == true, "\(summary)")
-        #expect(offsets.map { (-0.030...0.010).contains($0.mean) && $0.sd <= 0.006 } == true, "\(summary)")
         #expect(Self.isNear(result.tempoBPM, bpm), "\(summary)")
+        // Средние по фазам с захвата, разброс в установившемся режиме (`settle` после захвата):
+        // сразу после захвата ФАПЧ еще сходится, это проверяет `postLockConvergence`.
+        _ = Self.checkLockedPhases(results, beats: scene.beats, period: period)
+        guard let from = Self.lockedFrom(result, period: period) else { return }
+        var pooled: [Double] = []
+        for phased in results {
+            pooled += phased.offsetValues(reference: beats, from: from + Self.settle)
+        }
+        let steady = SyncResult.meanAndSD(pooled)
+        #expect(steady.sd <= 0.006, "pooled offset \(steady.mean * 1000) ± \(steady.sd * 1000) ms")
+        let predicted = result.predictedOffsets(reference: beats, from: from + Self.settle)
+        #expect(predicted.sd <= 0.002, "predicted beats \(predicted.mean * 1000) ± \(predicted.sd * 1000) ms")
+        if [90.0, 100, 120, 160].contains(bpm) {
+            Self.checkConvergence(result, beats: beats, label: "seed 1")
+        }
+    }
+
+    /// Сходимость после захвата на других зернах цепочки (зерно 1 проверяет `steadyBeatLocksOnTime`).
+    /// Захват и окно `settle` кончаются до 9 с, поэтому сцены по 12 с.
+    @Test(arguments: [90.0, 100, 120, 160])
+    func postLockConvergence(bpm: Double) async {
+        let runs = await runOffCooperativePool { () -> [(beats: [Double], result: SyncResult)] in
+            let scene = Drums.fourOnFloor(bpm: bpm, seconds: 12, hats: .eighths)
+            return [UInt64(2), 3, 4].map { seed in
+                let result = SyncHarness.run(scene: scene, config: SyncHarness.Config(seed: seed))
+                return (result.audible(scene.beats), result)
+            }
+        }
+        for (index, run) in runs.enumerated() {
+            Self.checkConvergence(run.result, beats: run.beats, label: "seed \(index + 2)")
+        }
+    }
+
+    /// После захвата ФАПЧ еще сходится к доле (первая оценка темпа бывает неточна на 2-3 %, а
+    /// `alpha` 0.25 снимает ошибку примерно на четверть за долю): каждая предсказанная доля в первые
+    /// `settle` секунд после захвата лежит в пределах -35...+20 мс от слышимой.
+    private static func checkConvergence(_ result: SyncResult, beats: [Double], label: String) {
+        guard let lock = result.lockTime else {
+            Issue.record("\(label): no lock")
+            return
+        }
+        let window = result.predictedTimes.filter { $0 >= lock && $0 <= lock + settle }
+        #expect(!window.isEmpty, "\(label)")
+        for time in window {
+            guard let beat = beats.min(by: { abs($0 - time) < abs($1 - time) }) else { continue }
+            #expect((-0.035...0.020).contains(time - beat), "\(label): beat \(beat) predicted \((time - beat) * 1000) ms")
+        }
     }
 
     /// Без захвата свечение идет от онсетов бочки. Бюджет: блок 5 + обнаружение 7 + пробуждение 4 +
@@ -82,6 +175,7 @@ struct BeatSyncTests {
     func noiseAloneNeverGlows(seed: UInt64) async {
         let (_, result) = await Self.run { Drums.noiseOnly(levelDB: -20, seconds: 12, seed: seed) }
         #expect(result.events.isEmpty, "events \(result.events)")
+        #expect(result.peakGlow < 0.2, "peak glow \(result.peakGlow)")
     }
 
     @Test func quietIntroNeverGlows() async {
@@ -95,6 +189,21 @@ struct BeatSyncTests {
         let (scene, result) = await Self.run { Drums.dnb174() }
         let f = result.fMeasure(reference: result.audible(scene.kicks), tolerance: 0.05, from: Self.from)
         #expect(f >= 0.9, "\(Self.describe(result, f: f, offsets: nil))")
+    }
+
+    /// Шум под барабанами без захвата: онсеты бочки должны оставаться подтвержденными широкополосно.
+    @Test(arguments: [(Float(-40), 0.95), (-30, 0.9)])
+    func dnbInNoiseStillGlowsOnKicks(noiseDB: Float, minimum: Double) async {
+        let (scene, result) = await Self.run {
+            let drums = Drums.dnb174()
+            let noise = Drums.pinkNoise(levelDB: noiseDB, count: drums.samples.count, seed: 2)
+            var mixed = drums
+            mixed.samples = zip(drums.samples, noise).map { $0 + $1 }
+            return mixed
+        }
+        let f = result.fMeasure(reference: result.audible(scene.kicks), tolerance: 0.05, from: Self.from)
+        #expect(result.lockTime == nil)
+        #expect(f >= minimum, "\(Self.describe(result, f: f, offsets: nil))")
     }
 
     @Test func syncopationGlowsOnBeatsAndKicks() async {
@@ -136,21 +245,35 @@ struct BeatSyncTests {
 
     @Test(arguments: [44_100.0, 96_000])
     func otherSampleRates(rate: Double) async {
-        let (scene, result) = await Self.run { Drums.fourOnFloor(bpm: 120, sampleRate: rate, hats: .eighths) }
-        let f = result.fMeasure(reference: result.audible(scene.beats), tolerance: 0.05, from: Self.from)
-        let offsets = Self.lockedOffsets(result, beats: scene.beats, period: 0.5)
-        let summary = Self.describe(result, f: f, offsets: offsets)
-        #expect(f >= 0.9, "\(summary)")
-        #expect(offsets.map { (-0.030...0.010).contains($0.mean) } == true, "\(summary)")
+        let (scene, results) = await Self.runPhases { Drums.fourOnFloor(bpm: 120, sampleRate: rate, hats: .eighths) }
+        for (k, result) in results.enumerated() {
+            let f = result.fMeasure(reference: result.audible(scene.beats), tolerance: 0.05, from: Self.from)
+            #expect(f >= 0.9, "phase \(k): \(Self.describe(result, f: f, offsets: nil))")
+        }
+        _ = Self.checkLockedPhases(results, beats: scene.beats, period: 0.5, label: "\(Int(rate)) Hz")
     }
 
     @Test func bluetoothLatencyIsPredicted() async {
         var config = SyncHarness.Config()
         config.outputLatency = 0.180
-        let (scene, result) = await Self.run({ SharedScenes.steady120 }, config)
-        let offsets = Self.lockedOffsets(result, beats: scene.beats, period: 0.5)
-        let f = result.fMeasure(reference: result.audible(scene.beats), tolerance: 0.05, from: Self.from)
-        #expect(offsets.map { (-0.030...0.010).contains($0.mean) } == true, "\(Self.describe(result, f: f, offsets: offsets))")
+        let (scene, results) = await Self.runPhases({ SharedScenes.steady120 }, config)
+        _ = Self.checkLockedPhases(results, beats: scene.beats, period: 0.5)
+    }
+
+    /// Сдвиг синхронизации +40 мс сдвигает вспышки на 40 ± 3 мс (средние по всем фазам рендера).
+    @Test func syncOffsetShiftsTheGlow() async {
+        var shifted = SyncHarness.Config()
+        shifted.syncOffset = 0.040
+        let (scene, base) = await Self.runPhases { SharedScenes.steady120 }
+        let (_, moved) = await Self.runPhases({ SharedScenes.steady120 }, shifted)
+        let before = SyncResult.meanAndSD(Self.checkLockedPhases(base, beats: scene.beats, period: 0.5)).mean
+        var after: [Double] = []
+        for result in moved {
+            guard let from = Self.lockedFrom(result, period: 0.5) else { continue }
+            after += result.offsetValues(reference: result.audible(scene.beats), from: from, tolerance: 0.15)
+        }
+        let delta = SyncResult.meanAndSD(after).mean - before
+        #expect(abs(delta - 0.040) <= 0.003, "shift \(delta * 1000) ms")
     }
 
     /// Энергия между долями (бас на слабых восьмых, малый на слабых долях) не сдвигает свечение с долей.

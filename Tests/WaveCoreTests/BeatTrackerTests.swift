@@ -139,48 +139,107 @@ struct BeatTrackerTests {
         #expect(!kick.schedule.events.contains { !$0.predicted && $0.time == onset.time })
     }
 
-    /// `BeatGlow` помнит id 2 с: ни сброс, ни смена темпа не дают id другого события.
+    /// `BeatGlow` помнит id 2 с: id, который ушел из расписания, больше не появляется никогда, в том
+    /// числе после сброса и смены темпа.
     @Test func idsNeverRepeatAcrossResetAndTempoSwitch() {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
-        var times: [UInt64: Double] = [:]
-        var reused: [UInt64] = []
-        func record(_ tracker: BeatTracker) {
-            for event in tracker.schedule.events {
-                #expect(event.predicted == (event.id & BeatTracker.onsetIDFlag == 0))
-                if let time = times[event.id] {
-                    if abs(time - event.time) > 0.1 { reused.append(event.id) }
-                } else {
-                    times[event.id] = event.time
-                }
-            }
-        }
+        var ids = IDLifetimes()
 
         var hops = SyntheticBeats(bpm: 120)
-        hops.feed(&tracker, until: 8) { record($0) }
-        let predictedBeforeReset = times.keys.filter { $0 & BeatTracker.onsetIDFlag == 0 }
-        let onsetsBeforeReset = times.keys.filter { $0 & BeatTracker.onsetIDFlag != 0 }
+        hops.feed(&tracker, until: 8) { ids.record($0) }
+        let beforeReset = ids.seen
         tracker.reset()
         // Новый поток с нуля, затем смена темпа 120 -> 100.
         hops = SyntheticBeats(bpm: 120)
-        hops.feed(&tracker, until: 8) { tracker in
-            record(tracker)
-            for event in tracker.schedule.events {
-                let before = event.predicted ? predictedBeforeReset : onsetsBeforeReset
-                #expect(event.id > before.max() ?? 0)
-            }
-        }
+        hops.feed(&tracker, until: 8) { ids.record($0) }
         hops.bpm = 100
         var switches = 0
         var lastPeriod = tracker.period
         hops.feed(&tracker, until: 20) { tracker in
-            record(tracker)
+            ids.record(tracker)
             if let period = tracker.period, let last = lastPeriod, abs(period / last - 1) > 0.1 { switches += 1 }
             lastPeriod = tracker.period
         }
-        #expect(!predictedBeforeReset.isEmpty && !onsetsBeforeReset.isEmpty)
+        #expect(beforeReset.contains { $0 & BeatTracker.onsetIDFlag == 0 })
+        #expect(beforeReset.contains { $0 & BeatTracker.onsetIDFlag != 0 })
         #expect(switches >= 1)
         #expect(tracker.period.map { abs($0 - 0.6) < 0.01 } == true)
-        #expect(reused.isEmpty, "ids reused for another event: \(reused)")
+        #expect(ids.reused.isEmpty, "ids back after leaving the schedule: \(ids.reused)")
+        #expect(ids.mislabeled.isEmpty, "onset flag does not match the kind: \(ids.mislabeled)")
+    }
+
+    /// Смена частоты 48 -> 44.1 кГц посреди потока: трекер начинает заново, снова захватывает 120 BPM
+    /// и не повторяет ни одного id.
+    @Test func rateChangeRelocksWithNewIDs() async {
+        let first = await runOffCooperativePool { Hops.steady }
+        let second = await runOffCooperativePool {
+            StreamAnalyzer(sampleRate: 44_100).processSignal(Drums.fourOnFloor(bpm: 120, seconds: 12, sampleRate: 44_100, hats: .eighths).samples)
+        }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var ids = IDLifetimes()
+        for hop in first where hop.endTime < 12 {
+            tracker.process(hop)
+            ids.record(tracker)
+        }
+        #expect(tracker.locked)
+        let before = ids.seen
+        tracker.reconfigure(framesPerSecond: AnalysisConfig(sampleRate: 44_100).framesPerSecond)
+        #expect(tracker.framesPerSecond == AnalysisConfig(sampleRate: 44_100).framesPerSecond)
+        #expect(!tracker.locked && tracker.period == nil)
+        var relock: Double?
+        for hop in second {
+            tracker.process(hop)
+            ids.record(tracker)
+            if relock == nil, tracker.locked { relock = hop.endTime }
+        }
+        #expect(relock.map { $0 <= 8 } == true, "relock at \(String(describing: relock)) s of the new stream")
+        #expect(tracker.period.map { abs($0 / 0.5 - 1) < 0.04 } == true, "period \(String(describing: tracker.period))")
+        #expect(ids.reused.isEmpty, "ids back after leaving the schedule: \(ids.reused)")
+        #expect(ids.seen.subtracting(before).count > 0)
+    }
+
+    /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
+    @Test func nonFiniteKickLevelCountsAsFloor() {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 8)
+        let gate = tracker.energyGate
+        for level in [Float.infinity, .nan, -.infinity] {
+            hops.endTime += hops.hop
+            var hop = SyntheticBeats.hop(endTime: hops.endTime, broadband: nil, kick: nil)
+            hop.kickLevelDB = level
+            tracker.process(hop)
+            #expect(tracker.energyGate.isFinite && (0...1).contains(tracker.energyGate), "level \(level)")
+        }
+        #expect(abs(tracker.energyGate - gate) < 0.1)
+        // Без бочек ворот закрывается, а не остается открытым от бесконечного пика.
+        hops.feedSilence(&tracker, until: hops.endTime + 2)
+        #expect(tracker.energyGate == 0)
+        // Следующие доли открывают его снова.
+        hops.nextBeatTime = hops.endTime + 0.25
+        hops.feed(&tracker, until: hops.endTime + 1.5)
+        #expect(tracker.energyGate > 0.9)
+    }
+}
+
+/// Жизнь id в расписаниях, взятых на каждом шаге: id, который ушел из расписания, вернуться не может.
+struct IDLifetimes {
+    private(set) var seen: Set<UInt64> = []
+    private var current: Set<UInt64> = []
+    private(set) var reused: [UInt64] = []
+    private(set) var mislabeled: [UInt64] = []
+
+    mutating func record(_ tracker: BeatTracker) {
+        let events = tracker.schedule.events
+        let now = Set(events.map(\.id))
+        for event in events where event.predicted != (event.id & BeatTracker.onsetIDFlag == 0) {
+            mislabeled.append(event.id)
+        }
+        for id in now where seen.contains(id) && !current.contains(id) {
+            reused.append(id)
+        }
+        seen.formUnion(now)
+        current = now
     }
 }
 
