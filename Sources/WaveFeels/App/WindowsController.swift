@@ -2,7 +2,8 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Открыто ли окно сейчас. Живые части окна (таймеры, `TimelineView`) работают только пока да.
+/// Окно открыто и не свернуто в Dock. Живые части окна (таймеры, `TimelineView`) работают
+/// только пока да.
 @MainActor
 @Observable
 final class WindowPresence {
@@ -52,11 +53,17 @@ final class WindowsController: NSObject, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
+    func windowDidMiniaturize(_ notification: Notification) {
+        setDiagnosticsLive(false, for: notification)
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        setDiagnosticsLive(true, for: notification)
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow else { return }
-        if closing === diagnosticsWindow, diagnosticsPresence.isOpen {
-            diagnosticsPresence.isOpen = false
-        }
+        setDiagnosticsLive(false, for: notification)
         let othersOpen = [settingsWindow, diagnosticsWindow].contains { window in
             guard let window, window !== closing else { return false }
             return window.isVisible || window.isMiniaturized
@@ -64,6 +71,12 @@ final class WindowsController: NSObject, NSWindowDelegate {
         if !othersOpen {
             NSApp.setActivationPolicy(.accessory)
         }
+    }
+
+    private func setDiagnosticsLive(_ live: Bool, for notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === diagnosticsWindow,
+              diagnosticsPresence.isOpen != live else { return }
+        diagnosticsPresence.isOpen = live
     }
 
     // MARK: - Окна

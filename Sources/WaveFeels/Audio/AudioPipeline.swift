@@ -165,6 +165,11 @@ final class AudioPipeline {
         performRebuild(reason: "возобновление")
     }
 
+    /// Сторож нулей снова получает все попытки (например, после выдачи доступа к звуку).
+    func resetWatchdog() {
+        if watchdogRebuilds != 0 { watchdogRebuilds = 0 }
+    }
+
     /// Пересборка не чаще раза в 250 мс; запросы во время ожидания объединяются.
     func rebuild(reason: String) {
         guard mode == .live, rebuildTask == nil else { return }

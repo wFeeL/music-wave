@@ -2,8 +2,8 @@ import SwiftUI
 import WaveCore
 
 /// Окно диагностики: живой уровень и бит, кнопки доступа и копирования, разделы из
-/// `AppModel.diagnosticsSections()`. Разделы обновляются раз в секунду, индикатор 30 раз в
-/// секунду, и то и другое только пока окно открыто.
+/// `AppModel.diagnosticsSections()`. Разделы и статус доступа обновляются раз в секунду,
+/// индикатор 30 раз в секунду, и то и другое только пока окно открыто и не свернуто.
 struct DiagnosticsView: View {
     let model: AppModel
     let presence: WindowPresence
@@ -40,6 +40,7 @@ struct DiagnosticsView: View {
         .task(id: presence.isOpen) {
             guard presence.isOpen else { return }
             while !Task.isCancelled {
+                model.checkAudioPermission()
                 let fresh = model.diagnosticsSections()
                 if fresh != sections { sections = fresh }
                 try? await Task.sleep(for: .seconds(1))

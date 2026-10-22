@@ -38,6 +38,9 @@ final class AppModel {
     private(set) var permissionHint = false
     /// Последний результат `AudioCapturePermission.preflight()`.
     private(set) var permissionStatus: AudioCapturePermission.Status = .unknown
+    /// Источник, когда пользователь его не выбрал (`settings.source == nil`). Определяется при
+    /// каждом запуске и при запуске или закрытии приложений, в настройки не пишется.
+    private(set) var defaultSource: AudioSource = .systemWide
     var pointerInHoverZone = false
     var fullscreenSuppressed = false
     var screenLocked = false
@@ -47,6 +50,12 @@ final class AppModel {
     @ObservationIgnored private var machine = IslandStateMachine()
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     @ObservationIgnored private var workspaceObservers: [any NSObjectProtocol] = []
+    @ObservationIgnored private var appObservers: [any NSObjectProtocol] = []
+    /// Первый `checkAudioPermission()` после запуска только запоминает статус.
+    @ObservationIgnored private var permissionChecked = false
+    /// `defaultSource` надо определить заново: запуск, запуск или закрытие приложения,
+    /// пользователь снял свой выбор.
+    @ObservationIgnored private var defaultSourceStale = true
     @ObservationIgnored private var appliedSource: AudioSource?
     @ObservationIgnored private var sourceAppRunning = false
     @ObservationIgnored private var silentSince: Double?
@@ -72,13 +81,8 @@ final class AppModel {
         guard loopTask == nil else { return }
         self.arguments = arguments
 
-        if settings.source == nil {
-            let source = resolveDefaultSource()
-            settings.source = source
-            log("источник по умолчанию: \(source.displayName)")
-        }
         applySettings()
-        subscribeToWorkspace()
+        subscribeToNotifications()
         refreshSourceAppRunning()
 
         if let file = arguments.demoFile {
@@ -110,17 +114,35 @@ final class AppModel {
     func stop() {
         loopTask?.cancel()
         loopTask = nil
-        let center = NSWorkspace.shared.notificationCenter
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
         for observer in workspaceObservers {
-            center.removeObserver(observer)
+            workspaceCenter.removeObserver(observer)
         }
         workspaceObservers = []
+        for observer in appObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        appObservers = []
         pipeline.stop()
         adapter.stop()
         silentSince = nil
     }
 
     // MARK: - Источник по умолчанию
+
+    /// Источник, который сейчас используется: выбранный пользователем или по умолчанию.
+    var effectiveSource: AudioSource {
+        settings.source ?? defaultSource
+    }
+
+    private func refreshDefaultSource() {
+        defaultSourceStale = false
+        let source = resolveDefaultSource()
+        if source != defaultSource {
+            defaultSource = source
+            log("источник по умолчанию: \(source.displayName)")
+        }
+    }
 
     /// Яндекс Музыка по bundle ID, иначе приложение в `/Applications` с «Яндекс Музыка» или
     /// «Yandex Music» в имени, иначе весь звук системы.
@@ -172,10 +194,24 @@ final class AppModel {
     // MARK: - Доступ к звуку
 
     /// Перечитывает статус доступа и пересчитывает `permissionHint`.
+    /// Если доступ стал разрешенным (не при первой проверке), счетчик сторожа нулей
+    /// сбрасывается и tap пересобирается.
     func checkAudioPermission() {
-        let status = AudioCapturePermission.preflight()
-        if status != permissionStatus { permissionStatus = status }
+        applyPermissionStatus(AudioCapturePermission.preflight())
         updatePermissionHint()
+    }
+
+    private func applyPermissionStatus(_ status: AudioCapturePermission.Status) {
+        let previous = permissionStatus
+        let firstCheck = !permissionChecked
+        permissionChecked = true
+        guard status != previous else { return }
+        permissionStatus = status
+        log("доступ к звуку: \(Self.describe(previous)) -> \(Self.describe(status))")
+        if status == .authorized, !firstCheck {
+            pipeline.resetWatchdog()
+            pipeline.rebuild(reason: "доступ к звуку разрешен")
+        }
     }
 
     /// Системный запрос доступа; после ответа tap пересобирается.
@@ -199,6 +235,7 @@ final class AppModel {
 
     /// Диагностика и последние 200 строк лога в буфер обмена.
     func copyDiagnostics() {
+        checkAudioPermission()
         let lines = Log.recentLines(Self.logTailLines)
         let text = diagnosticsText()
             + "\n\n## Лог (последние \(Self.logTailLines) строк)\n"
@@ -226,8 +263,7 @@ final class AppModel {
             watchdogExhausted = exhausted
             // Сторож исчерпал попытки: стоит заново спросить TCC, вдруг доступ отозвали.
             if exhausted {
-                let status = AudioCapturePermission.preflight()
-                if status != permissionStatus { permissionStatus = status }
+                applyPermissionStatus(AudioCapturePermission.preflight())
             }
         }
         let hint = permissionStatus == .denied || (permissionStatus == .unknown && exhausted)
@@ -243,7 +279,7 @@ final class AppModel {
         let now = ProcessInfo.processInfo.systemUptime
         applySettings()
 
-        let source = appliedSource ?? .systemWide
+        let source = effectiveSource
         let info = adapter.info
         let sourceInfo = info.flatMap { Self.belongs($0, to: source) ? $0 : nil }
         let sourcePlaying = sourceInfo?.isPlaying ?? false
@@ -277,7 +313,12 @@ final class AppModel {
     /// Настройки пользователя в `AudioPipeline`. Свойства конвейера сами отбрасывают
     /// повторы, `LevelSettings` сравнивается здесь, чтобы не будить анализ каждый тик.
     private func applySettings() {
-        let source = settings.source ?? .systemWide
+        if settings.source != nil {
+            defaultSourceStale = true
+        } else if defaultSourceStale {
+            refreshDefaultSource()
+        }
+        let source = effectiveSource
         if source != appliedSource {
             appliedSource = source
             pipeline.source = source
@@ -322,17 +363,37 @@ final class AppModel {
 
     // MARK: - Запущенные приложения
 
-    private func subscribeToWorkspace() {
-        guard workspaceObservers.isEmpty else { return }
-        let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-            let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+    private func subscribeToNotifications() {
+        if workspaceObservers.isEmpty {
+            let center = NSWorkspace.shared.notificationCenter
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.applicationsChanged()
+                    }
+                }
+                workspaceObservers.append(observer)
+            }
+        }
+        if appObservers.isEmpty {
+            // Пользователь мог выдать доступ в Системных настройках и вернуться.
+            let observer = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.refreshSourceAppRunning()
+                    self?.checkAudioPermission()
                 }
             }
-            workspaceObservers.append(observer)
+            appObservers.append(observer)
         }
+    }
+
+    private func applicationsChanged() {
+        defaultSourceStale = true
+        applySettings()
+        refreshSourceAppRunning()
     }
 
     private func refreshSourceAppRunning() {
@@ -437,13 +498,14 @@ extension AppModel {
     }
 
     private func audioSection() -> DiagnosticsSection {
-        let source = settings.source ?? .systemWide
+        let source = effectiveSource
+        let byDefault = settings.source == nil ? " (по умолчанию)" : ""
         var rows: [DiagnosticsRow] = []
         switch source {
         case .systemWide:
-            rows.append(DiagnosticsRow(label: "Источник", value: source.displayName))
+            rows.append(DiagnosticsRow(label: "Источник", value: source.displayName + byDefault))
         case .application(let bundleID, let bundlePath, let displayName):
-            rows.append(DiagnosticsRow(label: "Источник", value: "\(displayName) (\(bundleID.isEmpty ? "без bundle ID" : bundleID))"))
+            rows.append(DiagnosticsRow(label: "Источник", value: "\(displayName) (\(bundleID.isEmpty ? "без bundle ID" : bundleID))\(byDefault)"))
             rows.append(DiagnosticsRow(label: "Путь источника", value: bundlePath))
             rows.append(DiagnosticsRow(label: "Источник запущен", value: Self.yesNo(sourceAppRunning)))
         }
@@ -502,7 +564,7 @@ extension AppModel {
 
     private func permissionSection() -> DiagnosticsSection {
         DiagnosticsSection(title: "Доступ", rows: [
-            DiagnosticsRow(label: "Запись системного аудио", value: Self.describe(AudioCapturePermission.preflight())),
+            DiagnosticsRow(label: "Запись системного аудио", value: Self.describe(permissionStatus)),
             DiagnosticsRow(label: "Подсказка о доступе", value: permissionHint ? "показана" : "нет"),
         ])
     }
