@@ -283,6 +283,9 @@ final class AppModel {
         bannerTask?.cancel()
         bannerTask = nil
         bannerTaskDeadline = nil
+        // Как в `start()`: следующий запуск начинает с базового трека и без баннера.
+        banner.reset()
+        applyBannerPhase(.hidden)
         scanTask?.cancel()
         scanTask = nil
         stopSources()
