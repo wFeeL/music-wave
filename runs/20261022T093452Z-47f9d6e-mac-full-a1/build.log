@@ -1,0 +1,87 @@
+== step build-release: swift build -c release
+Building for production...
+[0/5] Write sources
+[2/5] Write swift-version-7974D3F7F03D5E95.txt
+[4/6] Compiling WaveCore ActivityGate.swift
+[5/7] Compiling WaveFeels AppDelegate.swift
+[5/7] Write Objects.LinkFileList
+[6/7] Linking WaveFeels
+Build complete! (53.06s)
+== step build-tests: swift build --build-tests
+Building for debugging...
+[0/13] /Users/runner/work/music-wave/music-wave/.build/arm64-apple-macosx/debug/WaveFeelsPackageTests.derived/runner.swift
+[1/13] Write sources
+[6/13] Write WaveFeels-entitlement.plist
+[7/13] Write swift-version-7974D3F7F03D5E95.txt
+[9/27] Emitting module WaveCore
+[10/27] Compiling WaveCore ActivityGate.swift
+[11/27] Compiling WaveCore AdapterSilenceMonitor.swift
+[12/27] Compiling WaveCore Analyzer.swift
+[13/27] Compiling WaveCore AttackRelease.swift
+[14/27] Compiling WaveCore AudioSource.swift
+[15/27] Compiling WaveCore BandMapper.swift
+[16/27] Compiling WaveCore BeatDetector.swift
+[17/27] Compiling WaveCore IdleCapture.swift
+[18/27] Compiling WaveCore IslandStateMachine.swift
+[19/27] Compiling WaveCore Latency.swift
+[20/27] Compiling WaveCore LevelProcessor.swift
+[21/27] Compiling WaveCore NotchGeometry.swift
+[22/27] Compiling WaveCore NowPlaying.swift
+[23/33] Compiling WaveCore Palette.swift
+[24/33] Compiling WaveCore RealFFT.swift
+[25/33] Compiling WaveCore SampleFeedMonitor.swift
+[26/33] Compiling WaveCore SampleRingBuffer.swift
+[27/33] Compiling WaveCore TapStreamLayout.swift
+[28/33] Compiling WaveCore WaveShape.swift
+[29/69] Emitting module WaveFeels
+[30/79] Compiling WaveFeels OutputDeviceMonitor.swift
+[31/79] Compiling WaveFeels ProcessTapCapture.swift
+[32/79] Compiling WaveFeels MediaRemoteAdapter.swift
+[33/79] Compiling WaveFeels SnapshotRenderer.swift
+[34/79] Compiling WaveFeels AppSettings.swift
+[35/79] Compiling WaveFeels ArtworkPixels.swift
+[36/79] Compiling WaveFeels AudioCapturePermission.swift
+[37/85] Compiling WaveFeels DiagnosticsView.swift
+[38/85] Compiling WaveFeels ExpandedPanelView.swift
+[39/85] Compiling WaveFeels IslandShape.swift
+[40/85] Compiling WaveFeels IslandView.swift
+[41/85] Compiling WaveFeels MarqueeText.swift
+[42/85] Compiling WaveFeels SettingsView.swift
+[43/85] Compiling WaveFeels WaveCanvas.swift
+[44/85] Compiling WaveFeels FullscreenDetector.swift
+[45/85] Compiling WaveFeels NotchPanel.swift
+[46/85] Compiling WaveFeels NotchWindowController.swift
+[54/85] Compiling WaveFeels LaunchAtLogin.swift
+[55/85] Compiling WaveFeels Log.swift
+[56/85] Compiling WaveFeels SigningInfo.swift
+[57/85] Compiling WaveFeels AppDelegate.swift
+[58/85] Compiling WaveFeels AppModel.swift
+[59/85] Compiling WaveFeels LaunchArguments.swift
+[60/85] Compiling WaveFeels WaveFeelsApp.swift
+[61/85] Compiling WaveCoreTests RealFFTTests.swift
+[62/85] Compiling WaveCoreTests SampleRingBufferTests.swift
+[63/85] Compiling WaveCoreTests SourceChoicesTests.swift
+[64/85] Compiling WaveCoreTests TapStreamLayoutTests.swift
+[65/85] Compiling WaveCoreTests TestSignals.swift
+[66/85] Compiling WaveCoreTests WaveShapeTests.swift
+[66/85] Write Objects.LinkFileList
+[73/85] Linking WaveFeels
+[74/85] Applying WaveFeels
+[76/94] Compiling WaveFeelsTests MediaRemoteAdapterTests.swift
+[83/94] Emitting module WaveCoreTests
+[84/94] Emitting module WaveFeelsTests
+[85/97] Compiling WaveFeelsTests AppModelArtworkTests.swift
+[86/97] Compiling WaveFeelsTests AppModelDefaultSourceTests.swift
+[87/97] Compiling WaveFeelsTests AppModelPauseTests.swift
+[88/97] Compiling WaveFeelsTests AppSettingsTests.swift
+[89/97] Compiling WaveFeelsTests ArtworkPixelsTests.swift
+[90/97] Compiling WaveFeelsTests CoreAudioSmokeTests.swift
+[91/97] Compiling WaveFeelsTests LaunchArgumentsTests.swift
+[93/97] Compiling WaveFeelsTests NotchPanelTests.swift
+[94/97] Compiling WaveFeelsTests PipelineLifecycleTests.swift
+[95/97] Compiling WaveFeelsTests SnapshotRendererTests.swift
+[96/99] Emitting module WaveFeelsPackageTests
+[97/99] Compiling WaveFeelsPackageTests runner.swift
+[97/99] Write Objects.LinkFileList
+[98/99] Linking WaveFeelsPackageTests
+Build complete! (55.17s)
