@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import Observation
 import QuartzCore
 import WaveCore
 
@@ -13,8 +14,9 @@ import WaveCore
 /// 2-3 щелчка. Колбэков завершения нет: все вызовы идут на главном акторе.
 ///
 /// Остановившийся сам движок (сменилась частота устройства) собирается заново на той же сетке;
-/// не собрался: метроном молчит, свечения тоже нет.
+/// не собрался: метроном молчит, свечения тоже нет, а `failed` сообщает об этом листу.
 @MainActor
+@Observable
 final class Metronome {
     /// Длина щелчка, с.
     static let clickDuration = 0.010
@@ -29,20 +31,26 @@ final class Metronome {
     /// Как часто очередь плеера пополняется.
     static let refillInterval: Duration = .milliseconds(100)
 
+    /// Движок не запустился или не собрался заново: щелчков нет. Единственное наблюдаемое свойство.
+    private(set) var failed = false
     /// Сетка щелчков; `nil`, пока метроном не идет.
-    private(set) var schedule: MetronomeSchedule?
-    private var engine: AVAudioEngine?
-    private var player: AVAudioPlayerNode?
-    private var click: AVAudioPCMBuffer?
-    private var accent: AVAudioPCMBuffer?
+    @ObservationIgnored private(set) var schedule: MetronomeSchedule?
+    @ObservationIgnored private var engine: AVAudioEngine?
+    @ObservationIgnored private var player: AVAudioPlayerNode?
+    @ObservationIgnored private var click: AVAudioPCMBuffer?
+    @ObservationIgnored private var accent: AVAudioPCMBuffer?
     /// Первый щелчок, еще не поставленный в очередь плеера.
-    private var nextClick = 0
-    private var refillTask: Task<Void, Never>?
+    @ObservationIgnored private var nextClick = 0
+    @ObservationIgnored private var refillTask: Task<Void, Never>?
 
     /// Запускает движок и щелчки: первый через `MetronomeSchedule.startDelay`.
     func start() {
         guard schedule == nil else { return }
-        guard startEngine() else { return }
+        guard startEngine() else {
+            failed = true
+            return
+        }
+        failed = false
         schedule = MetronomeSchedule(start: CACurrentMediaTime() + MetronomeSchedule.startDelay)
         nextClick = 0
         refill()
@@ -118,6 +126,7 @@ final class Metronome {
             tearDownEngine()
             guard startEngine() else {
                 stop()
+                failed = true
                 return
             }
             nextClick = 0

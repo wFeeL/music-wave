@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import SwiftUI
 import WaveCore
 
@@ -6,14 +8,15 @@ import WaveCore
 /// пока она не совпадет со щелчком.
 ///
 /// Свечение предпросмотра идет только от метронома (`Metronome.glowSchedule`): событие на
-/// `щелчок + задержка вывода + сдвиг`, задержка вывода считается так же, как у анализа, по
-/// устройству и режиму «Задержки волн». Захват и анализ музыки тем временем могут идти, на лист они
+/// `щелчок + задержка вывода + сдвиг`, задержка вывода та же, что у анализа
+/// (`AudioPipeline.deviceOutputLatency`: устройство и режим «Задержки волн»). Захват и анализ музыки тем временем могут идти, на лист они
 /// не влияют.
 ///
 /// Ползунок правит сдвиг устройства, для которого лист открыт (`deviceUID`; пустой UID правит
 /// общий сдвиг), и меняет его сразу, вместе с островом. «Готово» оставляет значение, «Отмена»,
-/// Esc и любое другое закрытие возвращают все сдвиги, какими они были при открытии. Сменилось
-/// устройство вывода: правка относилась к прежнему, поэтому лист закрывается как по «Отмене».
+/// Esc и выход из приложения с открытым листом возвращают все сдвиги, какими они были при
+/// открытии. Сменилось устройство вывода: правка относилась к прежнему, поэтому лист закрывается
+/// как по «Отмене». Метроном не включился: под текстом строка об этом.
 struct CalibrationView: View {
     static let width: CGFloat = 460
 
@@ -38,11 +41,10 @@ struct CalibrationView: View {
         let metronome = Metronome()
         _metronome = State(initialValue: metronome)
         _player = State(initialValue: PreviewPlayer(glowSchedule: { [model, deviceUID] presented in
-            let settings = model.settings
-            return metronome.glowSchedule(
+            metronome.glowSchedule(
                 at: presented,
-                outputLatency: LatencyCalculator.outputLatency(model.output.latency, mode: settings.latencyMode),
-                offsetMs: settings.syncOffsets.offset(forDeviceUID: deviceUID)
+                outputLatency: model.pipeline.deviceOutputLatency,
+                offsetMs: model.settings.syncOffsets.offset(forDeviceUID: deviceUID)
             )
         }))
     }
@@ -53,6 +55,10 @@ struct CalibrationView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Поставьте музыку на паузу. Двигайте ползунок, пока вспышка не совпадет со щелчком.")
                 .fixedSize(horizontal: false, vertical: true)
+            if metronome.failed {
+                Label("Не удалось включить метроном", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
             IslandPreview(model: model, player: player, active: true, wingLimit: nil)
             SettingsSliderRow(
                 "Сдвиг синхронизации",
@@ -87,13 +93,21 @@ struct CalibrationView: View {
         }
         .onDisappear {
             metronome.stop()
-            if !confirmed, let original {
-                model.settings.syncOffsets = original
-            }
+            restoreUnconfirmed()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            // Выход с открытым листом: `onDisappear` уже не придет, неподтвержденная правка не остается.
+            restoreUnconfirmed()
         }
         .onChange(of: model.pipeline.outputDeviceUID) { _, uid in
             guard uid != deviceUID else { return }
             dismiss()
         }
+    }
+
+    /// Без «Готово» сдвиги возвращаются к значениям на момент открытия.
+    private func restoreUnconfirmed() {
+        guard !confirmed, let original else { return }
+        model.settings.syncOffsets = original
     }
 }
