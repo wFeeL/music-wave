@@ -6,9 +6,12 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [
         .library(name: "WaveCore", targets: ["WaveCore"]),
+        .executable(name: "wave-eval", targets: ["wave-eval"]),
     ],
     targets: [
         .target(name: "WaveCore"),
+        // Офлайн-оценка попадания вспышек в долю на записанной музыке; собирается и на Linux.
+        .executableTarget(name: "wave-eval", dependencies: ["WaveCore"]),
         .testTarget(name: "WaveCoreTests", dependencies: ["WaveCore"]),
     ]
 )
