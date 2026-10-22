@@ -107,6 +107,7 @@ struct IslandBodyView: View, Equatable {
 /// из свернутой в баннер), с ним у каждого слоя своя форма и меняется только прозрачность.
 struct IslandWavesView: View {
     /// Свечение линий: размытая копия основных волн, радиус размытия × «Радиус свечения».
+    /// Выше 1× яркость умножается на корень из радиуса: иначе широкий ореол тусклее, чем при 1×.
     static let glowBlur: CGFloat = 2
     static let glowOpacity = 0.25
     /// Поле текстуры вокруг прямоугольника волн: под размытую копию линий и точку удара.
@@ -216,7 +217,7 @@ struct IslandWavesView: View {
                 if glow > 0 {
                     WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
                         .blur(radius: Self.glowBlur * radius)
-                        .opacity(Self.glowOpacity * glow)
+                        .opacity(min(Self.glowOpacity * glow * Double(max(radius, 1)).squareRoot(), 1))
                         .blendMode(.plusLighter)
                 }
                 WaveCanvas(waves: waves, mirrored: mirrored)
