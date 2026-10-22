@@ -699,4 +699,15 @@ struct NotchGeometryTests {
             }
         }
     }
+
+    /// Баннер появился под неподвижным курсором: панель не раскрывается, пока курсор не
+    /// сдвинется или не войдет в зону заново.
+    @Test func bannerUnderStillPointerDoesNotCountAsHover() {
+        #expect(!NotchPointer.countsAsHover(inZone: true, moved: false, banner: true, wasInZone: false))
+        #expect(NotchPointer.countsAsHover(inZone: true, moved: true, banner: true, wasInZone: false))
+        #expect(NotchPointer.countsAsHover(inZone: true, moved: false, banner: true, wasInZone: true))
+        #expect(NotchPointer.countsAsHover(inZone: true, moved: false, banner: false, wasInZone: false))
+        #expect(!NotchPointer.countsAsHover(inZone: false, moved: true, banner: true, wasInZone: true))
+        #expect(!NotchPointer.countsAsHover(inZone: false, moved: false, banner: false, wasInZone: true))
+    }
 }

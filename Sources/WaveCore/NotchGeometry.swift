@@ -227,6 +227,14 @@ public struct NotchPointer: Sendable, Equatable {
         self.acceptsClicks = acceptsClicks
         self.needsPolling = needsPolling
     }
+
+    /// Засчитать ли курсор в зону наведения. `inZone`: курсор в зоне по геометрии; `moved`:
+    /// пересчет от движения мыши или опроса; `banner`: виден баннер; `wasInZone`: курсор уже
+    /// был засчитан в зону. Баннер, появившийся под неподвижным курсором, панель не раскрывает:
+    /// курсор засчитывается, только когда сдвинется или войдет в зону заново.
+    public static func countsAsHover(inZone: Bool, moved: Bool, banner: Bool, wasInZone: Bool) -> Bool {
+        inZone && (moved || !banner || wasInZone)
+    }
 }
 
 /// Раскладка содержимого баннера нового трека в локальных координатах баннера

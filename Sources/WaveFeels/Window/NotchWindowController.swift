@@ -238,10 +238,9 @@ final class NotchWindowController {
             suppressed: model.islandSuppressed,
             banner: banner
         )
-        var inside = pointer.inHoverZone
-        if !moved, banner, inside, !model.pointerInHoverZone {
-            inside = false
-        }
+        let inside = NotchPointer.countsAsHover(
+            inZone: pointer.inHoverZone, moved: moved, banner: banner, wasInZone: model.pointerInHoverZone
+        )
         if panel.ignoresMouseEvents == pointer.acceptsClicks {
             panel.ignoresMouseEvents = !pointer.acceptsClicks
         }
