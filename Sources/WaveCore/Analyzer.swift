@@ -68,7 +68,6 @@ public final class Analyzer {
         self.sampleRate = sampleRate
         let mapper = BandMapper(fftSize: Self.fftSize, sampleRate: sampleRate)
         self.mapper = mapper
-        levelProcessor = Self.makeLevelProcessor(for: mapper)
         lowBands = Self.makeLowBands(for: mapper)
         resetDynamics()
     }
@@ -80,7 +79,7 @@ public final class Analyzer {
     public func process(samples: [Float], time: Double, dt: Double, settings: LevelSettings) -> WaveFrame {
         precondition(samples.count == Self.fftSize, "samples.count must equal fftSize")
 
-        // Пауза или перемотка времени: история детектора и сглаживание устарели.
+        // Пауза или перемотка времени: история детектора, сглаживание и пики автоуровня устарели.
         if let lastTime, time - lastTime > Self.staleGap || time < lastTime {
             resetDynamics()
         }
@@ -115,8 +114,11 @@ public final class Analyzer {
         )
     }
 
+    /// Пауза, перемотка или смена частоты: детектор, сглаживание и пики автоуровня начинают
+    /// заново, иначе пик громкого припева до паузы держал бы волны тихого трека маленькими.
     private func resetDynamics() {
         detector.reset()
+        levelProcessor = Self.makeLevelProcessor(for: mapper)
         envelope = BeatEnvelope()
         smoothers = Self.makeSmoothers()
         lastTime = nil

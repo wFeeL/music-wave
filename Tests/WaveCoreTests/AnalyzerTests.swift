@@ -124,6 +124,19 @@ struct AnalyzerTests {
         #expect(silent.beat == 0)
     }
 
+    @Test func pauseResetsAutoLevelPeaks() throws {
+        let quiet = TestSignals.sine(frequency: 440, amplitude: 0.01, sampleRate: 48_000, count: 24_000)
+        let fresh = try #require(Self.run(Analyzer(sampleRate: 48_000), samples: quiet).last?.frame)
+
+        // Громкий припев, пауза 10 с, тихий трек: пик громкого не должен держать волны маленькими.
+        let analyzer = Analyzer(sampleRate: 48_000)
+        Self.run(analyzer, samples: TestSignals.sine(frequency: 440, amplitude: 0.5, sampleRate: 48_000, count: 96_000))
+        let resumed = try #require(Self.run(analyzer, samples: quiet, timeOffset: 12).last?.frame)
+
+        #expect(fresh.level > 0.5)
+        #expect(abs(resumed.level - fresh.level) < 0.05)
+    }
+
     @Test func frameStoreReturnsLastPublished() {
         let store = FrameStore()
         #expect(store.latest == .silent)
