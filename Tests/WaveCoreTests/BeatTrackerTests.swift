@@ -279,6 +279,24 @@ struct BeatTrackerTests {
         #expect(release.before >= 0.25 && release.after < 0.25, "\(release)")
     }
 
+    /// Смесь доходит от онсетов до предсказания за одну долю после захвата.
+    @Test func blendCrossfadesInOneBeat() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        let hop = hops.hop
+        var steps = 0
+        var lockStep: Int?
+        var fullStep: Int?
+        hops.feed(&tracker, until: 10) { tracker in
+            steps += 1
+            if lockStep == nil, tracker.locked { lockStep = steps }
+            if fullStep == nil, tracker.blend == 1 { fullStep = steps }
+        }
+        let lock = Double(try #require(lockStep)) * hop
+        let full = Double(try #require(fullStep)) * hop
+        #expect(abs(full - lock - 0.5) <= 2 * hop, "lock \(lock), full blend \(full)")
+    }
+
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
     @Test func nonFiniteKickLevelCountsAsFloor() {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
