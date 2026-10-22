@@ -42,12 +42,15 @@ struct SnapshotRendererTests {
         #expect(loudCount > 100, "02-loud-beat: насыщенных пикселей в крыльях \(loudCount)")
         #expect(silentCount == 0, "01-silent: насыщенных пикселей в крыльях \(silentCount)")
 
-        // Раскрытая панель показывает обложку: середина обложки цветная, не черная.
+        // Раскрытая панель показывает обложку (или градиент вместо нее) на своем месте: длинный
+        // текст не сдвигает ее, середина обложки цветная, не черная.
         let artwork = SnapshotRenderer.artworkSampleRect()
-        let expanded = try Bitmap(url: directory.appendingPathComponent("04-expanded.png"))
-        let artworkCount = expanded.saturatedPixels(in: artwork, scale: SnapshotRenderer.scale)
         let artworkArea = Int(artwork.width * artwork.height * SnapshotRenderer.scale * SnapshotRenderer.scale)
-        #expect(artworkCount > artworkArea / 2, "04-expanded: цветных пикселей обложки \(artworkCount) из \(artworkArea)")
+        for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork", "11-expanded-no-adapter"] {
+            let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
+            let artworkCount = expanded.saturatedPixels(in: artwork, scale: SnapshotRenderer.scale)
+            #expect(artworkCount > artworkArea / 2, "\(name): цветных пикселей обложки \(artworkCount) из \(artworkArea)")
+        }
     }
 
     /// `Resources/Demo/demo.wav` в корне репозитория.

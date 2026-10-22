@@ -5,6 +5,7 @@ import SwiftUI
 /// возврат к началу втрое быстрее, и снова. Обрезанные края затухают маской на 14 pt: правый,
 /// пока конец текста скрыт, левый, пока скрыто начало.
 ///
+/// Ширина всегда предложенная, а не ширина текста: длинная строка не раздвигает соседей.
 /// Выбор между обычной и бегущей строкой делает `ViewThatFits` при раскладке, поэтому снимок
 /// (`ImageRenderer`) сразу показывает начало длинного текста с затуханием справа. Прокрутка
 /// живет в `task` и останавливается вместе с видом: бегущая строка есть только в раскрытой панели.
@@ -29,7 +30,7 @@ struct MarqueeText: View {
                 .fixedSize(horizontal: true, vertical: false)
             MarqueeScroller(text: text, font: font)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -54,13 +55,21 @@ private struct MarqueeScroller: View {
 
     var body: some View {
         let distance = max(textWidth - boxWidth, 0)
+        // Место задает скрытая строка: высота одной строки, ширина ровно предложенная (минимум 0).
+        // Сам текст во всю длину лежит поверх и в раскладке не участвует; маска обрезает его по месту.
         Text(verbatim: text)
             .font(font)
             .lineLimit(1)
-            .fixedSize()
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
-            .offset(x: offset)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .hidden()
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
+                Text(verbatim: text)
+                    .font(font)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+                    .offset(x: offset)
+            }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
             .mask { edgeMask }
             .task(id: Trip(text: text, distance: distance)) {

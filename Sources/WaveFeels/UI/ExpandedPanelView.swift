@@ -39,6 +39,18 @@ struct ExpandedPanelView: View {
     static let buttonSize: CGFloat = 36
     static let buttonSpacing: CGFloat = 2
     static let symbolSize: CGFloat = 20
+    /// Ширина трех кнопок с промежутками.
+    static let controlsWidth: CGFloat = 3 * buttonSize + 2 * buttonSpacing
+
+    /// Ширина колонки текста: все, что осталось в панели после отступов, обложки и кнопок.
+    /// Задается явно, чтобы длинное название не раздвигало панель.
+    static func textColumnWidth(controls: Bool) -> CGFloat {
+        let panel = NotchGeometry.expandedSize.width
+        let leading = leadingInset + artworkSize + artworkSpacing
+        let trailing = controls ? controlsSpacing + controlsWidth + trailingInset : trailingInsetWithoutControls
+        return max(panel - leading - trailing, 0)
+    }
+
     /// Сколько ждать подтверждения паузы или игры от Now Playing, прежде чем вернуть значок.
     static let pendingPlaybackTimeout: Duration = .seconds(2)
 
@@ -72,9 +84,10 @@ struct ExpandedPanelView: View {
                         .padding(.top, Self.progressSpacing)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: Self.textColumnWidth(controls: playback != nil), alignment: .leading)
             if let playback {
                 controls(isPlaying: pendingPlaying ?? playback.isPlaying)
+                    .fixedSize()
                     .padding(.leading, Self.controlsSpacing)
             }
         }
