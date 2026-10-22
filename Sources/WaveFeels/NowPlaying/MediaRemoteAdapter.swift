@@ -92,7 +92,6 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var streamToken = 0
     @ObservationIgnored private var stream: AdapterProcess?
     @ObservationIgnored private var streamStartedAt: ContinuousClock.Instant?
-    @ObservationIgnored private var parser = NowPlayingStreamParser()
     /// Последнее состояние текущего потока; во время удержания может отличаться от `info`.
     @ObservationIgnored private var streamInfo: NowPlayingInfo?
     /// После перезапуска: прежний `info` держится, пока поток не выдал трек или не вышел срок.
@@ -310,7 +309,6 @@ final class MediaRemoteAdapter {
         let token = nextToken()
         streamToken = token
         streamStartedAt = nil
-        parser = NowPlayingStreamParser()
         streamInfo = nil
         holdTask?.cancel()
         holdTask = nil
@@ -322,9 +320,11 @@ final class MediaRemoteAdapter {
                 self?.holdExpired(token: token)
             }
         }
+        // У каждого запуска свой разбор: строки нового потока не сливаются с состоянием прежнего.
         let process = AdapterProcess(
             arguments: [paths.script, paths.framework] + Self.streamArguments,
-            onStdout: { [weak self] line in self?.streamLine(line, token: token) },
+            parsesNowPlaying: true,
+            onStdout: { [weak self] output in self?.streamOutput(output, token: token) },
             onStderr: { [weak self] line in self?.streamStderrLine(line, token: token) },
             onFinish: { [weak self] status in self?.streamEnded(status: status, token: token) }
         )
@@ -349,20 +349,23 @@ final class MediaRemoteAdapter {
         }
     }
 
-    private func streamLine(_ line: String, token: Int) {
+    /// Строка потока, уже разобранная вне главного потока (`NowPlayingLineDecoder`).
+    private func streamOutput(_ output: AdapterOutput, token: Int) {
         guard token == streamToken else { return }
-        let parsed: NowPlayingInfo?
-        do {
-            parsed = try parser.consume(line: line)
-        } catch {
-            log("адаптер: строка не разобрана: \(line.prefix(200))")
+        let next: NowPlayingInfo?
+        switch output {
+        case .line:
             return
+        case .unparsed(let prefix):
+            log("адаптер: строка не разобрана: \(prefix)")
+            return
+        case .nowPlaying(let decoded):
+            next = decoded
         }
-        let next = parsed.map(Self.sanitized)
         streamInfo = next
         // Перезапущенный поток начинает с пустого снимка: прежний трек пока остается.
         if holdingInfo {
-            guard parsed != nil else { return }
+            guard next != nil else { return }
             holdingInfo = false
             holdTask?.cancel()
             holdTask = nil
@@ -370,7 +373,7 @@ final class MediaRemoteAdapter {
         if next != info {
             info = next
         }
-        guard parsed != nil else { return }
+        guard next != nil else { return }
         restarts = 0
         // Из «тишины адаптера» выводит только трек выбранного источника (`clearSilence()`).
         if availability != .available, availability != .silent {
@@ -474,7 +477,8 @@ private final class AdapterProcess {
     private static let endGrace: Duration = .seconds(1)
 
     private let process = Process()
-    private let onStdout: @MainActor (String) -> Void
+    private let parsesNowPlaying: Bool
+    private let onStdout: @MainActor (AdapterOutput) -> Void
     private let onStderr: @MainActor (String) -> Void
     private let onFinish: @MainActor (Int32) -> Void
     private var readers: [FileHandle] = []
@@ -482,15 +486,19 @@ private final class AdapterProcess {
     private var status: Int32 = 0
     private var finished = false
 
+    /// `parsesNowPlaying`: stdout это поток Now Playing, его строки разбираются вне главного
+    /// потока и приходят как `.nowPlaying` или `.unparsed`; иначе как `.line`.
     init(
         arguments: [String],
-        onStdout: @escaping @MainActor (String) -> Void,
+        parsesNowPlaying: Bool = false,
+        onStdout: @escaping @MainActor (AdapterOutput) -> Void,
         onStderr: @escaping @MainActor (String) -> Void,
         onFinish: @escaping @MainActor (Int32) -> Void
     ) {
         process.executableURL = MediaRemoteAdapter.perl
         process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
+        self.parsesNowPlaying = parsesNowPlaying
         self.onStdout = onStdout
         self.onStderr = onStderr
         self.onFinish = onFinish
@@ -502,9 +510,17 @@ private final class AdapterProcess {
         process.standardOutput = stdout
         process.standardError = stderr
         readers = [stdout.fileHandleForReading, stderr.fileHandleForReading]
+        let decode: @Sendable (String) -> AdapterOutput
+        if parsesNowPlaying {
+            let decoder = NowPlayingLineDecoder()
+            decode = { line in decoder.decode(line) }
+        } else {
+            decode = { line in .line(line) }
+        }
         PipeIO.readLines(
             from: stdout.fileHandleForReading,
-            onLine: { line in self.onStdout(line) },
+            decode: decode,
+            onLine: { output in self.onStdout(output) },
             onEnd: { self.endReached() }
         )
         PipeIO.readLines(
@@ -569,41 +585,87 @@ private final class AdapterProcess {
     }
 }
 
+/// Строка stdout процесса адаптера. Строки потока Now Playing приходят уже разобранными.
+enum AdapterOutput: Sendable, Equatable {
+    case line(String)
+    /// Состояние Now Playing после строки потока (`nil`: играть нечему), уже с `sanitized`.
+    case nowPlaying(NowPlayingInfo?)
+    /// Строка потока не разобралась; начало строки для лога.
+    case unparsed(String)
+}
+
+/// Разбирает строки потока Now Playing: JSON, слияние diff и base64 обложки. Вызывается только
+/// с последовательной очереди одного `PipeIO.readLines`, поэтому состояние парсера без замка.
+nonisolated final class NowPlayingLineDecoder: @unchecked Sendable {
+    static let unparsedPrefix = 200
+
+    private var parser = NowPlayingStreamParser()
+
+    func decode(_ line: String) -> AdapterOutput {
+        do {
+            let parsed = try parser.consume(line: line)
+            return .nowPlaying(parsed.map { MediaRemoteAdapter.sanitized($0) })
+        } catch {
+            return .unparsed(String(line.prefix(Self.unparsedPrefix)))
+        }
+    }
+}
+
 /// Обработчики `FileHandle` и `Process`, которые Foundation вызывает на фоновых очередях.
 /// Замыкания создаются здесь, вне главного актора, и передают результат на главный поток
 /// через `DispatchQueue.main.async`, сохраняя порядок.
 nonisolated enum PipeIO {
-    static func readLines(
+    /// Строки из пайпа по одной. `decode` идет на своей последовательной очереди (разбор JSON и
+    /// обложки не занимает главный поток), на главный поток попадает только результат, в том же
+    /// порядке; `onEnd` после последней строки.
+    static func readLines<Output: Sendable>(
         from handle: FileHandle,
-        onLine: @escaping @MainActor @Sendable (String) -> Void,
+        decode: @escaping @Sendable (String) -> Output,
+        onLine: @escaping @MainActor @Sendable (Output) -> Void,
         onEnd: @escaping @MainActor @Sendable () -> Void
     ) {
         let splitter = LineSplitter()
+        let queue = DispatchQueue(label: "com.wfeels.wavefeels.adapter-lines", qos: .utility)
         handle.readabilityHandler = { handle in
             let chunk = handle.availableData
             if chunk.isEmpty {
                 handle.readabilityHandler = nil
                 let rest = splitter.finish()
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        if let rest {
-                            onLine(rest)
+                queue.async {
+                    let output = rest.map(decode)
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            if let output {
+                                onLine(output)
+                            }
+                            onEnd()
                         }
-                        onEnd()
                     }
                 }
                 return
             }
             let lines = splitter.append(chunk)
             guard !lines.isEmpty else { return }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    for line in lines {
-                        onLine(line)
+            queue.async {
+                let outputs = lines.map(decode)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        for output in outputs {
+                            onLine(output)
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// Строки без разбора.
+    static func readLines(
+        from handle: FileHandle,
+        onLine: @escaping @MainActor @Sendable (String) -> Void,
+        onEnd: @escaping @MainActor @Sendable () -> Void
+    ) {
+        readLines(from: handle, decode: { $0 }, onLine: onLine, onEnd: onEnd)
     }
 
     static func observeExit(of process: Process, onExit: @escaping @MainActor @Sendable (Int32) -> Void) {

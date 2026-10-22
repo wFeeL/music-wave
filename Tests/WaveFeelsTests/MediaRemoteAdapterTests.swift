@@ -51,6 +51,29 @@ struct MediaRemoteAdapterTests {
         #expect(splitter.finish() == "tail")
     }
 
+    /// Строки потока разбираются вне главного потока (`NowPlayingLineDecoder`): состояние
+    /// копится между строками, длительность проверяется, плохая строка отдается началом.
+    @Test func lineDecoderParsesStreamOffMain() async {
+        let decoded = await Task.detached { () -> [AdapterOutput] in
+            let decoder = NowPlayingLineDecoder()
+            let snapshot = #"{"type":"data","diff":false,"payload":{"bundleIdentifier":"com.apple.Music","title":"One","playing":true,"durationMicros":1e18}}"#
+            let diff = #"{"type":"data","diff":true,"payload":{"playing":false}}"#
+            let broken = "{" + String(repeating: "x", count: 500)
+            return [snapshot, diff, broken].map { decoder.decode($0) }
+        }.value
+        #expect(decoded.count == 3)
+        guard case .nowPlaying(let first?) = decoded[0], case .nowPlaying(let second?) = decoded[1] else {
+            Issue.record("строки потока не разобраны: \(decoded)")
+            return
+        }
+        #expect(first.title == "One")
+        #expect(first.isPlaying)
+        #expect(first.duration == nil)
+        #expect(second.title == "One")
+        #expect(!second.isPlaying)
+        #expect(decoded[2] == .unparsed("{" + String(repeating: "x", count: NowPlayingLineDecoder.unparsedPrefix - 1)))
+    }
+
     @Test func absurdDurationIsDropped() {
         let track = NowPlayingInfo(bundleIdentifier: "com.apple.Music", title: "Песня", duration: 200)
         #expect(MediaRemoteAdapter.sanitized(track).duration == 200)
