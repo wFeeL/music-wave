@@ -83,4 +83,6 @@ git commit -m "chore: remove signing files from repo"
 git push
 ```
 
+Сразу после этого добавить `signing/` в .gitignore репозитория, иначе следующий `git add -A` снова закоммитит эти файлы.
+
 Если заданы оба секрета, workflow берет их, иначе берет файлы из signing/. Если задан только один из двух, сборка падает.
