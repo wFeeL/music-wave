@@ -39,7 +39,7 @@ private func peakIndex(_ spectrum: [Float]) -> Int {
 
 @Test func denormalInputHasNoNaN() {
     let fft = RealFFT(size: fftSize)
-    let spec = fft.amplitudeSpectrum([Float](repeating: 1e-40, count: fftSize))
+    let spec = fft.amplitudeSpectrum([Float](repeating: Float.leastNormalMagnitude / 1000, count: fftSize))
     #expect(spec.count == 1024)
     #expect(spec.allSatisfy { $0.isFinite })
 }
