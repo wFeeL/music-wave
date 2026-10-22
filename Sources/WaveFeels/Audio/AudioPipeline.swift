@@ -12,7 +12,7 @@ enum PipelineStatus: Equatable, Sendable {
     case waitingForSource
     /// Пересборка сторожем нулей.
     case rebuilding(attempt: Int)
-    /// Tap не создался, повтор номер `attempt` из `AudioPipeline.startRetryPauses.count` после паузы.
+    /// Tap не создался, повтор номер `attempt` из `recoveryTiming.startRetryPauses.count` после паузы.
     case retrying(attempt: Int, message: String)
     /// Долгая тишина: IOProc и анализ остановлены, подписки работают, конвейер следит, не начал
     /// ли источник выводить звук.
@@ -42,9 +42,6 @@ struct CaptureErrorNote: Equatable, Sendable {
 final class AudioPipeline {
     static let ringCapacity = 131_072
     static let minRebuildInterval = 0.25
-    /// Паузы перед повторами, если tap не создался.
-    static let startRetryPauses = CaptureRecovery.Timing.standard.startRetryPauses
-    static let slowRetryInterval = CaptureRecovery.Timing.standard.slowRetryInterval
 
     private(set) var status: PipelineStatus = .stopped
     private(set) var matchedProcesses: [AudioProcessInfo] = []

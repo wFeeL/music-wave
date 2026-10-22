@@ -1445,7 +1445,7 @@ extension AppModel {
             rows.append(DiagnosticsRow(label: "Путь источника", value: bundlePath))
             rows.append(DiagnosticsRow(label: "Источник запущен", value: Self.yesNo(sourceAppRunning)))
         }
-        rows.append(DiagnosticsRow(label: "Статус захвата", value: Self.describe(pipeline.status)))
+        rows.append(DiagnosticsRow(label: "Статус захвата", value: Self.describe(pipeline.status, timing: pipeline.recoveryTiming)))
         let rate: String
         if case .capturing(.running(let sampleRate, _)) = pipeline.status {
             rate = "\(Int(sampleRate.rounded())) Гц"
@@ -1674,7 +1674,8 @@ extension AppModel {
         return "\(bundleID), \(path), звук: \(yesNo(process.isRunningOutput))"
     }
 
-    private static func describe(_ status: PipelineStatus) -> String {
+    /// Статус захвата для диагностики; сроки повторов берутся из `timing` конвейера.
+    nonisolated static func describe(_ status: PipelineStatus, timing: CaptureRecovery.Timing) -> String {
         switch status {
         case .stopped: "остановлен"
         case .demo: "демо из файла"
@@ -1682,11 +1683,11 @@ extension AppModel {
         case .capturing(.running(_, let processCount)): "захват идет, процессов в tap: \(processCount)"
         case .capturing(.idle): "tap не создан"
         case .capturing(.failed(let message)):
-            "ошибка: \(message); повтор раз в \(Int(AudioPipeline.slowRetryInterval)) с"
+            "ошибка: \(message); повтор раз в \(Int(timing.slowRetryInterval)) с"
         case .waitingForSource: "жду запуска источника"
         case .rebuilding(let attempt): "пересборка сторожем нулей, попытка \(attempt)"
         case .retrying(let attempt, let message):
-            "tap не создан (\(message)), повтор \(attempt) из \(AudioPipeline.startRetryPauses.count)"
+            "tap не создан (\(message)), повтор \(attempt) из \(timing.startRetryPauses.count)"
         case .suspended: "приостановлен в тишине"
         case .paused: "остановлен, визуализация на паузе"
         }

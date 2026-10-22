@@ -27,4 +27,11 @@ struct AppModelDiagnosticsTests {
         #expect(AppModel.outputtingDescription(status: .suspended, outputting: false) == "нет")
         #expect(AppModel.outputtingDescription(status: .stopped, outputting: false) == "нет данных")
     }
+
+    /// Статус захвата берет сроки повторов из конвейера, а не стандартные 30 с.
+    @Test func captureStatusShowsActualRetryInterval() {
+        let timing = CaptureRecovery.Timing(startRetryPauses: [1, 2], slowRetryInterval: 45)
+        #expect(AppModel.describe(.capturing(.failed("x")), timing: timing) == "ошибка: x; повтор раз в 45 с")
+        #expect(AppModel.describe(.retrying(attempt: 1, message: "x"), timing: timing) == "tap не создан (x), повтор 1 из 2")
+    }
 }
