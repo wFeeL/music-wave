@@ -15,3 +15,4 @@ docs/
 # Ключ подписи хранится только вне репозитория (см. README, «Сертификат подписи»)
 signing/wavefeels-signing.p12
 signing/password.txt
+.claude/

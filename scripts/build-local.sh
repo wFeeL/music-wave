@@ -47,7 +47,7 @@ usage() {
                     но не ниже 1.1.0; без git 1.1.0
   --signing-dir ПАПКА
                     папка с wavefeels-signing.p12 и password.txt, например
-                    ~/Downloads/music-wave-develop/signing. Ключ копируется в
+                    ~/Downloads/music-wave-develop-old/signing. Ключ копируется в
                     «~/Library/Application Support/WaveFeels/signing», это нужно
                     один раз, дальше он берется оттуда
   -h, --help        показать эту справку
@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
         --version=*) VERSION=${1#--version=} ;;
         --signing-dir)
             if [[ $# -lt 2 ]]; then
-                echo "После --signing-dir нужна папка с ключом, например --signing-dir ~/Downloads/music-wave-develop/signing" >&2
+                echo "После --signing-dir нужна папка с ключом, например --signing-dir ~/Downloads/music-wave-develop-old/signing" >&2
                 exit 2
             fi
             SIGNING_DIR_ARG=$2
