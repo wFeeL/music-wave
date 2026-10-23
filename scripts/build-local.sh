@@ -5,15 +5,15 @@
 #   --install  закрыть запущенный WaveFeels, заменить /Applications/WaveFeels.app и открыть его;
 #   --signing-dir  папка с wavefeels-signing.p12 и password.txt: ключ копируется в
 #              ~/Library/Application Support/WaveFeels/signing, дальше он берется оттуда;
-#   --version  версия приложения, иначе самый новый тег v* (без v и суффикса, не ниже 1.0.0),
-#              иначе 1.0.0. Номер сборки: date +%Y%m%d%H.
+#   --version  версия приложения, иначе самый новый тег v* (без v и суффикса, не ниже 1.1.0),
+#              иначе 1.1.0. Номер сборки: date +%Y%m%d%H.
 # Цепочка та же, что в ci-mac.sh: swift build -c release, адаптер, bundle.sh, sign.sh.
 # Адаптер Now Playing: cmake есть, тогда build-adapter.sh; не вышло, части копируются из
 # установленного /Applications/WaveFeels.app в dist/adapter-local; нет и их, сборка без
 # Now Playing с предупреждением.
 # Рассчитан на одни Command Line Tools: без actool иконка остается в .icns (RELEASE не задается),
 # если swift test не находит фреймворк тестов, тесты пропускаются с подсказкой.
-# git не обязателен: из архива GitHub (Download ZIP) без .git версия будет 1.0.0.
+# git не обязателен: из архива GitHub (Download ZIP) без .git версия будет 1.1.0.
 # Подпись: sign.sh с сертификатом во временной связке ключей; после выхода список связок
 # ключей пользователя проверяется еще раз, даже если сборку прервали. Ключ в git не хранится,
 # его ищет find_signing_dir (scripts/signing-source.sh). Если ключа нигде нет, а в
@@ -28,7 +28,7 @@ ROOT=$PWD
 # shellcheck source=scripts/signing-source.sh
 source scripts/signing-source.sh
 
-MIN_VERSION=1.0.0
+MIN_VERSION=1.1.0
 APP="$ROOT/dist/WaveFeels.app"
 INSTALLED=/Applications/WaveFeels.app
 
@@ -44,7 +44,7 @@ usage() {
                     тесты могут не запуститься, тогда они пропускаются)
   --install         заменить WaveFeels в «Программах» новой сборкой и открыть
   --version X.Y.Z   версия приложения, по умолчанию из последнего тега v*,
-                    но не ниже 1.0.0; без git 1.0.0
+                    но не ниже 1.1.0; без git 1.1.0
   --signing-dir ПАПКА
                     папка с wavefeels-signing.p12 и password.txt, например
                     ~/Downloads/music-wave-develop/signing. Ключ копируется в
@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
         --install) INSTALL=1 ;;
         --version)
             if [[ $# -lt 2 ]]; then
-                echo "После --version нужна версия, например --version 1.0.0" >&2
+                echo "После --version нужна версия, например --version 1.1.0" >&2
                 exit 2
             fi
             VERSION=$2
@@ -120,7 +120,7 @@ if [[ -n "$SIGNING_DIR_ARG" ]]; then
 fi
 
 if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Версия должна выглядеть как 1.0.0, получено: $VERSION" >&2
+    echo "Версия должна выглядеть как 1.1.0, получено: $VERSION" >&2
     exit 2
 fi
 
