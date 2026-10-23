@@ -46,6 +46,10 @@ final class RhythmRecording {
     /// ложной вспышки.
     @ObservationIgnored private var previousGlow: Float = 0
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// Запись файлов: `cancel()` ее не прерывает, но после нее ни Finder, ни «Сохранено».
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// «Уменьшение движения» уже отмечено в этой записи.
+    @ObservationIgnored private var notedReduceMotion = false
     @ObservationIgnored private var startedAt = 0.0
     @ObservationIgnored private var stamp = ""
 
@@ -67,6 +71,7 @@ final class RhythmRecording {
         task?.cancel()
         let session = RhythmSession(RhythmRecorder(duration: Self.duration, meta: meta))
         self.session = session
+        notedReduceMotion = meta.reduceMotion
         startedAt = CACurrentMediaTime()
         stamp = Self.stamp(Date())
         pipeline.recordRhythm(session)
@@ -83,11 +88,16 @@ final class RhythmRecording {
 
     /// Кадр острова с моментом показа `presented` (секунды хоста) и свечением доли `glow` на него.
     /// Зовется один раз на кадр `TimelineView`; без записи только запоминает свечение и ничего не
-    /// выделяет.
-    func frame(presented: Double, glow: Float, schedule: BeatSchedule?, refreshPeriod: Double) {
+    /// выделяет. `reduceMotion`: «Уменьшение движения» на этом кадре (свечения нет), один раз за
+    /// запись отмечается в ней.
+    func frame(presented: Double, glow: Float, schedule: BeatSchedule?, refreshPeriod: Double, reduceMotion: Bool) {
         let rise = glow - previousGlow
         previousGlow = glow
         guard let session else { return }
+        if reduceMotion, !notedReduceMotion {
+            notedReduceMotion = true
+            session.noteReduceMotion()
+        }
         session.appendFrame(presentedHost: presented, glowRise: rise, schedule: schedule ?? .empty, refreshPeriod: refreshPeriod)
     }
 
@@ -95,6 +105,8 @@ final class RhythmRecording {
     func cancel() {
         task?.cancel()
         task = nil
+        saveTask?.cancel()
+        saveTask = nil
         if let session {
             session.stop(.stopped)
             pipeline.recordRhythm(nil)
@@ -140,23 +152,26 @@ final class RhythmRecording {
                 + "вспышек \(log.flashes.count)"
         )
         guard !samples.isEmpty else {
-            show(.failed("Нет звука"))
+            // Анализ не дал ни шага: нет звука, остров скрыт (анализ в простое) или захват на паузе.
+            show(.failed("Нет звука или остров скрыт"))
             return
         }
         phase = .saving
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/WaveFeels", isDirectory: true)
         let names = RhythmLog.fileNames(stamp: stamp)
-        Task { @MainActor [weak self] in
+        saveTask = Task { @MainActor [weak self] in
             do {
                 let urls = try await Task.detached(priority: .utility) {
                     try RhythmRecording.write(log: log, samples: samples, directory: directory, json: names.json, wav: names.wav)
                 }.value
+                guard !Task.isCancelled else { return }
                 NSWorkspace.shared.activateFileViewerSelecting(urls)
                 Log.file("запись ритма сохранена: \(names.json), \(names.wav)")
                 self?.show(.saved)
             } catch {
                 Log.file("запись ритма не сохранилась: \(error.localizedDescription)")
+                guard !Task.isCancelled else { return }
                 self?.show(.failed("Не удалось сохранить"))
             }
         }

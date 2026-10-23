@@ -14,7 +14,8 @@
 # если Icon Composer на месте, icon-macos26.png (как .icon рисует система) и варианты
 # icon-macos26-dark.png, -clear.png, -tinted.png.
 # С $RELEASE без AppIcon.icns сборка падает.
-# В Info.plist пишутся WFCommit (короткий хэш: $WF_COMMIT, иначе git, иначе unknown) и
+# В Info.plist пишутся WFCommit (короткий хэш: $WF_COMMIT, иначе git с -dirty при правках,
+# иначе хэш из архива GitHub, иначе unknown) и
 # WFSwiftVersion (из swift --version), их показывает «Диагностика», строка «Сборка».
 set -euo pipefail
 
@@ -67,6 +68,10 @@ plutil -replace CFBundleVersion -string "$BUILD" "$CONTENTS/Info.plist"
 COMMIT=${WF_COMMIT:-}
 if [[ -z "$COMMIT" && -e .git ]] && command -v git > /dev/null 2>&1; then
     COMMIT=$(git rev-parse --short HEAD 2> /dev/null || true)
+    # Правки в отслеживаемых файлах: сборка не совпадает с коммитом.
+    if [[ -n "$COMMIT" ]] && ! git diff --quiet HEAD -- 2> /dev/null; then
+        COMMIT="$COMMIT-dirty"
+    fi
 fi
 if [[ -z "$COMMIT" && -f scripts/archive-commit.txt ]]; then
     ARCHIVED=$(head -n 1 scripts/archive-commit.txt | tr -d '[:space:]')

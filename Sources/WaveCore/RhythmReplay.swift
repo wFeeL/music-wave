@@ -7,7 +7,9 @@ import Foundation
 ///
 /// Сравниваются вспышки на общем отрезке `[0, until]`: `until` это меньшее из последнего кадра
 /// рендера (`meta.renderedUntil`) и слышимого конца звука (звук плюс задержка вывода плюс
-/// положительный сдвиг). Прогон начинает с холодного трекера, а устройство к началу записи уже
+/// положительный сдвиг). Если запись кончилась раньше (не `complete`), анализ на устройстве
+/// остановился и сбросил расписание вскоре после последнего сэмпла, поэтому `until` не дальше
+/// `audioSeconds`: вспышки устройства позже этого могли пропасть. Прогон начинает с холодного трекера, а устройство к началу записи уже
 /// могло держать ритм, поэтому есть и строка "after lock": только вспышки после того, как оба
 /// захватили ритм.
 public enum RhythmReplay {
@@ -167,7 +169,10 @@ public enum RhythmReplay {
         let result = OfflineBeatChain.run(samples: samples, sampleRate: sampleRate, config: config(for: meta, options: options))
 
         let audioEnd = Double(samples.count) / sampleRate + meta.outputLatency + max(meta.syncOffset, 0)
-        let until = min(meta.renderedUntil ?? audioEnd, audioEnd)
+        var until = min(meta.renderedUntil ?? audioEnd, audioEnd)
+        if meta.endReason != .complete {
+            until = min(until, Double(samples.count) / sampleRate)
+        }
         let deviceFlashes = log.flashes.filter { $0.time >= 0 && $0.time <= until }
         let replayFlashes = result.flashes.filter { $0.time >= 0 && $0.time <= until }
         let all = compare(device: deviceFlashes.map(\.time), replay: replayFlashes.map(\.time), window: options.window)
@@ -288,6 +293,16 @@ extension RhythmReplay.Report {
                 + "end \(meta.endReason.rawValue), rendered frames \(meta.renderedFrames)"
                 + (meta.renderedUntil.map { " until \(String(format: "%.2f", $0)) s" } ?? "")
         )
+        lines.append(
+            "device settings: reduce motion \(meta.reduceMotion ? "on" : "off"), glow intensity "
+                + "\(String(format: "%.2f", meta.glowIntensity)), beat pulse \(meta.beatPulse ? "on" : "off"), "
+                + "low power \(meta.lowPower ? "on" : "off"), clipped samples \(meta.clippedSamples)"
+        )
+        if meta.reduceMotion {
+            lines.append("NOTE: reduce motion was on, the device draws no glow, so 0 device flashes is expected")
+        } else if meta.glowIntensity <= 0 {
+            lines.append("NOTE: glow intensity was 0, the device flashes below were computed but not visible")
+        }
         lines.append(
             "compared: 0...\(String(format: "%.2f", until)) s, match window +-\(String(format: "%.0f", options.window * 1000)) ms, "
                 + "replay seed \(options.seed); difference = device minus replay, plus is later"

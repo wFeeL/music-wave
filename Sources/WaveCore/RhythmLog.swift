@@ -73,6 +73,18 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var sampleRate: Double
         /// Период отрисовки острова в начале записи, секунды.
         public var renderPeriod: Double
+        /// «Уменьшение движения» было включено в начале или на любом кадре записи: тогда свечения
+        /// нет и вспышек устройства не бывает.
+        public var reduceMotion: Bool
+        /// «Яркость свечения» 0...1: на вспышки записи не влияет (правило роста смотрит на свечение
+        /// до нее), но с нулем пользователь их не видит.
+        public var glowIntensity: Double
+        /// «Вздох» острова в такт доле включен.
+        public var beatPulse: Bool
+        /// Режим энергосбережения в начале записи (рендер до 30 кадров в секунду, облегченный вид).
+        public var lowPower: Bool
+        /// Сэмплов, обрезанных до ±1 при записи в 16 бит: прогон видит их не такими, как анализ.
+        public var clippedSamples: Int
         /// Время хоста первого сэмпла (`CACurrentMediaTime()`), ноль оси.
         public var startHostSeconds: Double
         /// Сколько секунд просили записать.
@@ -98,6 +110,11 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             syncOffset: Double = 0,
             sampleRate: Double = 0,
             renderPeriod: Double = 1.0 / 60,
+            reduceMotion: Bool = false,
+            glowIntensity: Double = 1,
+            beatPulse: Bool = true,
+            lowPower: Bool = false,
+            clippedSamples: Int = 0,
             startHostSeconds: Double = 0,
             duration: Double = 0,
             audioSeconds: Double = 0,
@@ -116,6 +133,11 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.syncOffset = syncOffset
             self.sampleRate = sampleRate
             self.renderPeriod = renderPeriod
+            self.reduceMotion = reduceMotion
+            self.glowIntensity = glowIntensity
+            self.beatPulse = beatPulse
+            self.lowPower = lowPower
+            self.clippedSamples = clippedSamples
             self.startHostSeconds = startHostSeconds
             self.duration = duration
             self.audioSeconds = audioSeconds
@@ -281,7 +303,9 @@ public struct RhythmRecorder: Sendable {
             let from = nextSample - windowStart
             let count = min(endSample - nextSample, capacity - samples.count)
             for index in from..<(from + max(count, 0)) {
-                samples.append(Self.pcm16(window[index]))
+                let sample = window[index]
+                if sample > 1 || sample < -1 { meta.clippedSamples += 1 }
+                samples.append(Self.pcm16(sample))
             }
             nextSample = endSample
         }
@@ -302,16 +326,16 @@ public struct RhythmRecorder: Sendable {
     public mutating func appendSchedule(_ schedule: BeatSchedule, publishedAtHost host: Double) {
         guard hasStarted, endReason == nil, host.isFinite else { return }
         let zero = meta.startHostSeconds
-        var beats: [Double] = []
-        for event in schedule.events where event.predicted && event.time.isFinite {
-            beats.append(Self.rounded(event.time - zero))
-        }
         let bpm = schedule.bpm.flatMap { $0.isFinite ? $0 : nil }
         let confidence = schedule.confidence.isFinite ? schedule.confidence : 0
         if let last = schedules.last, last.locked == schedule.locked, last.bpm == bpm,
-           abs(last.confidence - confidence) < Self.confidenceStep, last.beats.count == beats.count,
-           zip(last.beats, beats).allSatisfy({ abs($0 - $1) <= Self.beatTolerance }) {
+           abs(last.confidence - confidence) < Self.confidenceStep,
+           Self.sameBeats(last.beats, schedule, zero: zero) {
             return
+        }
+        var beats: [Double] = []
+        for event in schedule.events where event.predicted && event.time.isFinite {
+            beats.append(Self.rounded(event.time - zero))
         }
         schedules.append(
             RhythmLog.Schedule(time: Self.rounded(host - zero), bpm: bpm, confidence: confidence, locked: schedule.locked, beats: beats)
@@ -331,10 +355,15 @@ public struct RhythmRecorder: Sendable {
         flashes.append(
             RhythmLog.Flash(
                 time: Self.rounded(time),
-                predicted: Self.startedEventIsPredicted(schedule, at: presentedHost, refreshPeriod: refreshPeriod),
+                predicted: OfflineBeatChain.startedEvent(in: schedule, by: presentedHost, refreshPeriod: refreshPeriod)?.predicted ?? false,
                 locked: schedule.locked
             )
         )
+    }
+
+    /// «Уменьшение движения» включено на кадре записи.
+    public mutating func noteReduceMotion() {
+        meta.reduceMotion = true
     }
 
     /// Кончает запись с причиной `reason`; первая причина остается.
@@ -351,7 +380,8 @@ public struct RhythmRecorder: Sendable {
         return RhythmLog(meta: meta, kicks: kicks, onsets: onsets, schedules: schedules, flashes: flashes)
     }
 
-    /// Сэмпл -1...1 в 16 бит; за пределами обрезается, не число дает 0.
+    /// Сэмпл -1...1 в 16 бит; за пределами обрезается (счет в `meta.clippedSamples`: горячий мастер
+    /// или громкость выше единицы дают сэмплы больше 1, прогон видит их обрезанными), не число дает 0.
     public static func pcm16(_ sample: Float) -> Int16 {
         guard sample.isFinite else { return 0 }
         return Int16((min(max(sample, -1), 1) * 32_767).rounded())
@@ -369,16 +399,15 @@ public struct RhythmRecorder: Sendable {
         (seconds * 1_000_000).rounded() / 1_000_000
     }
 
-    /// Дала ли вспышку на кадре `t` предсказанная доля: из начавшихся к кадру событий берется самое
-    /// позднее (начало по `BeatGlow`: `time − lead − R / 2`), как в `OfflineBeatChain`. Без
-    /// выделения памяти.
-    static func startedEventIsPredicted(_ schedule: BeatSchedule, at t: Double, refreshPeriod: Double) -> Bool {
-        var best: GlowEvent?
-        for event in schedule.events where event.time.isFinite && event.time - BeatGlow.lead - refreshPeriod / 2 <= t {
-            if let current = best, current.time >= event.time { continue }
-            best = event
+    /// Те же ли предсказанные доли в `schedule` (ось хоста), что `beats` (ось записи), с допуском
+    /// `beatTolerance`. Без выделения памяти.
+    private static func sameBeats(_ beats: [Double], _ schedule: BeatSchedule, zero: Double) -> Bool {
+        var index = 0
+        for event in schedule.events where event.predicted && event.time.isFinite {
+            guard index < beats.count, abs(beats[index] - (event.time - zero)) <= beatTolerance else { return false }
+            index += 1
         }
-        return best?.predicted ?? false
+        return index == beats.count
     }
 }
 
@@ -443,6 +472,10 @@ public final class RhythmSession: Sendable {
 
     public func stop(_ reason: RhythmLog.EndReason) {
         recorder.withLock { $0.stop(reason) }
+    }
+
+    public func noteReduceMotion() {
+        recorder.withLock { $0.noteReduceMotion() }
     }
 
     /// Запись и ее звук в 16 бит.

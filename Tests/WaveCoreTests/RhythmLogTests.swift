@@ -84,6 +84,28 @@ struct RhythmLogTests {
             )
         }
         #expect(recorder.samples == [32_767, -32_767, 32_767, -32_767, 0, 16_384])
+        #expect(recorder.finish().meta.clippedSamples == 2)
+    }
+
+    @Test func reduceMotionOnAFrameIsKept() {
+        let session = RhythmSession(RhythmRecorder(duration: 1, meta: Self.meta()))
+        #expect(!session.finish().log.meta.reduceMotion)
+        session.noteReduceMotion()
+        #expect(session.finish().log.meta.reduceMotion)
+    }
+
+    @Test func startedEventKeepsTheLatestStartedAndTheFirstOnTies() {
+        let events = [
+            GlowEvent(id: 1, time: 1.0, amplitude: 1, predicted: false),
+            GlowEvent(id: 2, time: 1.2, amplitude: 1, predicted: true),
+            GlowEvent(id: 3, time: 1.2, amplitude: 1, predicted: false),
+            GlowEvent(id: 4, time: .nan, amplitude: 1, predicted: false),
+            GlowEvent(id: 5, time: 2.0, amplitude: 1, predicted: false),
+        ]
+        let schedule = BeatSchedule(events: events, bpm: nil, period: nil, confidence: 0, locked: false)
+        #expect(OfflineBeatChain.startedEvent(in: schedule, by: 1.19, refreshPeriod: 1.0 / 60)?.id == 2)
+        #expect(OfflineBeatChain.startedEvent(in: schedule, by: 1.1, refreshPeriod: 1.0 / 60)?.id == 1)
+        #expect(OfflineBeatChain.startedEvent(in: schedule, by: 0.5, refreshPeriod: 1.0 / 60) == nil)
     }
 
     @Test func aGapInTheStreamEndsTheRecording() {
@@ -417,6 +439,31 @@ struct RhythmLogTests {
             try RhythmReplay.Arguments.parse(["--replay", "a.json", "--json"])
         }
         #expect(try RhythmReplay.Arguments.parse(["--help"]).help)
+    }
+
+    @Test func earlyEndComparesOnlyUpToTheLastSample() throws {
+        var meta = Self.meta()
+        meta.sampleRate = 8_000
+        meta.outputLatency = 0.1
+        meta.audioSeconds = 2
+        meta.renderedUntil = 2.3
+        meta.endReason = .islandHidden
+        meta.reduceMotion = true
+        let flashes = [0.5, 1.5, 1.9, 2.05].map { RhythmLog.Flash(time: $0, predicted: false, locked: false) }
+        let log = RhythmLog(meta: meta, kicks: [], onsets: [], schedules: [], flashes: flashes)
+        let wav = WAVWriter.pcm16Mono([Int16](repeating: 0, count: 16_000), sampleRate: 8_000)
+        let report = try RhythmReplay.replay(logData: try log.encoded(), wavData: wav, options: RhythmReplay.Options())
+        #expect(report.until == 2)
+        #expect(report.all.deviceCount == 3)
+        #expect(report.text.contains("reduce motion was on"))
+
+        var complete = log
+        complete.meta.endReason = .complete
+        complete.meta.reduceMotion = false
+        let full = try RhythmReplay.replay(logData: try complete.encoded(), wavData: wav, options: RhythmReplay.Options())
+        #expect(abs(full.until - 2.1) < 1e-12)
+        #expect(full.all.deviceCount == 4)
+        #expect(!full.text.contains("NOTE"))
     }
 
     @Test func replayRejectsAWAVWithAnotherSampleRate() throws {

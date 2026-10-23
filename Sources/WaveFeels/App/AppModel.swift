@@ -1240,7 +1240,9 @@ final class AppModel {
         let frame = springFrame(sampled, glow: glow)
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
-            rhythmRecording.frame(presented: presented, glow: glow, schedule: shownSchedule, refreshPeriod: period)
+            rhythmRecording.frame(
+                presented: presented, glow: glow, schedule: shownSchedule, refreshPeriod: period, reduceMotion: reduceMotion
+            )
         }
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
@@ -1426,8 +1428,10 @@ extension AppModel {
 
     static let rhythmSectionTitle = "Ритм"
 
-    /// «Записать 30 с»: запись ритма с версией, сборкой, устройством вывода, режимом задержки и
-    /// периодом отрисовки. Задержку, сдвиг и частоту берет сама запись у анализа.
+    /// «Записать 30 с»: запись ритма с версией, сборкой, устройством вывода, режимом задержки,
+    /// периодом отрисовки и настройками, от которых зависит видимое свечение («Уменьшение
+    /// движения» системы, яркость свечения, «вздох», энергосбережение). Задержку, сдвиг и частоту
+    /// берет сама запись у анализа, «Уменьшение движения» на кадрах отмечает `islandVisuals`.
     func startRhythmRecording() {
         let info = Bundle.main.infoDictionary ?? [:]
         let latencyMode: String
@@ -1443,7 +1447,11 @@ extension AppModel {
             deviceName: output.deviceName,
             deviceUID: output.deviceUID,
             latencyMode: latencyMode,
-            renderPeriod: renderPeriod
+            renderPeriod: renderPeriod,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            glowIntensity: settings.glowIntensity,
+            beatPulse: settings.beatPulse,
+            lowPower: lowPower
         )
         rhythmRecording.start(meta: meta)
     }
