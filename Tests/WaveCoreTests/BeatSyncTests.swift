@@ -107,6 +107,28 @@ struct BeatSyncTests {
         }
     }
 
+    /// Захваченные вспышки опережают удар на 10-25 мс (`BeatGlow.lead` 15 мс плюс остаток ФАПЧ) на
+    /// темпах 90-175 BPM: среднее по фазам рендера в установившемся режиме. Эталон здесь сам удар, а не
+    /// аннотации GTZAN (там широкополосные онсеты на 12 мс раньше доли, и вспышки идут около -29 мс).
+    @Test(arguments: [90.0, 120, 150, 175])
+    func lockedFlashesLeadTheKick(bpm: Double) async {
+        let (scene, results) = await Self.runPhases {
+            bpm == 120 ? SharedScenes.steady120 : Drums.fourOnFloor(bpm: bpm, hats: .eighths)
+        }
+        let beats = results[0].audible(scene.beats)
+        guard let from = Self.lockedFrom(results[0], period: 60 / bpm) else {
+            Issue.record("no lock: \(Self.describe(results[0], f: nil, offsets: nil))")
+            return
+        }
+        var pooled: [Double] = []
+        for phased in results {
+            pooled += phased.offsetValues(reference: beats, from: from + Self.settle)
+        }
+        let lead = SyncResult.meanAndSD(pooled)
+        #expect(pooled.count >= 20)
+        #expect((-0.025 ... -0.010).contains(lead.mean), "\(Int(bpm)) BPM: \(lead.mean * 1000) ± \(lead.sd * 1000) ms")
+    }
+
     /// Сходимость после захвата на темпах между проверенными в `steadyBeatLocksOnTime` (90, 100, 120,
     /// 160). Захват и окно `settle` кончаются до 9 с, поэтому сцены по 12 с.
     @Test(arguments: [95.0, 110])

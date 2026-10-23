@@ -107,9 +107,8 @@ struct BeatTrackerTests {
         let beat = try #require(tracker.nextBeat)
         // Шаги без онсетов до момента сразу после доли, окно совпадения еще открыто.
         hops.feedSilence(&tracker, until: beat + 0.03)
-        let delay = tracker.parameters.beatDelay
-        let before = try #require(tracker.schedule.events.first { $0.predicted && abs($0.time - delay - beat) < 0.001 })
-        let after = tracker.schedule.events.first { $0.predicted && $0.time - delay > beat + 0.25 }
+        let before = try #require(tracker.schedule.events.first { $0.predicted && abs($0.time - beat) < 0.001 })
+        let after = tracker.schedule.events.first { $0.predicted && $0.time > beat + 0.25 }
         // Онсет на 20 мс позже доли: поправка фазы 0.25 × 20 = 5 мс.
         hops.feedSilence(&tracker, until: beat + 0.04, broadband: OnsetEvent(time: beat + 0.020, strength: 1))
         let nudged = try #require(tracker.schedule.events.first { $0.id == before.id })
@@ -236,18 +235,6 @@ struct BeatTrackerTests {
             #expect(distance < 0.02, "next beat \(next)")
             #expect(tracker.locked)
         }
-    }
-
-    /// Предсказанные доли публикуются на `beatDelay` (12 мс) позже фазы ФАПЧ, сама ФАПЧ на онсетах.
-    @Test func predictedBeatsArePublishedBeatDelayLater() throws {
-        var tracker = BeatTracker(framesPerSecond: Self.fps)
-        var hops = SyntheticBeats(bpm: 120)
-        hops.feed(&tracker, until: 10)
-        try #require(tracker.locked)
-        let next = try #require(tracker.nextBeat)
-        #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.005)
-        let published = try #require(tracker.schedule.events.first { $0.predicted && $0.time > next })
-        #expect(abs(published.time - next - 0.012) < 1e-9)
     }
 
     /// Захват с нуля на пятом попадании подряд (уверенность 0.76, после четырех 0.68 уже выше 0.6, но
