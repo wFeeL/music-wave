@@ -45,10 +45,11 @@ public struct BeatTracker: Sendable {
         public var matchWindow: Double
         /// Шаг уверенности к попаданию или промаху.
         public var confidenceGain: Double
-        /// Захват при уверенности от `lockConfidence` и `lockHits` попаданиях подряд. На реальной музыке
-        /// широкополосный онсет есть примерно у 60 % верно предсказанных долей (у неверных около 25 %),
-        /// поэтому четыре попадания подряд почти не набирались: при 0.6 и 4 захват держался 27 % времени
-        /// ровных жанров GTZAN, при 0.55 и 2 (то есть с нуля после трех попаданий) около 50 %.
+        /// Захват при уверенности от `lockConfidence` и `lockHits` попаданиях подряд. Серия попаданий
+        /// отсекает неверную фазу лучше уровня уверенности: на неверной фазе широкополосный онсет есть
+        /// примерно у 25-40 % долей, на верной у 55-75 %, поэтому пять подряд на неверной редки. На GTZAN
+        /// файлов с захватом в основном мимо долей при 2 попаданиях было 33, при 4 20, при 5 16; доля
+        /// времени с захватом при этом 0.50, 0.38 и 0.33 (`wave-eval`, столбцы wrongLock и lockedCov).
         public var lockConfidence: Double
         /// Попаданий подряд для захвата.
         public var lockHits: Int
@@ -87,8 +88,8 @@ public struct BeatTracker: Sendable {
             beta: Double = 0.04,
             matchWindow: Double = 0.15,
             confidenceGain: Double = 0.25,
-            lockConfidence: Double = 0.55,
-            lockHits: Int = 2,
+            lockConfidence: Double = 0.6,
+            lockHits: Int = 5,
             unlockConfidence: Double = 0.25,
             phaseJump: Double = 0.12,
             phaseJumpChecks: Int = 2,

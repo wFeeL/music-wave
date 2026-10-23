@@ -250,9 +250,9 @@ struct BeatTrackerTests {
         #expect(abs(published.time - next - 0.012) < 1e-9)
     }
 
-    /// Захват с нуля на третьем попадании подряд (уверенность 0.58 ≥ 0.55), отпускание, когда уверенность
-    /// падает ниже 0.25.
-    @Test func locksOnTheThirdHitAndReleasesBelowAQuarter() throws {
+    /// Захват с нуля на пятом попадании подряд (уверенность 0.76, после четырех 0.68 уже выше 0.6, но
+    /// попаданий мало), отпускание, когда уверенность падает ниже 0.25.
+    @Test func locksOnTheFifthHitAndReleasesBelowAQuarter() throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var hops = SyntheticBeats(bpm: 120)
         var hitsAtLock: Int?
@@ -263,8 +263,8 @@ struct BeatTrackerTests {
                 confidenceAtLock = tracker.confidence
             }
         }
-        #expect(hitsAtLock == 3)
-        #expect((0.55..<0.6).contains(confidenceAtLock), "confidence at lock \(confidenceAtLock)")
+        #expect(hitsAtLock == 5)
+        #expect((0.6..<0.8).contains(confidenceAtLock), "confidence at lock \(confidenceAtLock)")
         try #require(tracker.locked)
         var before = tracker.confidence
         var released: (before: Double, after: Double)?
@@ -295,6 +295,35 @@ struct BeatTrackerTests {
         let lock = Double(try #require(lockStep)) * hop
         let full = Double(try #require(fullStep)) * hop
         #expect(abs(full - lock - 0.5) <= 2 * hop, "lock \(lock), full blend \(full)")
+    }
+
+    /// Захват на «и»: доли сдвинулись на полпериода (трекер оказался на слабой доле). Захват на старой
+    /// фазе держится не дольше 2 с, на новой фазе захват снова есть не позже чем через 5 с.
+    @Test func offbeatLockRecovers() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let shift = hops.endTime
+        hops.nextBeatTime += 0.25
+        // Новые доли на 0.5 + k · 0.5 с, старые на 0.25 + k · 0.5 с.
+        func onNewGrid(_ time: Double) -> Bool { abs(BeatTracker.circularDifference(time - 0.5, period: 0.5)) < 0.03 }
+        var lockedOld: Double?
+        var relocked: Double?
+        var steps = 0
+        hops.feed(&tracker, until: shift + 8) { tracker in
+            steps += 1
+            let now = shift + Double(steps) * 256.0 / 48_000
+            guard tracker.locked, let next = tracker.nextBeat else { return }
+            if onNewGrid(next) {
+                if relocked == nil { relocked = now }
+            } else {
+                lockedOld = now
+            }
+        }
+        #expect((lockedOld ?? shift) - shift <= 2, "locked on the old phase until \(String(describing: lockedOld))")
+        let relock = try #require(relocked)
+        #expect(relock - shift <= 5, "relocked at \(relock - shift) s after the shift")
     }
 
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
