@@ -249,6 +249,20 @@ public enum BeatEvaluation {
         public var cmlt: Double
         public var amlt: Double
         public var lockedCoverage: Double
+        /// Файлы, где захват в основном мимо долей: не меньше `wrongLockMinFlashes` вспышек при захвате и
+        /// точность захвата ниже `wrongLockPrecision`. Уверенное свечение на «и» целыми кусками песни.
+        public var wrongLockFiles: Int
+        /// Вспышки при захвате мимо долей в этих файлах.
+        public var wrongLockFlashes: Int
+    }
+
+    public static let wrongLockMinFlashes = 10
+    public static let wrongLockPrecision = 0.5
+
+    /// Файл с захватом в основном мимо долей (см. `Summary.wrongLockFiles`).
+    public static func isWrongLock(_ score: FileScore) -> Bool {
+        score.lockedFlashCount >= wrongLockMinFlashes
+            && Double(score.lockedMatched) < wrongLockPrecision * Double(score.lockedFlashCount)
     }
 
     public static func summarize(name: String, scores: [FileScore]) -> Summary {
@@ -271,7 +285,9 @@ public enum BeatEvaluation {
             meanOffsetLockedMs: offset(scores.reduce(0) { $0 + $1.offsetLockedSumMs }, sum(\.offsetLockedCount)),
             meanOffsetUnlockedMs: offset(scores.reduce(0) { $0 + $1.offsetUnlockedSumMs }, sum(\.offsetUnlockedCount)),
             cmlt: mean(scores.map(\.cmlt)), amlt: mean(scores.map(\.amlt)),
-            lockedCoverage: mean(scores.map(\.lockedCoverage))
+            lockedCoverage: mean(scores.map(\.lockedCoverage)),
+            wrongLockFiles: scores.filter(isWrongLock).count,
+            wrongLockFlashes: scores.filter(isWrongLock).reduce(0) { $0 + $1.lockedFlashCount - $1.lockedMatched }
         )
     }
 
@@ -310,6 +326,7 @@ public enum BeatEvaluation {
         "prec / unlockedPrec: pooled precision over all flashes / over flashes under an unlocked schedule (one-to-one, window); each kind is matched on its own against all beats",
         "meanOff = mean of per-file mean offsets over all flashes; offLocked / offUnlocked = mean signed offset (ms) of the flashes inside the window, pooled over flashes",
         "F, CMLt, AMLt, lockedCov: means over files, every file weighs the same",
+        "wrongLock = files with >= 10 locked flashes and locked precision < 0.5 (locked mostly off the beat); wrongLockFl = their locked flashes that miss",
         "CMLt omits mir_eval's previous-beat-also-correct condition, so it is more lenient than mir_eval and not comparable to published numbers",
         "flashes lead the beat by design (BeatGlow.lead 15 ms): a negative meanOffset is expected",
     ]
@@ -332,7 +349,7 @@ public enum BeatEvaluation {
         var lines = [title]
         let heads = [
             "files", "lockedFiles", "LPpool", "lockedPrec", "prec", "unlockedPrec", "F", "meanOff", "offLocked",
-            "offUnlocked", "AMLt", "CMLt", "lockedCov",
+            "offUnlocked", "AMLt", "CMLt", "lockedCov", "wrongLock", "wrongLockFl",
         ]
         lines.append(pad("group", width) + "  " + heads.map { right($0, max($0.count, 7)) }.joined(separator: " "))
         for row in summaries {
@@ -340,7 +357,7 @@ public enum BeatEvaluation {
                 String(row.files), String(row.lockedFiles), fraction(row.lockedPrecisionPooled), fraction(row.lockedPrecision),
                 fraction(row.precisionPooled), fraction(row.unlockedPrecisionPooled), fraction(row.f), milliseconds(row.meanOffsetMs),
                 milliseconds(row.meanOffsetLockedMs), milliseconds(row.meanOffsetUnlockedMs), fraction(row.amlt),
-                fraction(row.cmlt), fraction(row.lockedCoverage),
+                fraction(row.cmlt), fraction(row.lockedCoverage), String(row.wrongLockFiles), String(row.wrongLockFlashes),
             ]
             lines.append(
                 pad(row.name, width) + "  "

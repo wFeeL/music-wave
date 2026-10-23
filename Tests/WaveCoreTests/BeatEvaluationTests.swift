@@ -171,6 +171,9 @@ struct BeatEvaluationTests {
         #expect(total.files == 4 && total.lockedFiles == 3)
         // 10 + 5 + 0 совпадений из 30 вспышек.
         #expect(abs(try #require(total.lockedPrecisionPooled) - 0.5) < 1e-12)
+        // Захват мимо долей: только c (10 вспышек при захвате, ни одной в долю); у b точность ровно 0.5.
+        #expect(total.wrongLockFiles == 1 && total.wrongLockFlashes == 10)
+        #expect(rows[1].wrongLockFiles == 0)
         #expect(BeatEvaluation.filter(scores, split: .tune).count == 3)
         #expect(BeatEvaluation.filter(scores, split: .heldout).map(\.group) == ["a"])
         #expect(BeatEvaluation.filter(scores, split: .all).count == 4)
@@ -181,7 +184,7 @@ struct BeatEvaluationTests {
         let rows = BeatEvaluation.summaries(scores: [], unions: [])
         let text = BeatEvaluation.table(title: "t", summaries: rows)
         #expect(text.contains("TOTAL") && text.contains("lockedFiles") && text.contains("unlockedPrec"))
-        #expect(text.contains("offLocked") && text.hasPrefix("t\n"))
+        #expect(text.contains("offLocked") && text.contains("wrongLock") && text.hasPrefix("t\n"))
     }
 
     /// Четыре на пол 120 BPM через настоящую цепочку: вспышки лежат на долях, чуть раньше.
