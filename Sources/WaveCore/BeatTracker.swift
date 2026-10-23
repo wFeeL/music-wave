@@ -134,11 +134,14 @@ public struct BeatTracker: Sendable {
     static let gateHighDB: Float = -12
     /// Подтверждение онсета бочки широкополосной функцией: отношение ее значения на шаге онсета (или
     /// шаге до него) к медиане за `confirmWindow` секунд плюс `confirmEpsilon` проходит через
-    /// smoothstep от `confirmLow` до `confirmHigh`.
+    /// smoothstep от `confirmLow` до `confirmHigh`. Границы 7 и 11 (в 1.0 6 и 9): в плотной музыке
+    /// онсет бочки с отношением ниже около 9 чаще бас или том между долями; на GTZAN точность вспышек
+    /// без захвата 0.594 -> 0.602, всех вспышек 0.822 -> 0.839. Строже (9 и 14, 12 и 18) драм-н-бейс в
+    /// розовом шуме теряет вспышки на бочках (`dnbInLouderNoiseGlowsOnKicksOnAverage`).
     static let confirmWindow = 1.5
     static let confirmEpsilon: Float = 0.5
-    static let confirmLow: Float = 6
-    static let confirmHigh: Float = 9
+    static let confirmLow: Float = 7
+    static let confirmHigh: Float = 11
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double

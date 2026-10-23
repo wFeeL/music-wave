@@ -313,6 +313,27 @@ struct BeatTrackerTests {
         #expect(relock - shift <= 5, "relocked at \(relock - shift) s after the shift")
     }
 
+    /// Подтверждение бочки: отношение широкополосной функции на онсете к медиане за 1.5 с (плюс 0.5)
+    /// проходит smoothstep от 7 до 11. Отношение 7 не светится, 9 вполовину, 11 полностью.
+    @Test(arguments: [(Float(7), Float(0)), (Float(9), Float(0.5)), (Float(11), Float(1))])
+    func kickConfirmationBand(ratio: Float, amplitude: Float) {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        let hop = 256.0 / 48_000
+        var time = 0.0
+        // Ровная широкополосная функция 1.5 без онсетов: медиана 1.5, знаменатель 2, темпа нет.
+        func step(odf: Float, kick: OnsetEvent?) {
+            time += hop
+            var result = SyntheticBeats.hop(endTime: time, broadband: nil, kick: kick)
+            result.broadbandODF = odf
+            tracker.process(result)
+        }
+        for _ in 0..<Int(2 / hop) { step(odf: 1.5, kick: nil) }
+        let onset = OnsetEvent(time: time + hop, strength: 1)
+        step(odf: 2 * ratio, kick: onset)
+        let glow = tracker.schedule.events.first { !$0.predicted && $0.time == onset.time }
+        #expect(abs((glow?.amplitude ?? 0) - amplitude) < 1e-4, "ratio \(ratio): \(String(describing: glow))")
+    }
+
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
     @Test func nonFiniteKickLevelCountsAsFloor() {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
