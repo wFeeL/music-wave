@@ -31,6 +31,12 @@ import WaveCore
 /// которое его меняло. По нему работает сторож нулей. Остров снова виден: состояние онсетов
 /// начинается заново (`StreamAnalyzer.resetOnsets()`), уровни остаются.
 /// `stop()` оставляет в хранилище один тихий кадр.
+///
+/// Запись ритма (`recordRhythm`): каждый обработанный шаг отдает в `RhythmSession` окно звука,
+/// онсеты и время хоста первого сэмпла, каждое опубликованное расписание идет туда же с моментом
+/// пробуждения. Все это на очереди анализа, IOProc не трогается. Остановка, новый запуск или
+/// обнуление кольца, простой острова и остановка потока кончают запись (причина в `RhythmLog`),
+/// пропуск шагов она замечает сама по номерам сэмплов.
 nonisolated final class AnalysisEngine: @unchecked Sendable {
     /// Самый большой шаг времени между пробуждениями, который получают уровни.
     static let maxStep = 0.1
@@ -54,6 +60,16 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         var zeroRun: Double = 0
         var hopsProcessed = 0
         var frameObserver: (@Sendable (WaveFrame, Double) -> Void)?
+        var rhythm: RhythmSession?
+    }
+
+    /// Запись ритма на одно пробуждение: сессия и задержка со сдвигом, с которыми идет анализ.
+    private struct RhythmTap {
+        let session: RhythmSession
+        let outputLatency: Double
+        let syncOffset: Double
+        /// Момент пробуждения, секунды хоста: время публикации расписания.
+        let now: Double
     }
 
     private let ring: SampleRingBuffer
@@ -141,6 +157,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             self.lastWake = nil
             self.lastZeroRunWake = nil
             self.active = false
+            self.endRhythm(.captureRestarted)
             if let observer = self.powerObserver {
                 NotificationCenter.default.removeObserver(observer)
                 self.powerObserver = nil
@@ -167,6 +184,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             guard let self, self.idle != idle else { return }
             self.idle = idle
             if idle {
+                self.endRhythm(.islandHidden)
                 self.tracker.reset()
                 self.store.publishSchedule(.empty)
             } else {
@@ -196,6 +214,29 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         shared.withLock { $0.frameObserver = observer }
     }
 
+    /// Ставит запись ритма (`nil` снимает). Прежняя запись, если была другой, кончается
+    /// (`stopped`). Можно звать с любого потока.
+    func recordRhythm(_ session: RhythmSession?) {
+        let previous = shared.withLock {
+            let previous = $0.rhythm
+            $0.rhythm = session
+            return previous
+        }
+        if let previous, previous !== session {
+            previous.stop(.stopped)
+        }
+    }
+
+    /// Кончает запись ритма с причиной `reason` и снимает ее.
+    private func endRhythm(_ reason: RhythmLog.EndReason) {
+        let session = shared.withLock {
+            let session = $0.rhythm
+            $0.rhythm = nil
+            return session
+        }
+        session?.stop(reason)
+    }
+
     // MARK: - Очередь анализа
 
     /// Поток начинается заново: часы хоста без метки, первый шаг самый новый, в хранилище тихий
@@ -208,12 +249,16 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         feed.reset()
         feedStalled = false
         store.reset()
+        endRhythm(.captureRestarted)
     }
 
     private func wake(now: Double) {
         guard active, now.isFinite else { return }
-        let (settings, latency, syncOffset, observer) = shared.withLock {
-            ($0.settings, $0.outputLatency, $0.syncOffset, $0.frameObserver)
+        let (settings, latency, syncOffset, observer, rhythmSession) = shared.withLock {
+            ($0.settings, $0.outputLatency, $0.syncOffset, $0.frameObserver, $0.rhythm)
+        }
+        let rhythm = rhythmSession.map {
+            RhythmTap(session: $0, outputLatency: latency, syncOffset: syncOffset, now: now)
         }
         var dt = interval
         if let lastWake {
@@ -257,6 +302,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 tracker.reset()
                 store.publishSchedule(.empty)
                 feedStalled = true
+                endRhythm(.stalled)
             }
             let time = (hostClock.hostTime(ofSample: total) ?? now) + offset
             store.publish(.silent, at: time)
@@ -265,7 +311,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         } else {
             feedStalled = false
             windows = processHops(
-                total: total, dt: dt, settings: settings, offset: offset, observer: observer
+                total: total, dt: dt, settings: settings, offset: offset, observer: observer, rhythm: rhythm
             )
         }
         guard windows != .noHop else { return }
@@ -289,7 +335,8 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         dt: Double,
         settings: LevelSettings,
         offset: Double,
-        observer: (@Sendable (WaveFrame, Double) -> Void)?
+        observer: (@Sendable (WaveFrame, Double) -> Void)?,
+        rhythm: RhythmTap?
     ) -> Windows {
         let config = analyzer.config
         let hop = config.hopSize
@@ -321,6 +368,21 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             if !idle {
                 tracker.process(result)
             }
+            if !idle, let rhythm {
+                let firstHost = hostClock.hostTime(ofSample: hopEnd - config.fftSize)
+                window.withUnsafeBufferPointer {
+                    rhythm.session.appendHop(
+                        window: $0,
+                        endSample: hopEnd,
+                        firstSampleHost: firstHost,
+                        sampleRate: config.sampleRate,
+                        outputLatency: rhythm.outputLatency,
+                        syncOffset: rhythm.syncOffset,
+                        kick: result.kickOnset?.time,
+                        onset: result.broadbandOnset?.time
+                    )
+                }
+            }
             let time = centre + offset
             store.publish(result.frame, at: time)
             observer?(result.frame, time)
@@ -334,7 +396,11 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         }
         if !idle, let lastEnd, let host = hostClock.hostTime(ofSample: lastEnd) {
             let shift = host - Double(lastEnd) / config.sampleRate + offset
-            store.publishSchedule(tracker.schedule.shifted(by: shift))
+            let published = tracker.schedule.shifted(by: shift)
+            store.publishSchedule(published)
+            if let rhythm {
+                rhythm.session.appendSchedule(published, publishedAtHost: rhythm.now)
+            }
         }
         if processed == 0 { return .noHop }
         return allZero ? .zero : .sound

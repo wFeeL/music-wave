@@ -3,7 +3,8 @@ import WaveCore
 
 /// Окно диагностики: живой уровень и бит, кнопки доступа и копирования, разделы из
 /// `AppModel.diagnosticsSections()`. Разделы и статус доступа обновляются раз в секунду,
-/// индикатор 30 раз в секунду, и то и другое только пока окно открыто и не свернуто.
+/// индикатор 30 раз в секунду, и то и другое только пока окно открыто и не свернуто. Под
+/// разделом «Ритм» кнопка записи ритма (`RhythmRecording`).
 struct DiagnosticsView: View {
     let model: AppModel
     let presence: WindowPresence
@@ -32,7 +33,12 @@ struct DiagnosticsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(sections) { section in
-                        SectionView(section: section)
+                        VStack(alignment: .leading, spacing: 8) {
+                            SectionView(section: section)
+                            if section.title == AppModel.rhythmSectionTitle {
+                                RhythmRecordButton(model: model)
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -73,6 +79,41 @@ struct DiagnosticsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// «Записать 30 с», во время записи «Запись… N с», после нее «Сохранено» и снова кнопка.
+private struct RhythmRecordButton: View {
+    let model: AppModel
+
+    var body: some View {
+        let recording = model.rhythmRecording
+        HStack(spacing: 8) {
+            switch recording.phase {
+            case .idle, .saved, .failed:
+                Button("Записать 30 с") {
+                    model.startRhythmRecording()
+                }
+            case .recording(let seconds):
+                Button("Запись… \(seconds) с") {}
+                    .disabled(true)
+            case .saving:
+                Button("Сохраняю…") {}
+                    .disabled(true)
+            }
+            switch recording.phase {
+            case .saved:
+                Text("Сохранено")
+                    .foregroundStyle(.secondary)
+            case .failed(let message):
+                Text(message)
+                    .foregroundStyle(.orange)
+            case .idle, .recording, .saving:
+                EmptyView()
+            }
+        }
+        .font(.system(size: 12))
+        .help("Звук и вспышки за 30 с в ~/Library/Logs/WaveFeels, остров должен оставаться на экране")
     }
 }
 

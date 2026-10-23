@@ -286,9 +286,14 @@ public struct OfflineBeatChain: Sendable {
     /// Событие расписания, давшее вспышку на кадре `t`: из начавшихся к этому кадру берется самое
     /// позднее (начало по `BeatGlow`: `time − lead − R / 2`). Это оценка: `BeatGlow` не говорит, какое
     /// событие дало рост, а событие, которое он счел слишком старым, здесь не отличается от обычного.
-    private static func startedEvent(in schedule: BeatSchedule, by t: Double, refreshPeriod: Double) -> GlowEvent? {
-        schedule.events
-            .filter { $0.time.isFinite && $0.time - BeatGlow.lead - refreshPeriod / 2 <= t }
-            .max { $0.time < $1.time }
+    /// При равных временах остается первое. Без выделения памяти: то же правило зовет запись ритма
+    /// на кадре рендера (`RhythmRecorder.appendFrame`).
+    static func startedEvent(in schedule: BeatSchedule, by t: Double, refreshPeriod: Double) -> GlowEvent? {
+        var best: GlowEvent?
+        for event in schedule.events where event.time.isFinite && event.time - BeatGlow.lead - refreshPeriod / 2 <= t {
+            if let current = best, current.time >= event.time { continue }
+            best = event
+        }
+        return best
     }
 }

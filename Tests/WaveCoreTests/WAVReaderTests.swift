@@ -28,7 +28,7 @@ struct WAVReaderTests {
         let data = Self.wav(Self.fmt(tag: 1, channels: 1, rate: 44_100, bits: 16), Self.chunk("data", Self.int16([0, 16_384, -32_768, 32_767])))
         let (samples, rate) = try WAVReader.read(data)
         #expect(rate == 44_100)
-        #expect(samples == [0, 0.5, -1, 32_767.0 / 32_768])
+        #expect(samples == [0, 0.5, -1, Float(32_767) / 32_768])
     }
 
     @Test func pcm16StereoIsAveraged() throws {
