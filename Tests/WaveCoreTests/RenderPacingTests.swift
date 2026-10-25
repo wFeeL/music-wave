@@ -219,4 +219,75 @@ struct RenderPacingTests {
         #expect(summary.spreadText.hasPrefix("интервал σ "))
         #expect(summary.spreadText.hasSuffix(" мс | шкала σ \(String(format: "%.1f", summary.timelineSigmaMs)) мс"))
     }
+
+    @Test func restartSkipsOneInterval() throws {
+        var pacing = RenderPacing()
+        record([0.0167, 0.0167], into: &pacing)
+        let median = try #require(pacing.medianInterval(last: 2))
+        // Кадры простоя через 83 мс: интервал до следующего кадра не пишется, замер не теряется.
+        pacing.restart()
+        pacing.record(now: 100.12, timelineTime: 5_100.12, bucket: .collapsed, analysisSequence: 20)
+        #expect(try #require(pacing.summary(.collapsed, refreshPeriod: Self.period)).frames == 2)
+        #expect(pacing.medianInterval(last: 2) == median)
+        pacing.record(now: 100.12 + 0.0167, timelineTime: 5_100.12 + 0.0167, bucket: .collapsed, analysisSequence: 21)
+        #expect(try #require(pacing.summary(.collapsed, refreshPeriod: Self.period)).frames == 3)
+    }
+}
+
+struct RenderIdleDetectorTests {
+    /// Результаты `update` по кадрам `(level, glow, pulse, now)`; `#expect` не принимает
+    /// изменяющий вызов внутри себя.
+    private func run(_ detector: inout RenderIdleDetector, _ frames: [(Float, Float, Float, Double)]) -> [Bool] {
+        frames.map { detector.update(level: $0.0, glow: $0.1, pulse: $0.2, now: $0.3) }
+    }
+
+    @Test func constants() {
+        #expect(RenderIdleDetector.level == Float(0.01))
+        #expect(RenderIdleDetector.settle == 0.5)
+        #expect(RenderIdleDetector.idleInterval == 1.0 / 12)
+    }
+
+    @Test func idleAfterHalfSecondFlat() {
+        var detector = RenderIdleDetector()
+        let early = run(&detector, (0..<24).map { (Float(0.005), Float(0), Float(0), Double($0) / 60) })
+        #expect(!early.contains(true))
+        let atFourTenths = run(&detector, [(0.005, 0, 0, 0.4)])
+        #expect(atFourTenths == [false])
+        #expect(!detector.isIdle)
+        let atSixTenths = run(&detector, [(0.005, 0, 0, 0.6)])
+        #expect(atSixTenths == [true])
+        #expect(detector.isIdle)
+    }
+
+    @Test func activeImmediatelyOnSound() {
+        var detector = RenderIdleDetector()
+        let idle = run(&detector, [(0, 0, 0, 0), (0, 0, 0, 1)])
+        #expect(idle == [false, true])
+        let sound = run(&detector, [(0.05, 0, 0, 1.05)])
+        #expect(sound == [false])
+        #expect(!detector.isIdle)
+        // Звук снова стих: простой через `settle` после последнего ненулевого входа.
+        let quiet = run(&detector, [(0, 0, 0, 1.4), (0, 0, 0, 1.6)])
+        #expect(quiet == [false, true])
+    }
+
+    @Test func glowKeepsActive() {
+        var detector = RenderIdleDetector()
+        let lit = run(&detector, (0...60).map { (Float(0), Float(0.1), Float(0), Double($0) / 60) })
+        #expect(!lit.contains(true))
+        let dark = run(&detector, [(0, 0, 0, 1.4), (0, 0, 0, 1.6)])
+        #expect(dark == [false, true])
+        // «Вздох» и не конечный вход тоже держат полную частоту.
+        let breath = run(&detector, [(0, 0, 0.2, 3), (0, 0, 0, 3.5), (Float.nan, 0, 0, 4)])
+        #expect(breath == [false, true, false])
+    }
+
+    @Test func clockQuirks() {
+        var detector = RenderIdleDetector()
+        let flat = run(&detector, [(0, 0, 0, 10), (0, 0, 0, 10.6)])
+        #expect(flat == [false, true])
+        // Не конечный момент ничего не меняет, момент из прошлого начинает выдержку заново.
+        let odd = run(&detector, [(0, 0, 0, .nan), (0, 0, 0, 5), (0, 0, 0, 5.4), (0, 0, 0, 5.5)])
+        #expect(odd == [true, false, false, true])
+    }
 }

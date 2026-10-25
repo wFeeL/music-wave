@@ -113,6 +113,11 @@ final class AppModel {
     var renderPeriod: Double {
         RenderPacing.effectivePeriod(measured: measuredRenderPeriod, refreshPeriod: refreshPeriod)
     }
+    /// Простой отрисовки: волны ровные, свечения и «вздоха» нет дольше
+    /// `RenderIdleDetector.settle`, остров не в переходе. Тогда остров рисуется не чаще
+    /// `RenderIdleDetector.idleInterval`. Пишет только `updateRenderIdle()` (тик и смена
+    /// острова или баннера), не вычисление тела острова, и только при смене значения.
+    private(set) var renderIdle = false
     /// Когда последний раз сменился `islandState`, секунды хоста (`CACurrentMediaTime()`).
     @ObservationIgnored private(set) var islandStateChangedAt: Double = 0
     /// Снимки: кадр, пружины и «вздох» заданы `showPreview` и на кадрах не меняются.
@@ -188,6 +193,9 @@ final class AppModel {
     @ObservationIgnored private var levelSpring = LevelSpring()
     /// Замер отрисовки для раздела «Отрисовка».
     @ObservationIgnored private var renderPacing = RenderPacing()
+    /// Простой отрисовки по входам кадров `islandVisuals`; `renderIdle` берет его последний
+    /// результат.
+    @ObservationIgnored private var renderIdleDetector = RenderIdleDetector()
     /// Когда строка «Раскрытый» последний раз ушла в лог; `nil`, пока остров не раскрыт.
     @ObservationIgnored private var lastRenderLog: Double?
     /// Шкала `TimelineView` последнего записанного кадра: SwiftUI пересчитывает сцену и между
@@ -661,6 +669,7 @@ final class AppModel {
         )
         updateIsland(inputs, now: now)
         updateBanner(now: now, sourceInfo: sourceInfo)
+        updateRenderIdle()
         updatePermissionHint()
         // Подсказка показана, а окна, которые опрашивают доступ каждую секунду, закрыты:
         // пользователь мог выдать доступ в Системных настройках, не возвращаясь в приложение.
@@ -694,6 +703,8 @@ final class AppModel {
             log("остров: \(Self.describe(islandState)) -> \(Self.describe(state))")
             islandState = state
             islandStateChangedAt = CACurrentMediaTime()
+            // Переход острова: полная частота кадров сразу, а не на следующем тике.
+            updateRenderIdle()
             if state == .expanded {
                 // Панель вместо баннера: сначала входы с открытой панелью (трек становится
                 // базовым, момент скрытия текущий), затем отмена.
@@ -825,7 +836,21 @@ final class AppModel {
         guard visible != bannerWasVisible else { return }
         bannerWasVisible = visible
         bannerVisibleChangedAt = CACurrentMediaTime()
+        updateRenderIdle()
         onIslandStateChange?()
+    }
+
+    /// `renderIdle` по последнему результату `renderIdleDetector`; переход острова или баннера
+    /// моложе `IslandTransition.overlap` простой отменяет (волны крыльев и панели сменяют друг
+    /// друга по кадрам). Наблюдаемое значение меняется, только когда сменилось.
+    private func updateRenderIdle() {
+        let now = CACurrentMediaTime()
+        let moving = now - islandStateChangedAt < IslandTransition.overlap
+            || now - bannerVisibleChangedAt < IslandTransition.overlap
+        let idle = renderIdleDetector.isIdle && !moving
+        if idle != renderIdle {
+            renderIdle = idle
+        }
     }
 
     /// Ставит обновление баннера на срок `TrackBanner.deadline`, если он есть и еще не
@@ -1202,7 +1227,9 @@ final class AppModel {
     /// захвата равен свечению. «Уменьшение движения»: ни свечения, ни «вздоха», ни акцента.
     /// Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр идет в
     /// замер отрисовки (`timelineTime`: дата `TimelineView`), пока остров раскрыт, раз в 10 с строка
-    /// замера пишется в лог. Снимки (`previewing`) получают заданные кадр, свечение и «вздох» без шага.
+    /// замера пишется в лог. Уровни, свечение и «вздох» кадра идут в детектор простоя
+    /// (`renderIdleDetector`), `renderIdle` по нему ставит тик. Снимки (`previewing`) получают
+    /// заданные кадр, свечение и «вздох» без шага, детектор не трогают.
     func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
         let period = renderPeriod
         let presented = now + LatencyCalculator.presentationLead(refreshPeriod: period)
@@ -1228,7 +1255,8 @@ final class AppModel {
             layerSprings[index].step(toward: target, dt: dt)
         }
         levelSpring.step(toward: sampled.level, dt: dt)
-        motion.advance(layers: layerSprings.map(\.value), dt: reduceMotion ? dt / 2 : dt)
+        let springs = layerSprings.map(\.value)
+        motion.advance(layers: springs, dt: reduceMotion ? dt / 2 : dt)
 
         var glow: Float = 0
         var breath: Float = 0
@@ -1241,6 +1269,11 @@ final class AppModel {
             let spring = pulse.step(beat: early, dt: dt)
             breath = schedule.locked ? spring : glow
         }
+        // Простой: наибольший уровень волн, свечение и «вздох». Другой пульс (мягкий, когда
+        // появится) идет в `pulse` через `max` с «вздохом». `renderIdle` пишет тик.
+        _ = renderIdleDetector.update(
+            level: max(springs.max() ?? 0, levelSpring.value), glow: glow, pulse: breath, now: now
+        )
         let frame = springFrame(sampled, glow: glow)
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
@@ -1280,10 +1313,17 @@ final class AppModel {
     }
 
     /// Кадр отрисовки в `renderPacing`; пока остров раскрыт, строка «Раскрытый» раз в
-    /// `renderLogInterval` в файл лога (первая через 10 с после раскрытия).
+    /// `renderLogInterval` в файл лога (первая через 10 с после раскрытия). В простое
+    /// (`renderIdle`) кадры не пишутся: интервалы 83 мс сдвинули бы медиану `measuredRenderPeriod`
+    /// и упреждение показа, замер «Отрисовка» и cpu-probe. Замер начинается заново со
+    /// следующего кадра, медиана остается прежней.
     private func recordRender(now: Double, timelineTime: Double) {
         guard timelineTime != lastRecordedTimeline else { return }
         lastRecordedTimeline = timelineTime
+        if renderIdle {
+            renderPacing.restart()
+            return
+        }
         let bucket = RenderBucket.classify(state: islandState, sinceStateChange: now - islandStateChangedAt)
         renderPacing.record(now: now, timelineTime: timelineTime, bucket: bucket, analysisSequence: store.sequence)
         if let median = renderPacing.refreshedMedian(last: Self.renderPeriodSamples, every: Self.renderPeriodRefreshFrames),

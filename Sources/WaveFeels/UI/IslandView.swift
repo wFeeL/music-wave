@@ -16,6 +16,8 @@ import WaveCore
 /// Кадры идут от `TimelineView(.animation)` с частотой экрана острова
 /// (`RenderPacing.timelineInterval`, `AppModel.refreshPeriod`), на паузе, пока остров скрыт
 /// (после скрытия еще `IslandTransition.overlap`, чтобы волны двигались, пока остров гаснет);
+/// в простое (`AppModel.renderIdle`: волны ровные, свечения и «вздоха» нет) 12 в секунду
+/// (`RenderIdleDetector.idleInterval`);
 /// в режиме энергосбережения не чаще 30 в секунду, без эха и без свечения линий
 /// (`WaveAppearance.lightened()`). На каждом кадре модель берет кадр анализа и свечение
 /// доли на момент показа кадра по часам хоста (`CACurrentMediaTime()` плюс два периода
@@ -98,9 +100,9 @@ struct IslandView: View {
                     scene(state: state, geometry: geometry, now: time, timelineTime: time)
                 } else {
                     TimelineView(.animation(
-                        minimumInterval: RenderPacing.timelineInterval(
-                            refreshPeriod: model.refreshPeriod, lowPower: model.lowPower
-                        ),
+                        minimumInterval: model.renderIdle
+                            ? RenderIdleDetector.idleInterval
+                            : RenderPacing.timelineInterval(refreshPeriod: model.refreshPeriod, lowPower: model.lowPower),
                         paused: state == .hidden && hideSettled
                     )) { context in
                         scene(

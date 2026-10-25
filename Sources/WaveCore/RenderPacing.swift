@@ -185,6 +185,13 @@ public struct RenderPacing: Sendable {
         recorded += 1
     }
 
+    /// Следующий кадр начинает замер заново: интервал от прошлого кадра не записывается.
+    /// Записанные интервалы и медиана остаются. Нужно, пока остров в простое
+    /// (`RenderIdleDetector`): редкие кадры простоя не должны попадать в замер.
+    public mutating func restart() {
+        last = nil
+    }
+
     /// Сводка корзины при периоде экрана `refreshPeriod` (без конечного положительного 1/60 с);
     /// `nil`, если в ней нет кадров.
     public func summary(_ bucket: RenderBucket, refreshPeriod: Double) -> RenderPacingSummary? {
@@ -242,6 +249,41 @@ public struct RenderPacing: Sendable {
         let mean = values.reduce(0, +) / Double(values.count)
         let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
         return variance.squareRoot()
+    }
+}
+
+/// Простой отрисовки острова: волны ровные, свечения и «вздоха» нет. Тогда кадры можно
+/// рисовать реже (`idleInterval`), на картинке это не видно.
+///
+/// Входы на каждом кадре: наибольший уровень волн (пружины слоев и общего уровня), свечение
+/// доли и пульс (сейчас «вздох»; другие пульсы передаются через наибольший из них). Вход не
+/// меньше `level` (по модулю, не конечный тоже) считается ненулевым. Простой наступает, когда
+/// с последнего ненулевого входа прошло `settle`, и кончается сразу на первом ненулевом.
+public struct RenderIdleDetector: Sendable {
+    /// Порог входа: ниже него волна неотличима от ровной линии.
+    public static let level: Float = 0.01
+    /// Сколько секунд все входы должны быть ниже порога до простоя.
+    public static let settle = 0.5
+    /// Наименьший интервал кадров в простое, с: 12 кадров в секунду.
+    public static let idleInterval = 1.0 / 12
+
+    /// Момент последнего ненулевого входа (или первого вызова), с.
+    private var lastActive: Double?
+    /// Результат последнего `update`.
+    public private(set) var isIdle = false
+
+    public init() {}
+
+    /// Входы кадра в момент `now` (секунды хоста). `true`: простой. Не конечный момент ничего
+    /// не меняет; момент раньше прошлого ненулевого начинает выдержку заново.
+    public mutating func update(level: Float, glow: Float, pulse: Float, now: Double) -> Bool {
+        guard now.isFinite else { return isIdle }
+        let active = !(abs(level) < Self.level && abs(glow) < Self.level && abs(pulse) < Self.level)
+        if active || lastActive.map({ now < $0 }) ?? true {
+            lastActive = now
+        }
+        isIdle = !active && now - (lastActive ?? now) >= Self.settle
+        return isIdle
     }
 }
 
