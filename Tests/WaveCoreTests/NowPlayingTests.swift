@@ -30,13 +30,19 @@ struct NowPlayingTests {
     @Test func diffMergesAndNullDeletes() throws {
         var parser = NowPlayingStreamParser()
         _ = try parser.consume(line: Self.fullLine)
+        let paused = try #require(try parser.consume(
+            line: #"{"type":"data","diff":true,"payload":{"playing":false}}"#))
+        #expect(!paused.isPlaying)
+        #expect(paused.album == "Группа крови")
+        #expect(paused.duration == 215)
         let info = try #require(try parser.consume(
-            line: #"{"type":"data","diff":true,"payload":{"album":null,"playing":false}}"#))
+            line: #"{"type":"data","diff":true,"payload":{"album":null}}"#))
         #expect(info.album == nil)
         #expect(!info.isPlaying)
         #expect(info.title == "Кино 🎸")
         #expect(info.artist == "Цой")
-        #expect(info.duration == 215)
+        // Альбом входит в ключ трека: его смена считается сменой трека, тайминг прошлого снят.
+        #expect(info.duration == nil)
     }
 
     @Test func emptyDiffKeepsState() throws {
@@ -246,6 +252,253 @@ struct NowPlayingTests {
         #expect(NowPlayingInfo(bundleIdentifier: "", parentBundleIdentifier: "", title: "x").appBundleIDs.isEmpty)
         let same = NowPlayingInfo(bundleIdentifier: "com.apple.Music", parentBundleIdentifier: "com.apple.Music", title: "x")
         #expect(same.appBundleIDs == ["com.apple.Music"])
+    }
+
+    // MARK: - Тайминг при смене трека
+
+    private static let t0: Double = 1_700_000_000
+    private static let t0Date = Date(timeIntervalSince1970: t0)
+
+    private static func micros(_ seconds: Double) -> String {
+        String(Int64((seconds * 1_000_000).rounded()))
+    }
+
+    /// Строка потока: `pairs` готовые фрагменты JSON (`"\"B\""`, `"true"`, число).
+    private static func line(diff: Bool, _ pairs: KeyValuePairs<String, String>) -> String {
+        let payload = pairs.map { "\"\($0.key)\":\($0.value)" }.joined(separator: ",")
+        return #"{"type":"data","diff":\#(diff),"payload":{\#(payload)}}"#
+    }
+
+    /// Полный снимок трека A: 2:13, позиция 2:10 на метке T, играет.
+    private static let snapshotA = line(diff: false, [
+        "bundleIdentifier": #""ru.yandex.desktop.music""#,
+        "title": #""A""#,
+        "artist": #""a""#,
+        "playing": "true",
+        "durationMicros": micros(133),
+        "elapsedTimeMicros": micros(130),
+        "timestampEpochMicros": micros(t0),
+    ])
+
+    /// Яндекс Музыка присылает название нового трека раньше его позиции и длительности:
+    /// тайминг прошлого трека не достается новому, прогресса нет до нового тайминга.
+    @Test func trackChangeDropsStaleTiming() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA)
+        let b = try #require(try parser.consume(line: Self.line(diff: true, ["title": #""B""#, "artist": #""b""#])))
+        #expect(b.title == "B")
+        #expect(b.duration == nil)
+        #expect(b.elapsedTime == nil)
+        #expect(b.timestamp == nil)
+        #expect(b.playbackPosition(at: Self.t0Date.addingTimeInterval(1)) == nil)
+
+        let timed = try #require(try parser.consume(line: Self.line(diff: true, [
+            "durationMicros": Self.micros(200),
+            "elapsedTimeMicros": Self.micros(1),
+            "timestampEpochMicros": Self.micros(Self.t0 + 5),
+        ])))
+        #expect(timed.title == "B")
+        #expect(timed.isPlaying)
+        #expect(timed.playbackPosition(at: Self.t0Date.addingTimeInterval(6))?.passedSeconds == 2)
+    }
+
+    @Test func trackChangeWithTimingKeepsIt() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA)
+        let b = try #require(try parser.consume(line: Self.line(diff: true, [
+            "title": #""B""#,
+            "durationMicros": Self.micros(200),
+            "elapsedTimeMicros": Self.micros(0),
+            "timestampEpochMicros": Self.micros(Self.t0 + 1),
+        ])))
+        #expect(b.duration == 200)
+        #expect(b.elapsedTime == 0)
+        #expect(b.timestamp == Self.t0Date.addingTimeInterval(1))
+    }
+
+    /// Каждый отсутствующий в диффе ключ тайминга удаляется отдельно: длительность без позиции
+    /// прогресс не показывает.
+    @Test func partialTimingHidesProgress() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA)
+        let b = try #require(try parser.consume(line: Self.line(diff: true, [
+            "title": #""B""#,
+            "durationMicros": Self.micros(200),
+        ])))
+        #expect(b.duration == 200)
+        #expect(b.elapsedTime == nil)
+        #expect(b.timestamp == nil)
+        #expect(b.playbackPosition(at: Self.t0Date) == nil)
+    }
+
+    @Test func diffWithoutTitleKeepsTiming() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA)
+        let info = try #require(try parser.consume(line: Self.line(diff: true, [
+            "elapsedTimeMicros": Self.micros(10),
+            "timestampEpochMicros": Self.micros(Self.t0 + 3),
+        ])))
+        #expect(info.title == "A")
+        #expect(info.duration == 133)
+        #expect(info.elapsedTime == 10)
+        #expect(info.timestamp == Self.t0Date.addingTimeInterval(3))
+    }
+
+    /// Тайминг, пришедший раньше названия, принадлежит первому названию, как обложка.
+    @Test func ownerlessTimingIsAdopted() throws {
+        var parser = NowPlayingStreamParser()
+        #expect(try parser.consume(line: Self.line(diff: false, [
+            "bundleIdentifier": #""ru.yandex.desktop.music""#,
+            "durationMicros": Self.micros(200),
+            "elapsedTimeMicros": Self.micros(10),
+            "timestampEpochMicros": Self.micros(Self.t0),
+            "playing": "true",
+        ])) == nil)
+        let b = try #require(try parser.consume(line: Self.line(diff: true, ["title": #""B""#])))
+        #expect(b.duration == 200)
+        #expect(b.elapsedTime == 10)
+        #expect(b.timestamp == Self.t0Date)
+    }
+
+    /// Пауза и продолжение без новой метки: позиция переносится на момент получения строки,
+    /// и время паузы в нее не попадает.
+    @Test func resumeAfterPauseWithoutTimestampDoesNotJump() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.line(diff: false, [
+            "bundleIdentifier": #""ru.yandex.desktop.music""#,
+            "title": #""A""#,
+            "playing": "true",
+            "durationMicros": Self.micros(200),
+            "elapsedTimeMicros": Self.micros(30),
+            "timestampEpochMicros": Self.micros(Self.t0),
+        ]))
+        let paused = try #require(try parser.consume(
+            line: Self.line(diff: true, ["playing": "false"]), receivedAt: Self.t0Date.addingTimeInterval(10)))
+        #expect(!paused.isPlaying)
+        #expect(abs((paused.elapsedTime ?? 0) - 40) < 1e-6)
+        #expect(paused.timestamp == Self.t0Date.addingTimeInterval(10))
+
+        let resumed = try #require(try parser.consume(
+            line: Self.line(diff: true, ["playing": "true"]), receivedAt: Self.t0Date.addingTimeInterval(100)))
+        #expect(resumed.isPlaying)
+        #expect(resumed.timestamp == Self.t0Date.addingTimeInterval(100))
+        #expect(abs((resumed.elapsed(at: Self.t0Date.addingTimeInterval(101)) ?? 0) - 41) < 1e-6)
+    }
+
+    /// Пауза, когда позиция уже ушла за длительность дальше допуска: такую позицию прогресс
+    /// скрывает, и в полную полосу на паузе она не превращается. Состояние остается как было
+    /// (так проходит и `elapsedAdvancesOnlyWhilePlaying` с меткой из прошлого).
+    @Test func pauseDoesNotRebaseStalePosition() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA)
+        let paused = try #require(try parser.consume(
+            line: Self.line(diff: true, ["playing": "false"]), receivedAt: Self.t0Date.addingTimeInterval(60)))
+        #expect(!paused.isPlaying)
+        #expect(paused.elapsedTime == 130)
+        #expect(paused.timestamp == Self.t0Date)
+        // В пределах допуска позиция переносится и ограничивается длительностью.
+        var near = NowPlayingStreamParser()
+        _ = try near.consume(line: Self.snapshotA)
+        let end = try #require(try near.consume(
+            line: Self.line(diff: true, ["playing": "false"]), receivedAt: Self.t0Date.addingTimeInterval(4)))
+        #expect(end.elapsedTime == 133)
+        #expect(end.timestamp == Self.t0Date.addingTimeInterval(4))
+        #expect(end.playbackPosition(at: Self.t0Date.addingTimeInterval(100))?.remainingSeconds == 0)
+    }
+
+    @Test func elapsedWithoutTimestampIsStampedOnReceipt() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA)
+        let info = try #require(try parser.consume(
+            line: Self.line(diff: true, ["elapsedTimeMicros": Self.micros(60)]),
+            receivedAt: Self.t0Date.addingTimeInterval(50)))
+        #expect(info.elapsedTime == 60)
+        #expect(info.timestamp == Self.t0Date.addingTimeInterval(50))
+        #expect(info.playbackPosition(at: Self.t0Date.addingTimeInterval(52))?.passedSeconds == 62)
+    }
+
+    /// Позиция дальше длительности больше чем на допуск: данные устарели, прогресс скрыт.
+    @Test func positionBeyondDurationIsHidden() {
+        let paused = NowPlayingInfo(
+            bundleIdentifier: "a", title: "t", isPlaying: false,
+            duration: 133, elapsedTime: 150, timestamp: Self.t0Date)
+        #expect(paused.playbackPosition(at: Self.t0Date) == nil)
+        let playing = NowPlayingInfo(
+            bundleIdentifier: "a", title: "t", isPlaying: true,
+            duration: 133, elapsedTime: 100, timestamp: Self.t0Date)
+        #expect(playing.playbackPosition(at: Self.t0Date.addingTimeInterval(60)) == nil)
+        #expect(playing.playbackPosition(at: Self.t0Date.addingTimeInterval(30))?.passedSeconds == 130)
+        let noDuration = NowPlayingInfo(bundleIdentifier: "a", title: "t", elapsedTime: 10)
+        #expect(noDuration.playbackPosition(at: Self.t0Date) == nil)
+        let noElapsed = NowPlayingInfo(bundleIdentifier: "a", title: "t", duration: 100)
+        #expect(noElapsed.playbackPosition(at: Self.t0Date) == nil)
+    }
+
+    /// В пределах допуска позиция за концом трека дает полную полосу.
+    @Test func positionAtEndShowsFullBar() throws {
+        let info = NowPlayingInfo(
+            bundleIdentifier: "a", title: "t", isPlaying: false,
+            duration: 133.9, elapsedTime: 134.5, timestamp: Self.t0Date)
+        let position = try #require(info.playbackPosition(at: Self.t0Date))
+        #expect(position.fraction == 1)
+        #expect(position.remainingSeconds == 0)
+        #expect(position.passedSeconds == 133)
+        #expect(position.elapsed == 133.9)
+    }
+
+    @Test func clockAndRemainingAddUp() {
+        let position = PlaybackPosition(elapsed: 63.7, duration: 214.2)
+        #expect(position.passedText == "1:03")
+        #expect(position.remainingText == "\u{2212}2:31")
+        #expect(position.passedSeconds + position.remainingSeconds == 214)
+        #expect(abs(position.fraction - 63.7 / 214.2) < 1e-12)
+        #expect(PlaybackPosition.clock(3723) == "1:02:03")
+        #expect(PlaybackPosition.clock(7) == "0:07")
+        #expect(PlaybackPosition.clock(221) == "3:41")
+        #expect(PlaybackPosition.overrunTolerance == 2.0)
+    }
+
+    // MARK: - NowPlayingTimingWatch
+
+    private static func track(_ title: String, duration: Double? = nil, elapsed: Double? = nil, playing: Bool = true) -> NowPlayingInfo {
+        NowPlayingInfo(
+            bundleIdentifier: "ru.yandex.desktop.music", title: title, isPlaying: playing,
+            duration: duration, elapsedTime: elapsed, timestamp: elapsed == nil ? nil : t0Date)
+    }
+
+    /// Смена трека без тайминга после трека с таймингом: одна строка, пустые снимки между
+    /// треками ее не теряют и не повторяют.
+    @Test func watchReportsTrackChangeWithoutTimingOnce() {
+        var watch = NowPlayingTimingWatch()
+        #expect(watch.observe(Self.track("A", duration: 133, elapsed: 10), at: Self.t0Date).isEmpty)
+        #expect(watch.observe(nil, at: Self.t0Date).isEmpty)
+        #expect(watch.observe(Self.track("B"), at: Self.t0Date) == [.trackChangedWithoutTiming])
+        #expect(watch.observe(Self.track("B"), at: Self.t0Date).isEmpty)
+        // Трек без тайминга после трека без тайминга: не о чем сообщать.
+        #expect(watch.observe(Self.track("C"), at: Self.t0Date).isEmpty)
+        // Длительность без позиции тоже тайминг не дает, но и строку «без длительности и позиции» не пишет.
+        #expect(watch.observe(Self.track("D", duration: 100, elapsed: 5), at: Self.t0Date).isEmpty)
+        #expect(watch.observe(Self.track("E", duration: 100), at: Self.t0Date).isEmpty)
+    }
+
+    @Test func watchReportsOverrunOncePerTrack() {
+        var watch = NowPlayingTimingWatch()
+        let a = Self.track("A", duration: 133, elapsed: 100)
+        #expect(watch.observe(a, at: Self.t0Date.addingTimeInterval(30)).isEmpty)
+        let late = Self.t0Date.addingTimeInterval(60)
+        #expect(watch.observe(a, at: late) == [.positionBeyondDuration(elapsed: 160, duration: 133, stampAge: 60)])
+        #expect(watch.observe(a, at: late.addingTimeInterval(1)).isEmpty)
+        #expect(watch.observe(Self.track("B", duration: 100, elapsed: 150, playing: false), at: late)
+            == [.positionBeyondDuration(elapsed: 150, duration: 100, stampAge: 60)])
+    }
+
+    @Test func watchEventMessages() {
+        #expect(NowPlayingTimingWatch.Event.trackChangedWithoutTiming.logMessage
+            == "адаптер: трек сменился без длительности и позиции")
+        #expect(NowPlayingTimingWatch.Event.positionBeyondDuration(elapsed: 160, duration: 133, stampAge: 60.24).logMessage
+            == "адаптер: позиция вне длительности (позиция 160.0 с, длительность 133.0 с, метка 60.2 с назад)")
+        #expect(NowPlayingTimingWatch.Event.positionBeyondDuration(elapsed: 150, duration: 133, stampAge: nil).logMessage
+            == "адаптер: позиция вне длительности (позиция 150.0 с, длительность 133.0 с, без метки)")
     }
 
     // MARK: - NowPlayingHold

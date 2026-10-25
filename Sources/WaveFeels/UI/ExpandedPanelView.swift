@@ -20,7 +20,9 @@ import WaveCore
 /// значок приложения-источника, его название и «Нет данных о треке», а справа кнопка
 /// «Открыть», которая выводит источник вперед (у всего звука системы кнопки нет). Время
 /// обновляется раз в секунду (`TimelineView(.periodic)`), пока трек играет и панель раскрыта;
-/// на паузе и в снимках стоит.
+/// на паузе и в снимках стоит. Прогресса нет, пока у трека нет длительности и позиции
+/// (`NowPlayingInfo.playbackPosition(at:)`), и когда позиция ушла за длительность: так
+/// выглядит тайминг прошлого трека или давняя метка.
 struct ExpandedPanelView: View {
     static let artworkSize: CGFloat = IslandGeometry.panelContentHeight
     static let artworkRadius: CGFloat = 11
@@ -148,9 +150,8 @@ struct ExpandedPanelView: View {
                         .foregroundStyle(Color.white.opacity(Self.artistOpacity))
                         .padding(.top, Self.artistSpacing)
                 }
-                if let duration = track.duration, track.elapsedTime != nil {
-                    progress(track, duration: duration)
-                        .padding(.top, Self.progressSpacing)
+                if let position = track.playbackPosition(at: date ?? Date()) {
+                    progress(track, position: position)
                 }
             }
             .frame(width: column, alignment: .leading)
@@ -197,16 +198,21 @@ struct ExpandedPanelView: View {
 
     // MARK: - Прогресс
 
+    /// `position`: позиция на момент построения (в снимках на `date`). Пока трек играет, она
+    /// пересчитывается каждую секунду; если позиция ушла за длительность дальше допуска
+    /// (`PlaybackPosition.overrunTolerance`), полоса пропадает вместе с отступом.
     @ViewBuilder
-    private func progress(_ track: NowPlayingInfo, duration: Double) -> some View {
-        if let date {
-            PlaybackProgress(elapsed: track.elapsed(at: date) ?? 0, duration: duration)
-        } else if track.isPlaying {
+    private func progress(_ track: NowPlayingInfo, position: PlaybackPosition) -> some View {
+        if date == nil, track.isPlaying {
             TimelineView(.periodic(from: Self.secondBoundary(of: track), by: 1)) { context in
-                PlaybackProgress(elapsed: track.elapsed(at: context.date) ?? 0, duration: duration)
+                if let current = track.playbackPosition(at: context.date) {
+                    PlaybackProgress(position: current)
+                        .padding(.top, Self.progressSpacing)
+                }
             }
         } else {
-            PlaybackProgress(elapsed: track.elapsed(at: Date()) ?? 0, duration: duration)
+            PlaybackProgress(position: position)
+                .padding(.top, Self.progressSpacing)
         }
     }
 
@@ -415,36 +421,24 @@ private struct PlaybackProgress: View {
     static let trackOpacity = 0.2
     static let fillOpacity = 0.9
 
-    let elapsed: Double
-    let duration: Double
+    let position: PlaybackPosition
 
     var body: some View {
-        let total = max(Int(duration.rounded(.down)), 0)
-        let passed = min(max(Int(elapsed.rounded(.down)), 0), total)
-        let fraction = duration > 0 ? min(max(elapsed / duration, 0), 1) : 0
+        let total = PlaybackPosition.clock(position.passedSeconds + position.remainingSeconds)
         HStack(spacing: ExpandedPanelView.timeSpacing) {
-            Text(verbatim: Self.format(passed))
+            Text(verbatim: position.passedText)
             ZStack {
                 Capsule().fill(Color.white.opacity(Self.trackOpacity))
-                ProgressFill(fraction: fraction).fill(Color.white.opacity(Self.fillOpacity))
+                ProgressFill(fraction: position.fraction).fill(Color.white.opacity(Self.fillOpacity))
             }
             .frame(height: ExpandedPanelView.progressHeight)
-            Text(verbatim: "\u{2212}" + Self.format(total - passed))
+            Text(verbatim: position.remainingText)
         }
         .font(.system(size: ExpandedPanelView.timeSize, weight: .medium).monospacedDigit())
         .foregroundStyle(Color.white.opacity(ExpandedPanelView.timeOpacity))
         .lineLimit(1)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Прошло \(Self.format(passed)) из \(Self.format(total))")
-    }
-
-    /// «0:07», «3:41», «1:02:03».
-    static func format(_ seconds: Int) -> String {
-        let hours = seconds / 3600
-        let minutes = seconds / 60 % 60
-        let rest = seconds % 60
-        let tail = String(format: "%02d", rest)
-        return hours > 0 ? "\(hours):" + String(format: "%02d", minutes) + ":" + tail : "\(minutes):" + tail
+        .accessibilityLabel("Прошло \(position.passedText) из \(total)")
     }
 }
 

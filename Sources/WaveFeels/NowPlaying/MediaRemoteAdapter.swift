@@ -108,6 +108,9 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var emptyHold = NowPlayingHold<NowPlayingInfo>()
     /// Срок удержания после пустого снимка, на который поставлен `holdTask`; `nil`, если не держится.
     @ObservationIgnored private var emptyHoldUntil: Double?
+    /// Строки лога о тайминге трека (позиция за длительностью, смена трека без тайминга),
+    /// не чаще раза на трек.
+    @ObservationIgnored private var timingWatch = NowPlayingTimingWatch()
     /// Смерти потока подряд; сбрасывается, когда поток выдал настоящий трек или прожил `stableRun`.
     @ObservationIgnored private var restarts = 0
     @ObservationIgnored private var restartTask: Task<Void, Never>?
@@ -477,6 +480,9 @@ final class MediaRemoteAdapter {
             next = decoded
         }
         streamInfo = next
+        for event in timingWatch.observe(next, at: Date()) {
+            log(event.logMessage)
+        }
         // Перезапущенный поток начинает с пустого снимка: прежний трек пока остается.
         if holdingInfo {
             guard next != nil else { return }
@@ -720,7 +726,7 @@ nonisolated final class NowPlayingLineDecoder: @unchecked Sendable {
 
     func decode(_ line: String) -> AdapterOutput {
         do {
-            let parsed = try parser.consume(line: line)
+            let parsed = try parser.consume(line: line, receivedAt: Date())
             return .nowPlaying(parsed.map { MediaRemoteAdapter.sanitized($0) })
         } catch {
             return .unparsed(String(line.prefix(Self.unparsedPrefix)))
