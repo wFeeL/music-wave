@@ -92,6 +92,14 @@ public struct RealFFT: Sendable {
         }
     }
 
+    /// То же в готовый массив `output` (`size / 2` значений), без выделения памяти. Шаг анализа
+    /// вызывает этот вариант без замыкания вокруг себя: внутри замыкания чтение БПФ из свойства
+    /// копировало бы всю структуру (удержание каждого ее массива) на каждом шаге.
+    /// - Precondition: `samples.count == size`, `output.count == size / 2`.
+    func amplitudeSpectrum(_ samples: UnsafeBufferPointer<Float>, into output: inout [Float]) {
+        output.withUnsafeMutableBufferPointer { amplitudeSpectrum(samples, into: $0) }
+    }
+
     /// Адрес и емкость рабочего массива для теста: вызовы его не пересоздают.
     var workBuffer: WorkBuffer {
         scratch.buffer.withLock { WorkBuffer($0) }

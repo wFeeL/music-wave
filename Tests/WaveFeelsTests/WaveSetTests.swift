@@ -1,3 +1,4 @@
+import SwiftUI
 import Testing
 import WaveCore
 @testable import WaveFeels
@@ -74,6 +75,30 @@ struct WaveSetTests {
                 palette: PaletteExtractor.fallback, layer: layer.shape, level: Self.frame.layers[layer.shape.rawValue],
                 time: 1, locations: locations, profile: style.profile
             ))
+        }
+    }
+
+    /// Градиенты строятся в наборе, один на кадр для всех холстов: обводка у каждой линии из ее
+    /// `stops`, заливка по набору точек градиента с прозрачностью `fillTopOpacity × fill` (у
+    /// основной линии и эха один). Без заливки градиентов заливки нет.
+    @Test func gradientsAreBuiltOncePerSet() {
+        for style in Self.styles {
+            let waves = Self.waves({
+                $0.lineCount = 6
+                $0.fill = 0.5
+            }, style: style)
+            let top = min(Double(WavePaint.fillTopOpacity) * 0.5, 1)
+            #expect(waves.fillGradients.count == 3)
+            for layer in waves.layers {
+                let opacity = layer.opacity
+                let stroke = WaveSet.gradient(layer.baseStops) { Double($0 * opacity) }
+                let fill = WaveSet.gradient(layer.baseStops) { _ in top }
+                #expect(layer.gradient == stroke)
+                #expect(layer.gradient.stops.map(\.location) == layer.stops.map { CGFloat($0.location) })
+                #expect(waves.fillGradients[layer.stopSet] == fill)
+            }
+            #expect(Self.waves({ $0.lineCount = 6 }, style: style).fillGradients.isEmpty)
+            #expect(WaveSet(empty: style).fillGradients.isEmpty)
         }
     }
 

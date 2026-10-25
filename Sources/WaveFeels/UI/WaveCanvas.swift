@@ -27,6 +27,8 @@ enum WavePass: Sendable {
 /// Волны одного кадра: точки и цвета считаются один раз и общие для всех холстов кадра
 /// (два крыла, линии и свечение). Точки всех линий лежат в одном массиве, точки градиента всех
 /// наборов в другом, линии держат свои срезы: на кадр два выделения памяти, а не по паре на линию.
+/// Градиенты обводки и заливки (`Gradient` из цветов `Color`) тоже строятся здесь один раз, холст
+/// только ставит их между своими краями.
 nonisolated struct WaveSet: Sendable {
     /// Одна линия (`WaveLine`).
     struct Layer: Sendable {
@@ -47,6 +49,8 @@ nonisolated struct WaveSet: Sendable {
         let stopSet: Int
         /// Множитель прозрачности линии (`WaveLine.opacity`).
         let opacity: Float
+        /// Градиент обводки линии и ее свечения: `stops` цветами `Color`.
+        let gradient: Gradient
 
         /// Точки градиента самой линии: `baseStops` с прозрачностью × `opacity`.
         var stops: [WavePaint.Stop] {
@@ -96,13 +100,25 @@ nonisolated struct WaveSet: Sendable {
     let thickness: CGFloat
     /// «Заливка» 0...1; 0 без заливки.
     let fill: Double
+    /// Градиенты заливки по номеру набора точек градиента (`Layer.stopSet`): цвет набора с
+    /// прозрачностью `fillTopOpacity × fill`, без прозрачности линии, поэтому у основной линии и
+    /// ее эха один. Пустой без заливки.
+    let fillGradients: [Gradient]
 
-    /// Пустой набор: холст ничего не рисует. Так стоит слой волн, которого сейчас не видно.
+    /// Пустой набор: холст ничего не рисует.
     init(empty style: WaveStyle) {
         self.style = style
         layers = []
         thickness = 1
         fill = 0
+        fillGradients = []
+    }
+
+    /// Градиент из точек `stops`, прозрачность каждой точки через `opacity`.
+    static func gradient(_ stops: ArraySlice<WavePaint.Stop>, opacity: (Float) -> Double) -> Gradient {
+        Gradient(stops: stops.map { stop in
+            Gradient.Stop(color: Color(palette: stop.color, opacity: opacity(stop.opacity)), location: CGFloat(stop.location))
+        })
     }
 
     /// По линии на каждую `appearance.lines`: размах от уровня источника (общий уровень у
@@ -169,15 +185,26 @@ nonisolated struct WaveSet: Sendable {
         layers = lines.indices.map { index in
             let line = lines[index]
             let set = stopSets[index]
+            let baseStops = stops[(set * stopCount)..<((set + 1) * stopCount)]
+            let opacity = line.opacity
             return Layer(
                 shape: line.shape,
                 level: levels[index],
                 glows: line.glows && levels[index] >= Self.glowLevel,
                 samples: samples[ranges[index]],
-                baseStops: stops[(set * stopCount)..<((set + 1) * stopCount)],
+                baseStops: baseStops,
                 stopSet: set,
-                opacity: line.opacity
+                opacity: opacity,
+                gradient: Self.gradient(baseStops) { Double($0 * opacity) }
             )
+        }
+        if appearance.fill > 0 {
+            let top = min(Double(WavePaint.fillTopOpacity) * appearance.fill, 1)
+            fillGradients = keys.indices.map { set in
+                Self.gradient(stops[(set * stopCount)..<((set + 1) * stopCount)]) { _ in top }
+            }
+        } else {
+            fillGradients = []
         }
     }
 }
@@ -256,32 +283,25 @@ nonisolated struct WaveDrawing: Sendable {
             }
             return (layer: layer, path: Self.smoothPath(through: points))
         }
-        func shading(_ stops: ArraySlice<WavePaint.Stop>, opacity: (Float) -> Double) -> GraphicsContext.Shading {
-            let gradient = Gradient(stops: stops.map { stop in
-                Gradient.Stop(color: Color(palette: stop.color, opacity: opacity(stop.opacity)), location: CGFloat(stop.location))
-            })
-            return .linearGradient(gradient, startPoint: CGPoint(x: start, y: middle), endPoint: CGPoint(x: end, y: middle))
-        }
+        // Градиенты готовы в наборе (общие для крыльев и проходов), холст задает только края.
+        let startPoint = CGPoint(x: start, y: middle)
+        let endPoint = CGPoint(x: end, y: middle)
 
         if pass == .lines, waves.fill > 0, !lines.isEmpty {
             // Цвет заливки не зависит от прозрачности линии: у основной линии и ее эха один
-            // градиент, он строится один раз на набор точек градиента.
-            let top = min(Double(WavePaint.fillTopOpacity) * waves.fill, 1)
-            var fillShadings: [Int: GraphicsContext.Shading] = [:]
-            for line in lines where fillShadings[line.layer.stopSet] == nil {
-                fillShadings[line.layer.stopSet] = shading(line.layer.baseStops) { _ in top }
-            }
+            // градиент набора точек градиента.
+            let fillGradients = waves.fillGradients
             drawFill(lines, in: context, size: size, start: start, end: end, middle: middle, swing: swing) { layer in
-                fillShadings[layer.stopSet] ?? shading(layer.baseStops) { _ in top }
+                let gradient = layer.stopSet < fillGradients.count ? fillGradients[layer.stopSet] : Gradient(stops: [])
+                return .linearGradient(gradient, startPoint: startPoint, endPoint: endPoint)
             }
         }
 
         for line in lines {
             let width = widths[line.layer.shape.rawValue] * waves.thickness * (pass == .glow ? Self.glowLineScale : 1)
-            let opacity = line.layer.opacity
             context.stroke(
                 line.path,
-                with: shading(line.layer.baseStops) { Double($0 * opacity) },
+                with: .linearGradient(line.layer.gradient, startPoint: startPoint, endPoint: endPoint),
                 style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
             )
         }

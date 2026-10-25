@@ -60,6 +60,31 @@ struct HopBuffersTests {
         }
     }
 
+    /// Спектр в массив `inout` (так его берет шаг анализа): бит в бит как в буфер, массив тот же
+    /// самый (адрес и длина), рабочий буфер БПФ тоже.
+    @Test func spectrumIntoArrayMatchesBufferVersion() {
+        var generator = SplitMix(seed: 11)
+        for size in [2, 16, 1024, 2048] {
+            let fft = RealFFT(size: size)
+            let scratchBefore = fft.workBuffer
+            var output = [Float](repeating: -1, count: size / 2)
+            let outputBefore = WorkBuffer(output)
+            for trial in 0..<3 {
+                let samples: [Float] = (0..<size).map { index in
+                    trial == 0 ? Float(sin(Double(index) * 0.37)) : Float(generator.unit() * 2 - 1)
+                }
+                var reference = [Float](repeating: -1, count: size / 2)
+                samples.withUnsafeBufferPointer { samples in
+                    reference.withUnsafeMutableBufferPointer { fft.amplitudeSpectrum(samples, into: $0) }
+                    fft.amplitudeSpectrum(samples, into: &output)
+                }
+                #expect(output.map(\.bitPattern) == reference.map(\.bitPattern), "size \(size) trial \(trial)")
+                #expect(WorkBuffer(output) == outputBefore)
+                #expect(fft.workBuffer == scratchBefore)
+            }
+        }
+    }
+
     // MARK: - Образец: скалярный БПФ до 1.1
 
     private static func scalarSpectrum(_ samples: [Float]) -> [Float] {

@@ -191,6 +191,14 @@ public final class StreamAnalyzer {
         broadbandPicker.reset()
     }
 
+    /// Спектр окна в `spectrum`. БПФ приходит по ссылке (`inout`), а не чтением свойства: метод
+    /// структуры на свойстве класса или внутри замыкания вызывался с копией `RealFFT` (удержание и
+    /// освобождение всех ее массивов) на каждом шаге. `fft` и `spectrum` разные свойства, доступ к
+    /// ним одновременно разрешен.
+    private static func amplitudeSpectrum(_ window: UnsafeBufferPointer<Float>, fft: inout RealFFT, into spectrum: inout [Float]) {
+        fft.amplitudeSpectrum(window, into: &spectrum)
+    }
+
     /// Анализирует окно, которое заканчивается сэмплом потока `endSample` (не включая его).
     /// `dt`: на сколько секунд сдвигаются автоуровень, сглаживание полос и огибающая удара; по
     /// умолчанию длина шага. Простой острова берет один шаг на пробуждение и передает время с
@@ -206,7 +214,7 @@ public final class StreamAnalyzer {
         let rate = config.sampleRate
         let dt = dt.map { $0.isFinite ? max($0, 0) : 0 } ?? config.hopDuration
 
-        spectrum.withUnsafeMutableBufferPointer { fft.amplitudeSpectrum(window, into: $0) }
+        Self.amplitudeSpectrum(window, fft: &fft, into: &spectrum)
         spectrum.withUnsafeBufferPointer { spectrum in
             levelsDB.withUnsafeMutableBufferPointer { mapper.bandLevels(spectrum, into: $0) }
         }
