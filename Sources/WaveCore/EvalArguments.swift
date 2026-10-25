@@ -238,7 +238,7 @@ extension BeatTracker.Parameters {
     public static let names: [String] = [
         "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "crossfadeBeats",
-        "gateFallPerBeatDB", "gateFallNoTempoDB",
+        "carryTolerance", "carryPhase", "gateFallPerBeatDB", "gateFallNoTempoDB",
     ]
 
     /// Задает поле по имени. `false`, если имени нет или значение не подходит (целые поля берут только
@@ -256,6 +256,8 @@ extension BeatTracker.Parameters {
         case "phaseJumpMargin": phaseJumpMargin = value
         case "dropWindow": dropWindow = value
         case "crossfadeBeats": crossfadeBeats = value
+        case "carryTolerance": carryTolerance = value
+        case "carryPhase": carryPhase = value
         case "offGridScale": offGridScale = Float(value)
         case "onsetFloor": onsetFloor = Float(value)
         case "gateFallPerBeatDB": gateFallPerBeatDB = Float(value)

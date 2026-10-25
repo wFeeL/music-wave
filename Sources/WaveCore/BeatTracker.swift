@@ -14,7 +14,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// же оси. На каждом шаге:
 /// 1. широкополосная функция онсетов и функция бочки идут в `TempoEstimator`, каждые
 ///    `TempoEstimator.updateInterval` секунд потока берется оценка темпа, ее период становится
-///    периодом ФАПЧ. Смена темпа ставит фазу заново по гребенке и сбрасывает уверенность (см. п. 4);
+///    периодом ФАПЧ. Смена темпа ставит фазу заново по гребенке и сбрасывает уверенность (см. п. 4),
+///    кроме смены на близкий, удвоенный или половинный период с долями на прежних местах (`carry`);
 /// 2. при каждой оценке гребенка ищет задержку последней доли
 ///    `d* = argmax_{d ∈ [0, T)} Σ_{k=0..5} 0.75^k · max(ODF[n − d − kT ± 1 шаг])`, кандидат
 ///    `now − d* − StreamAnalyzer.onsetLag` лежит на оси онсетов. Если он расходится с ФАПЧ (разность по
@@ -26,8 +27,9 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    события свечения;
 /// 4. когда окно доли закрылось, уверенность сдвигается к попаданию или промаху на `confidenceGain`.
 ///    Захват при уверенности от `lockConfidence` и `lockHits` попаданиях подряд, отпускание ниже
-///    `unlockConfidence`. Смена темпа и скачок фазы делят уверенность пополам, обнуляют счет попаданий
-///    и отпускают захват (`beat-sync.md` 2.6). Причина последней потери захвата в `lastUnlockReason`;
+///    `unlockConfidence`. Смена темпа на другую сетку и скачок фазы делят уверенность пополам, обнуляют
+///    счет попаданий и отпускают захват (`beat-sync.md` 2.6). Причина последней потери захвата в
+///    `lastUnlockReason`;
 /// 5. энергетический ворот: пик уровня бочки держится и спадает на `gateFallPerBeatDB` за долю (без
 ///    темпа `gateFallNoTempoDB` за 0.25 с), сравнивается со следящим пиком за 10 с,
 ///    `g_E = smoothstep(−24, −12, разность)`. Между бочками ворот открыт, в брейке закрывается;
@@ -82,6 +84,16 @@ public struct BeatTracker: Sendable {
         /// предсказанные доли с неверной фазой гаснут быстрее (на GTZAN такие вспышки попадали в долю в
         /// 65 % случаев против 90 % у захваченных).
         public var crossfadeBeats: Double
+        /// Переключение темпа в оценке не сбрасывает уверенность, когда новый период отличается от
+        /// прежнего, его удвоенного или половинного меньше чем на эту долю, а гребенка на новом
+        /// периоде видит доли на прежних местах (`carry`). 0 выключает перенос. 10 % как окно дрейфа
+        /// октавы в `TempoEstimator`; далекая смена близкого темпа начинается от 6 %
+        /// (`followTolerance`), в журнале 2 владельца это 6.1 %. На GTZAN tune от 6 до 10 % числа одни.
+        public var carryTolerance: Double
+        /// При близкой смене темпа (не октава) гребенка может стоять дальше `phaseJump` от доли ФАПЧ:
+        /// пока период был неверен, ФАПЧ отставала (журнал 2: 0.18 периода). До этой доли периода
+        /// уверенность переносится и фаза берется у гребенки; четверть периода никогда не «и».
+        public var carryPhase: Double
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -102,6 +114,8 @@ public struct BeatTracker: Sendable {
             offGridScale: Float = 0.2,
             onsetFloor: Float = 0.4,
             crossfadeBeats: Double = 1.0,
+            carryTolerance: Double = 0.10,
+            carryPhase: Double = 0.25,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -119,6 +133,8 @@ public struct BeatTracker: Sendable {
             self.offGridScale = offGridScale
             self.onsetFloor = onsetFloor
             self.crossfadeBeats = crossfadeBeats
+            self.carryTolerance = carryTolerance
+            self.carryPhase = carryPhase
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -317,16 +333,19 @@ public struct BeatTracker: Sendable {
 
     // MARK: Темп и фаза
 
-    private mutating func updateTempo(_ estimate: TempoEstimate) {
+    /// Новая оценка темпа (внутренняя, чтобы тесты подавали смену темпа напрямую).
+    mutating func updateTempo(_ estimate: TempoEstimate) {
         // Период ФАПЧ каждые 0.25 с заменяется оценкой темпа, поэтому поправки `beta` между оценками
         // не накапливаются и петля ведет себя как петля первого порядка: ошибка оценки периода δ за
         // долю оставляет постоянный сдвиг фазы около δ / alpha (на 120 BPM оценка 0.4989 с вместо
         // 0.5 с, доли предсказываются примерно на 5 мс раньше онсетов). Это укладывается в допуск
         // среднего сдвига; если понадобится убрать смещение, оценка должна подтягивать T, а не
         // заменять его (`beat-sync.md` 2.5).
+        let previous = period
         period = estimate.period
         let comb = phaseCandidate(period: estimate.period, current: estimate.switched ? nil : nextBeat)
         guard let nextBeat, !estimate.switched else {
+            if let nextBeat, let previous, let comb, carry(from: previous, next: nextBeat, comb: comb.time) { return }
             if nextBeat != nil { resetConfidence(.tempoSwitch) }
             if let comb { rephase(to: comb.time) }
             return
@@ -343,6 +362,36 @@ public struct BeatTracker: Sendable {
         } else {
             disagreements = 0
         }
+    }
+
+    /// Смена темпа на близкий (до `carryTolerance`), удвоенный или половинный период, при которой
+    /// гребенка на новом периоде видит доли там же, где ФАПЧ (до `phaseJump` меньшего периода):
+    /// сетка та же, поэтому уверенность, счет попаданий и захват остаются, а следующая доля не
+    /// двигается. При половинном темпе гребенка выбирает, какая из двух долей остается; если не
+    /// `nextBeat`, сетка начинается со следующей. При близком темпе гребенка дальше `phaseJump`, но
+    /// не дальше `carryPhase` периода, дает новую фазу с той же уверенностью. `true`, если смена
+    /// перенесена.
+    private mutating func carry(from previous: Double, next: Double, comb: Double) -> Bool {
+        guard let period else { return false }
+        let ratio = period / previous
+        let tolerance = parameters.carryTolerance
+        let near = abs(ratio - 1) < tolerance
+        let faster = abs(2 * ratio - 1) < tolerance
+        let slower = abs(ratio / 2 - 1) < tolerance
+        guard near || faster || slower else { return false }
+        let modulus = min(period, previous)
+        let offset = Self.circularDifference(comb - next, period: modulus)
+        if near, abs(offset) > parameters.phaseJump * modulus, abs(offset) <= parameters.carryPhase * modulus {
+            rephase(to: comb)
+            disagreements = 0
+            return true
+        }
+        guard abs(offset) <= parameters.phaseJump * modulus else { return false }
+        if slower, abs(Self.circularDifference(comb - next, period: period)) > parameters.phaseJump * period {
+            rephase(to: next + previous)
+        }
+        disagreements = 0
+        return true
     }
 
     /// Смена темпа или скачок фазы: уверенность вдвое, счет попаданий заново, захват отпущен

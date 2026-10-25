@@ -383,6 +383,90 @@ struct BeatTrackerTests {
         #expect(relock - shift <= 5, "relocked at \(relock - shift) s after the shift")
     }
 
+    /// Переключение темпа на 6 % при тех же позициях долей (журнал 2 владельца: 77.9 -> 73.5 BPM, 6.1 %,
+    /// далекая смена в оценке темпа) захват не сбрасывает: захват, счет попаданий, уверенность и
+    /// следующая доля остаются, меняется только период.
+    @Test(arguments: [0.94, 1.06])
+    func smallTempoMoveKeepsLock(ratio: Double) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let period = try #require(tracker.period)
+        let (hits, confidence, next) = (tracker.hits, tracker.confidence, tracker.nextBeat)
+        tracker.updateTempo(TempoEstimate(period: period * ratio, switched: true))
+        #expect(tracker.locked)
+        #expect(tracker.hits == hits)
+        #expect(tracker.confidence == confidence)
+        #expect(tracker.nextBeat == next)
+        #expect(tracker.period == period * ratio)
+        // Дальше доли идут как шли: захват держится.
+        hops.feed(&tracker, until: 14)
+        #expect(tracker.locked && tracker.lastUnlockReason == nil)
+    }
+
+    /// Переход ровно на удвоенный (80 -> 160 BPM) или половинный (144 -> 72 BPM) темп с теми же
+    /// позициями долей уверенность не сбрасывает, следующая доля остается на долях сцены.
+    @Test(arguments: [(80.0, 0.5), (144.0, 2.0)])
+    func octaveRelatedKeepsPhase(bpm: Double, factor: Double) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: bpm)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let period = try #require(tracker.period)
+        try #require(abs(period * bpm / 60 - 1) < 0.02, "locked at \(60 / period) BPM")
+        let (hits, confidence) = (tracker.hits, tracker.confidence)
+        tracker.updateTempo(TempoEstimate(period: period * factor, switched: true))
+        #expect(tracker.locked)
+        #expect(tracker.hits == hits)
+        #expect(tracker.confidence == confidence)
+        let next = try #require(tracker.nextBeat)
+        // Доли сцены на 0.25 + k · 60 / bpm.
+        #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 60 / bpm)) < 0.02, "next beat \(next)")
+    }
+
+    /// Близкая смена темпа, пока ФАПЧ отстала от долей (журнал 2: доли на 0.18 периода позже ФАПЧ,
+    /// потом смена 77.9 -> 73.5 BPM): уверенность и захват остаются, фаза переходит к гребенке. Те же
+    /// доли на «и» (полпериода) это другая сетка, захват сбрасывается.
+    @Test(arguments: [(0.09, true), (0.25, false)])
+    func nearTempoMoveFollowsTheComb(shift: Double, carries: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        // Доли сдвигаются позже окна совпадения (0.075 с): ФАПЧ их не видит, три промаха подряд.
+        hops.nextBeatTime += shift
+        hops.feed(&tracker, until: 11.5)
+        try #require(tracker.locked)
+        let period = try #require(tracker.period)
+        let confidence = tracker.confidence
+        tracker.updateTempo(TempoEstimate(period: period * 1.06, switched: true))
+        let next = try #require(tracker.nextBeat)
+        let newPeriod = try #require(tracker.period)
+        // Доли сцены теперь на 0.25 + shift + k · 0.5 с. Сетка ставится от последней доли гребенки
+        // с новым периодом, поэтому на долю сцены ложится доля перед `next`.
+        let offset = BeatTracker.circularDifference(next - newPeriod - 0.25 - shift, period: 0.5)
+        #expect(abs(offset) < 0.02, "next beat \(next), period \(newPeriod), off the scene by \(offset)")
+        if carries {
+            #expect(tracker.locked && tracker.confidence == confidence)
+        } else {
+            #expect(!tracker.locked && tracker.lastUnlockReason == .tempoSwitch)
+        }
+    }
+
+    /// Смена на некратный темп (×1.3) по-прежнему сбрасывает захват: это другая сетка.
+    @Test func unrelatedTempoSwitchStillResets() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let period = try #require(tracker.period)
+        tracker.updateTempo(TempoEstimate(period: period / 1.3, switched: true))
+        #expect(!tracker.locked)
+        #expect(tracker.hits == 0)
+        #expect(tracker.lastUnlockReason == .tempoSwitch)
+    }
+
     /// Подтверждение бочки: отношение широкополосной функции на онсете к медиане за 1.5 с (плюс 0.5)
     /// проходит smoothstep от 7 до 11. Отношение 7 не светится, 9 вполовину, 11 полностью.
     @Test(arguments: [(Float(7), Float(0)), (Float(9), Float(0.5)), (Float(11), Float(1))])
