@@ -158,8 +158,22 @@ final class WindowsController: NSObject, NSWindowDelegate {
 
     /// Показывает окно поверх остальных; свернутое в Dock разворачивается. Рамка ужимается до
     /// видимой области экрана окна (без строки меню и Dock).
+    ///
+    /// Политика `.regular` ставится сразу, а активация и вывод окна идут в следующем проходе
+    /// главного цикла: смена политики применяется асинхронно, и просьбу об активации до нее macOS
+    /// не выполняет (из меню строки меню окно на другом рабочем столе так и не выходило).
+    /// Активное приложение с окном на другом столе система переводит на этот стол, если включена
+    /// настройка «При переключении на программу переходить в пространство с открытыми окнами».
     private func present(_ window: NSWindow) {
         NSApp.setActivationPolicy(.regular)
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.bringForward(window)
+            }
+        }
+    }
+
+    private func bringForward(_ window: NSWindow) {
         NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
@@ -171,8 +185,28 @@ final class WindowsController: NSObject, NSWindowDelegate {
             }
         }
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         // Уведомление о видимости придет после вывода окна; до него берется текущее состояние.
         setVisible(window.occlusionState.contains(.visible), for: window)
+        // Активация тоже асинхронная: итог виден не сразу, а через долю секунды.
+        let title = window.title
+        Task { @MainActor [weak window] in
+            try? await Task.sleep(for: Self.activationCheckDelay)
+            guard let window else { return }
+            Self.log(
+                "окно \(title): показ, приложение активно: \(NSApp.isActive ? "да" : "нет"), "
+                    + "окно на текущем столе: \(window.isOnActiveSpace ? "да" : "нет"), "
+                    + "ключевое: \(window.isKeyWindow ? "да" : "нет")"
+            )
+        }
+    }
+
+    /// Через сколько после показа окна лог записывает, активно ли приложение.
+    private static let activationCheckDelay: Duration = .milliseconds(500)
+
+    private static func log(_ message: String) {
+        Log.ui.info("\(message, privacy: .public)")
+        Log.file(message)
     }
 
     /// Рамка `frame`, ужатая до `visible` и сдвинутая внутрь нее: верхний край по возможности
