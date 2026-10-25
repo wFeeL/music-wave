@@ -51,7 +51,9 @@ struct AdapterTiming: Sendable {
 /// `stream --micros --debounce=100`; первая строка с настоящим треком тоже считается
 /// подтверждением, что адаптер работает. Умерший поток перезапускается через 2, 4, 8 с, не больше
 /// 5 раз подряд (поток, проживший минуту, счетчик обнуляет); после перезапуска прежний трек
-/// держится до первого настоящего трека, но не дольше 3 с. `markSilent()` переводит работающий
+/// держится до первого настоящего трека, но не дольше 3 с. Пустой снимок внутри потока (так
+/// Яндекс Музыка переключает треки) трек тоже не снимает: он держится до нового трека, но не
+/// дольше `NowPlayingHold.grace` (1,5 с). `markSilent()` переводит работающий
 /// адаптер в запасной режим («тишина адаптера»), трек выбранного источника (`clearSilence()`)
 /// или новый `start()` его возвращают. Дочерние процессы завершаются
 /// (SIGTERM) только в `stop()`, очистки в `deinit` нет: владелец вызывает `stop()` перед выходом.
@@ -98,7 +100,14 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var streamInfo: NowPlayingInfo?
     /// После перезапуска: прежний `info` держится, пока поток не выдал трек или не вышел срок.
     @ObservationIgnored private var holdingInfo = false
+    /// Таймер удержания: после перезапуска (`holdingInfo`) или после пустого снимка
+    /// (`emptyHoldUntil`). Оба сразу не идут: пустые снимки во время удержания после
+    /// перезапуска в `emptyHold` не попадают.
     @ObservationIgnored private var holdTask: Task<Void, Never>?
+    /// Пустые снимки текущего потока: прежний трек держится `NowPlayingHold.grace`.
+    @ObservationIgnored private var emptyHold = NowPlayingHold<NowPlayingInfo>()
+    /// Срок удержания после пустого снимка, на который поставлен `holdTask`; `nil`, если не держится.
+    @ObservationIgnored private var emptyHoldUntil: Double?
     /// Смерти потока подряд; сбрасывается, когда поток выдал настоящий трек или прожил `stableRun`.
     @ObservationIgnored private var restarts = 0
     @ObservationIgnored private var restartTask: Task<Void, Never>?
@@ -169,6 +178,7 @@ final class MediaRemoteAdapter {
         holdTask?.cancel()
         holdTask = nil
         holdingInfo = false
+        resetEmptyHold()
         test?.terminate()
         test = nil
         stream?.terminate()
@@ -371,6 +381,7 @@ final class MediaRemoteAdapter {
         streamInfo = nil
         holdTask?.cancel()
         holdTask = nil
+        resetEmptyHold()
         holdingInfo = restart && info != nil
         if holdingInfo {
             holdTask = Task { [weak self, timing = self.timing] in
@@ -399,13 +410,57 @@ final class MediaRemoteAdapter {
         log("поток адаптера запущен")
     }
 
-    private func holdExpired(token: Int) {
-        guard token == streamToken, holdingInfo else { return }
+    /// Срок удержания вышел. `emptyUntil == nil`: удержание после перезапуска, иначе
+    /// удержание после пустого снимка с этим сроком (устаревший срок ничего не делает).
+    private func holdExpired(token: Int, emptyUntil: Double? = nil) {
+        guard token == streamToken else { return }
+        if let emptyUntil {
+            guard emptyUntil == emptyHoldUntil else { return }
+            emptyHoldUntil = nil
+            holdTask = nil
+            let published = emptyHold.expire(at: emptyUntil)
+            log("адаптер: пустой снимок дольше 1.5 с")
+            if published != info {
+                info = published
+            }
+            return
+        }
+        guard holdingInfo else { return }
         holdingInfo = false
         holdTask = nil
         if streamInfo != info {
             info = streamInfo
         }
+    }
+
+    /// Новый поток или остановка: удержание после пустого снимка забыто, его таймер снят.
+    private func resetEmptyHold() {
+        if emptyHoldUntil != nil {
+            holdTask?.cancel()
+            holdTask = nil
+            emptyHoldUntil = nil
+        }
+        emptyHold = NowPlayingHold()
+    }
+
+    /// Снимок потока проходит через `emptyHold`. Пустой снимок после трека ставит таймер
+    /// удержания (один на срок), трек до срока таймер снимает.
+    private func holdThroughEmpty(_ next: NowPlayingInfo?, token: Int) -> NowPlayingInfo? {
+        let result = emptyHold.receive(next, at: ProcessInfo.processInfo.systemUptime)
+        guard result.holdUntil != emptyHoldUntil else { return result.published }
+        holdTask?.cancel()
+        holdTask = nil
+        emptyHoldUntil = result.holdUntil
+        if let until = result.holdUntil {
+            log("адаптер: пустой снимок, трек держится 1.5 с")
+            let wait = max(0, until - ProcessInfo.processInfo.systemUptime)
+            holdTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(wait))
+                guard !Task.isCancelled else { return }
+                self?.holdExpired(token: token, emptyUntil: until)
+            }
+        }
+        return result.published
     }
 
     /// Строка потока, уже разобранная вне главного потока (`NowPlayingLineDecoder`).
@@ -429,8 +484,10 @@ final class MediaRemoteAdapter {
             holdTask?.cancel()
             holdTask = nil
         }
-        if next != info {
-            info = next
+        // Пустой снимок между треками: прежний трек держится до нового, но не дольше 1,5 с.
+        let published = holdThroughEmpty(next, token: token)
+        if published != info {
+            info = published
         }
         guard next != nil else { return }
         restarts = 0
@@ -459,6 +516,7 @@ final class MediaRemoteAdapter {
             holdTask?.cancel()
             holdTask = nil
             holdingInfo = false
+            resetEmptyHold()
             info = nil
             availability = .unavailable(exitCode: status, stderr: lastStderr)
             log("поток адаптера умер \(restarts) раз подряд (код \(status)), адаптер недоступен")

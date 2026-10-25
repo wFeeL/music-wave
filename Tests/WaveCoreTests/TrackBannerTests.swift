@@ -140,6 +140,47 @@ struct TrackBannerTests {
         #expect(banner.update(inputs(Self.a), now: 32) == .hidden)
     }
 
+    /// Записи Now Playing идут через `NowPlayingHold`, как в адаптере (шаг 0,1 с). A, пустой
+    /// снимок, A: баннера нет ни при коротком пропуске, ни после истечения удержания.
+    /// A, пустой, B: баннер один раз и с B. Короткий пропуск до баннера доходит треком,
+    /// длинный пустым.
+    @Test func emptyGapBetweenTracksShowsOnlyNewTrack() {
+        for gapSteps in [3, 50] {
+            for next in [Self.a, Self.b] {
+                var hold = NowPlayingHold<TrackKey>()
+                var banner = TrackBanner()
+                var holdUntil: Double?
+                var published: TrackKey?
+                var sawNil = false
+                var shown: [TrackKey] = []
+                for step in 0...250 {
+                    let now = Double(step) / 10
+                    let event: TrackKey?? = switch step {
+                    case 0: .some(Self.a)
+                    case 100: .some(nil)
+                    case 100 + gapSteps: .some(next)
+                    default: .none
+                    }
+                    if let event {
+                        let result = hold.receive(event, at: now)
+                        published = result.published
+                        holdUntil = result.holdUntil
+                    } else if let until = holdUntil, now >= until {
+                        published = hold.expire(at: until)
+                        holdUntil = nil
+                    }
+                    if step > 0, published == nil { sawNil = true }
+                    if case .showing(let key, _) = banner.update(inputs(published), now: now), shown.last != key {
+                        shown.append(key)
+                    }
+                }
+                let expected: [TrackKey] = next == Self.a ? [] : [Self.b]
+                #expect(shown == expected, "gap \(gapSteps), next \(next.title)")
+                #expect(sawNil == (gapSteps == 50), "gap \(gapSteps), next \(next.title)")
+            }
+        }
+    }
+
     @Test func emptyTitleIsNotFirstBaseline() {
         var banner = TrackBanner()
         let empty = TrackKey(title: "", artist: "", source: "com.apple.Music")

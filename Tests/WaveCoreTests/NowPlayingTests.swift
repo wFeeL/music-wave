@@ -247,4 +247,76 @@ struct NowPlayingTests {
         let same = NowPlayingInfo(bundleIdentifier: "com.apple.Music", parentBundleIdentifier: "com.apple.Music", title: "x")
         #expect(same.appBundleIDs == ["com.apple.Music"])
     }
+
+    // MARK: - NowPlayingHold
+
+    private static let trackA = NowPlayingInfo(bundleIdentifier: "ru.yandex.desktop.music", title: "Первый", isPlaying: true)
+    private static let trackB = NowPlayingInfo(bundleIdentifier: "ru.yandex.desktop.music", title: "Второй", isPlaying: true)
+
+    /// Яндекс Музыка между треками присылает пустой снимок: прежний трек держится, пока не придет новый.
+    @Test func emptyBetweenTracksIsHeld() {
+        var hold = NowPlayingHold<NowPlayingInfo>()
+        let first = hold.receive(Self.trackA, at: 0)
+        #expect(first.published == Self.trackA)
+        #expect(first.holdUntil == nil)
+        let empty = hold.receive(nil, at: 1.0)
+        #expect(empty.published == Self.trackA)
+        #expect(empty.holdUntil == 2.5)
+        let next = hold.receive(Self.trackB, at: 1.3)
+        #expect(next.published == Self.trackB)
+        #expect(next.holdUntil == nil)
+        // Таймер прежнего удержания пришел поздно: новый трек остается.
+        #expect(hold.expire(at: 2.5) == Self.trackB)
+    }
+
+    /// Пустое состояние дольше `grace`: трек правда кончился, данных больше нет.
+    @Test func longEmptyClearsAfterGrace() {
+        var hold = NowPlayingHold<NowPlayingInfo>()
+        _ = hold.receive(Self.trackA, at: 0)
+        #expect(hold.receive(nil, at: 1.0).holdUntil == 1.0 + NowPlayingHold<NowPlayingInfo>.grace)
+        #expect(hold.expire(at: 2.5) == nil)
+        // Следующие пустые снимки ничего не держат.
+        let after = hold.receive(nil, at: 3.0)
+        #expect(after.published == nil)
+        #expect(after.holdUntil == nil)
+        #expect(hold.receive(Self.trackB, at: 4.0).published == Self.trackB)
+    }
+
+    /// Тот же трек после пустого снимка: опубликованное значение не меняется ни на шаг,
+    /// баннер смены трека не видит.
+    @Test func sameTrackAfterEmptyStaysSame() {
+        var hold = NowPlayingHold<NowPlayingInfo>()
+        var published: [NowPlayingInfo?] = []
+        published.append(hold.receive(Self.trackA, at: 0).published)
+        published.append(hold.receive(nil, at: 1.0).published)
+        let back = hold.receive(Self.trackA, at: 1.2)
+        published.append(back.published)
+        #expect(published == [Self.trackA, Self.trackA, Self.trackA])
+        #expect(back.holdUntil == nil)
+        #expect(hold.expire(at: 2.5) == Self.trackA)
+    }
+
+    @Test func emptyWithoutTrackPublishesNil() {
+        var hold = NowPlayingHold<NowPlayingInfo>()
+        let first = hold.receive(nil, at: 0)
+        #expect(first.published == nil)
+        #expect(first.holdUntil == nil)
+        #expect(hold.expire(at: 10) == nil)
+    }
+
+    /// Повторные пустые снимки срок не продлевают; таймер раньше срока трек не снимает.
+    @Test func repeatedEmptyKeepsFirstDeadline() {
+        var hold = NowPlayingHold<NowPlayingInfo>()
+        _ = hold.receive(Self.trackA, at: 0)
+        #expect(hold.receive(nil, at: 1.0).holdUntil == 2.5)
+        let again = hold.receive(nil, at: 2.0)
+        #expect(again.published == Self.trackA)
+        #expect(again.holdUntil == 2.5)
+        #expect(hold.expire(at: 2.4) == Self.trackA)
+        #expect(hold.expire(at: 2.5) == nil)
+    }
+
+    @Test func graceIsOneAndAHalfSeconds() {
+        #expect(NowPlayingHold<NowPlayingInfo>.grace == 1.5)
+    }
 }
