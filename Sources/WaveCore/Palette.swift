@@ -299,6 +299,10 @@ public struct PaletteFade: Sendable {
         to = palette
     }
 
+    /// Переход идет: последняя `palette(target:now:)` вернула смесь, а не цель. Остров по нему
+    /// не уходит в редкие кадры простоя (`RenderIdleDetector`), пока палитра меняется.
+    public var isFading: Bool { start != nil }
+
     /// Палитра на момент `now`, секунды.
     public mutating func palette(target: [RGBColor], now: Double) -> [RGBColor] {
         if target != to {

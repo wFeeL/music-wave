@@ -115,8 +115,9 @@ final class AppModel {
     }
     /// Простой отрисовки: волны ровные, свечения и «вздоха» нет дольше
     /// `RenderIdleDetector.settle`, остров не в переходе. Тогда остров рисуется не чаще
-    /// `RenderIdleDetector.idleInterval`. Пишет только `updateRenderIdle()` (тик и смена
-    /// острова или баннера), не вычисление тела острова, и только при смене значения.
+    /// `RenderIdleDetector.idleInterval`. Пишет только `updateRenderIdle()` (тик, смена
+    /// острова или баннера, выход детектора из простоя через отложенную задачу), не вычисление
+    /// тела острова, и только при смене значения.
     private(set) var renderIdle = false
     /// Когда последний раз сменился `islandState`, секунды хоста (`CACurrentMediaTime()`).
     @ObservationIgnored private(set) var islandStateChangedAt: Double = 0
@@ -196,6 +197,8 @@ final class AppModel {
     /// Простой отрисовки по входам кадров `islandVisuals`; `renderIdle` берет его последний
     /// результат.
     @ObservationIgnored private var renderIdleDetector = RenderIdleDetector()
+    /// Задача выхода из простоя (`feedRenderIdle`) уже поставлена.
+    @ObservationIgnored private var renderIdleExitPending = false
     /// Когда строка «Раскрытый» последний раз ушла в лог; `nil`, пока остров не раскрыт.
     @ObservationIgnored private var lastRenderLog: Double?
     /// Шкала `TimelineView` последнего записанного кадра: SwiftUI пересчитывает сцену и между
@@ -1227,8 +1230,9 @@ final class AppModel {
     /// захвата равен свечению. «Уменьшение движения»: ни свечения, ни «вздоха», ни акцента.
     /// Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр идет в
     /// замер отрисовки (`timelineTime`: дата `TimelineView`), пока остров раскрыт, раз в 10 с строка
-    /// замера пишется в лог. Уровни, свечение и «вздох» кадра идут в детектор простоя
-    /// (`renderIdleDetector`), `renderIdle` по нему ставит тик. Снимки (`previewing`) получают
+    /// замера пишется в лог. Уровни, свечение, «вздох» и переход палитры кадра идут в детектор
+    /// простоя (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после
+    /// кадра. Снимки (`previewing`) получают
     /// заданные кадр, свечение и «вздох» без шага, детектор не трогают.
     func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
         let period = renderPeriod
@@ -1236,7 +1240,7 @@ final class AppModel {
         let sampled = store.frame(at: presented)
         if previewing {
             let glow = reduceMotion ? 0 : previewGlow
-            let frame = springFrame(sampled, glow: glow)
+            let frame = springFrame(sampled, layers: layerSprings.map(\.value), glow: glow)
             let shown = paletteFade.palette(target: wavePalette, now: now)
             return IslandVisuals(
                 frame: frame, sampled: sampled, motion: motion, palette: shown,
@@ -1269,12 +1273,7 @@ final class AppModel {
             let spring = pulse.step(beat: early, dt: dt)
             breath = schedule.locked ? spring : glow
         }
-        // Простой: наибольший уровень волн, свечение и «вздох». Другой пульс (мягкий, когда
-        // появится) идет в `pulse` через `max` с «вздохом». `renderIdle` пишет тик.
-        _ = renderIdleDetector.update(
-            level: max(springs.max() ?? 0, levelSpring.value), glow: glow, pulse: breath, now: now
-        )
-        let frame = springFrame(sampled, glow: glow)
+        let frame = springFrame(sampled, layers: springs, glow: glow)
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
             rhythmRecording.frame(
@@ -1283,6 +1282,8 @@ final class AppModel {
         }
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
+        // Другой пульс (мягкий, когда появится) идет в `pulse` через `max` с «вздохом».
+        feedRenderIdle(level: max(springs.max() ?? 0, levelSpring.value), glow: glow, pulse: breath, now: now)
         return IslandVisuals(
             frame: frame, sampled: sampled, motion: motion, palette: shown, glow: glow, pulse: breath, time: now
         )
@@ -1304,12 +1305,31 @@ final class AppModel {
         return result
     }
 
-    /// Кадр `sampled` с уровнями слоев и общим уровнем из пружин и акцентом доли на басу.
-    private func springFrame(_ sampled: WaveFrame, glow: Float) -> WaveFrame {
+    /// Кадр `sampled` с уровнями слоев из пружин `layers` (значения `layerSprings`), общим
+    /// уровнем из пружины и акцентом доли на басу.
+    private func springFrame(_ sampled: WaveFrame, layers: [Float], glow: Float) -> WaveFrame {
         var frame = sampled
-        frame.layers = BeatGlow.accented(layerSprings.map(\.value), glow: glow)
+        frame.layers = BeatGlow.accented(layers, glow: glow)
         frame.level = levelSpring.value
         return frame
+    }
+
+    /// Входы кадра в `renderIdleDetector`: наибольший уровень волн `level`, свечение `glow`,
+    /// пульс `pulse` и идущий переход палитры (`PaletteFade.isFading`, как полный пульс: пока
+    /// палитра меняется, простоя нет). Детектор вышел из простоя, а `renderIdle` еще стоит:
+    /// одна отложенная задача главного актора снимает его сразу после вычисления тела, не
+    /// дожидаясь тика (во время вычисления тела наблюдаемое значение не пишется). В редкой
+    /// частоте остается только кадр, который уже идет.
+    private func feedRenderIdle(level: Float, glow: Float, pulse: Float, now: Double) {
+        let fading: Float = paletteFade.isFading ? 1 : 0
+        let idle = renderIdleDetector.update(level: level, glow: glow, pulse: max(pulse, fading), now: now)
+        guard !idle, renderIdle, !renderIdleExitPending else { return }
+        renderIdleExitPending = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.renderIdleExitPending = false
+            self.updateRenderIdle()
+        }
     }
 
     /// Кадр отрисовки в `renderPacing`; пока остров раскрыт, строка «Раскрытый» раз в

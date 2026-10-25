@@ -176,6 +176,23 @@ struct PaletteTests {
         #expect(fade.palette(target: warm, now: 2.1) == warm)
     }
 
+    @Test func fadeReportsInProgress() {
+        var fade = PaletteFade(palette: PaletteExtractor.fallback)
+        #expect(!fade.isFading)
+        _ = fade.palette(target: PaletteExtractor.fallback, now: 1)
+        #expect(!fade.isFading)
+        _ = fade.palette(target: Self.cold, now: 2)
+        #expect(fade.isFading)
+        _ = fade.palette(target: Self.cold, now: 2.4)
+        #expect(fade.isFading)
+        // Переход кончается на первом кадре после `duration`.
+        _ = fade.palette(target: Self.cold, now: 2 + PaletteFade.duration + 0.01)
+        #expect(!fade.isFading)
+        _ = fade.palette(target: PaletteExtractor.fallback, now: 5)
+        _ = fade.palette(target: PaletteExtractor.fallback, now: .nan)
+        #expect(!fade.isFading)
+    }
+
     @Test func fadeSurvivesOddClocks() {
         var fade = PaletteFade(palette: PaletteExtractor.fallback)
         _ = fade.palette(target: Self.cold, now: 10)
