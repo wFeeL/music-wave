@@ -297,13 +297,17 @@ struct RhythmLogTests {
         var lost = Self.schedule(locked: false, bpm: 120, confidence: 0.2, beats: [501.5])
         lost.unlockReason = .phaseJump
         recorder.appendSchedule(lost, publishedAtHost: 500.8)
+        var reset = Self.schedule(locked: false, bpm: nil, confidence: 0, beats: [])
+        reset.unlockReason = .reset
+        recorder.appendSchedule(reset, publishedAtHost: 501.2)
         let data = try recorder.finish().encoded()
         let decoded = try RhythmLog.decode(data)
-        #expect(decoded.schedules.map(\.unlockReason) == [nil, .phaseJump])
+        #expect(decoded.schedules.map(\.unlockReason) == [nil, .phaseJump, .reset])
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let schedules = try #require(object["schedules"] as? [[String: Any]])
         #expect(schedules[0]["unlockReason"] == nil)
         #expect(schedules[1]["unlockReason"] as? String == "phaseJump")
+        #expect(schedules[2]["unlockReason"] as? String == "reset")
     }
 
     @Test func otherSchemaVersionsAreRejected() throws {
@@ -395,15 +399,19 @@ struct RhythmLogTests {
             RhythmLog.Schedule(time: 6, bpm: 124, confidence: 0.2, locked: false, beats: [], unlockReason: .misses),
             RhythmLog.Schedule(time: 8, bpm: 122, confidence: 0.6, locked: true, beats: []),
             RhythmLog.Schedule(time: 9, bpm: 122, confidence: 0.3, locked: false, beats: []),
+            RhythmLog.Schedule(time: 9.5, bpm: 122, confidence: 0.8, locked: true, beats: []),
+            RhythmLog.Schedule(time: 9.8, bpm: 122, confidence: 0, locked: false, beats: [], unlockReason: .reset),
         ]
         let timeline = RhythmReplay.Timeline(schedules: schedules, end: 10)
         #expect(timeline.firstLock == 2)
-        #expect(abs(timeline.lockedShare - 0.5) < 1e-12)
-        #expect(timeline.lockChanges == 4)
+        #expect(abs(timeline.lockedShare - 0.53) < 1e-12)
+        #expect(timeline.lockChanges == 6)
         #expect(timeline.lastBPM == 122)
-        #expect(timeline.medianLockedBPM == 121)
+        #expect(timeline.medianLockedBPM == 122)
         // Потери захвата по времени; у журнала 1.1 причины нет.
-        #expect(timeline.unlocks == [.init(time: 6, reason: .misses), .init(time: 9, reason: nil)])
+        #expect(
+            timeline.unlocks == [.init(time: 6, reason: .misses), .init(time: 9, reason: nil), .init(time: 9.8, reason: .reset)]
+        )
     }
 
     @Test func timelineWithoutSchedules() {

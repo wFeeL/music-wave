@@ -1,10 +1,11 @@
 import Foundation
 
-/// Почему трекер потерял захват: смена темпа, скачок фазы по гребенке или уверенность упала ниже
-/// `unlockConfidence` от промахов (`BeatTracker.lastUnlockReason`). Пишется в расписание, журнал ритма
-/// и сводку `wave-eval`.
+/// Почему трекер потерял захват: смена темпа, скачок фазы по гребенке, уверенность упала ниже
+/// `unlockConfidence` от промахов или трекер сброшен посреди захвата (`reset()` на паузе, перемотке,
+/// смене источника, `reconfigure` на смене частоты) (`BeatTracker.lastUnlockReason`). Пишется в
+/// расписание, журнал ритма и сводку `wave-eval`; офлайн-цепочка трекер не сбрасывает.
 public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
-    case tempoSwitch, phaseJump, misses
+    case tempoSwitch, phaseJump, misses, reset
 }
 
 /// Фаза доли, уверенность и события свечения (`beat-sync.md` 2.5-2.6).
@@ -178,8 +179,9 @@ public struct BeatTracker: Sendable {
     private(set) var confidence = 0.0
     private(set) var hits = 0
     private(set) var locked = false
-    /// Почему захват потерян в последний раз; `nil`, если захвата еще не было (с `reset()` тоже).
-    /// Меняется только при потере захвата: смена темпа без захвата причину не трогает.
+    /// Почему захват потерян в последний раз; `nil`, если захвата еще не было (и после `reset()` без
+    /// захвата). Меняется только при потере захвата: смена темпа без захвата причину не трогает,
+    /// `reset()` и `reconfigure` посреди захвата дают `.reset`.
     public internal(set) var lastUnlockReason: UnlockReason?
     private var disagreements = 0
     private var strengthEMA: Float = 0
@@ -287,8 +289,8 @@ public struct BeatTracker: Sendable {
         committedAmplitude = nil
         confidence = 0
         hits = 0
+        lastUnlockReason = locked ? .reset : nil
         locked = false
-        lastUnlockReason = nil
         disagreements = 0
         strengthEMA = 0
         beatCounter += 2
@@ -301,13 +303,16 @@ public struct BeatTracker: Sendable {
 
     /// Новая частота шагов (смена частоты дискретизации): все состояние начинается заново, как после
     /// `reset()`, а счетчики id продолжают расти, чтобы `BeatGlow` не принял новые события за старые.
+    /// Захват, который был, теряется с причиной `.reset`.
     public mutating func reconfigure(framesPerSecond: Double) {
         precondition(framesPerSecond > 0, "framesPerSecond must be positive")
         let beats = beatCounter
         let onsets = onsetCounter
+        let wasLocked = locked
         self = BeatTracker(framesPerSecond: framesPerSecond, parameters: parameters)
         beatCounter = beats + 2
         onsetCounter = onsets
+        if wasLocked { lastUnlockReason = .reset }
     }
 
     // MARK: Темп и фаза

@@ -309,8 +309,31 @@ struct BeatTrackerTests {
         #expect(tracker.energyGate > 0.9)
         #expect(tracker.lastUnlockReason == .misses)
         #expect(tracker.schedule.unlockReason == .misses)
+        // Захвата уже нет: сброс говорит «захвата еще не было», а не «потерян сбросом».
         tracker.reset()
         #expect(tracker.lastUnlockReason == nil && tracker.schedule.unlockReason == nil)
+    }
+
+    /// Пауза, перемотка или смена источника посреди захвата (`reset()`) и смена частоты
+    /// (`reconfigure`) это потеря захвата с причиной `.reset`, иначе журнал устройства показал бы
+    /// потерю без причины.
+    @Test func resetWhileLockedIsAnUnlockReason() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        tracker.reset()
+        #expect(!tracker.locked)
+        #expect(tracker.lastUnlockReason == .reset && tracker.schedule.unlockReason == .reset)
+        tracker.reset()
+        #expect(tracker.lastUnlockReason == nil)
+
+        var other = BeatTracker(framesPerSecond: Self.fps)
+        var more = SyntheticBeats(bpm: 120)
+        more.feed(&other, until: 10)
+        try #require(other.locked)
+        other.reconfigure(framesPerSecond: 44_100.0 / 256)
+        #expect(!other.locked && other.schedule.unlockReason == .reset)
     }
 
     /// Смесь доходит от онсетов до предсказания за одну долю после захвата.

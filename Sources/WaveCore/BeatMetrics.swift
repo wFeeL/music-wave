@@ -148,7 +148,7 @@ public enum BeatMetrics {
         return (changes, unlocks)
     }
 
-    /// Процентиль по ближайшему рангу: значение с номером `ceil(fraction · n)` по возрастанию; `nil`
+    /// Процентиль по ближайшему рангу: значение с номером `ceil(fraction * n)` по возрастанию; `nil`
     /// для пустого списка.
     public static func percentile(_ values: [Double], _ fraction: Double) -> Double? {
         guard !values.isEmpty else { return nil }

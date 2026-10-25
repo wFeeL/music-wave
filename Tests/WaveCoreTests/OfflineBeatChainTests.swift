@@ -92,8 +92,10 @@ struct OfflineBeatChainTests {
     /// Замедление 80 -> 72 BPM за 30 с с громкой слабой долей (малый на «и» с громкостью 0.1), как в
     /// журнале ритма 2 владельца: после первого захвата свечение не темнеет дольше 2 долей подряд. На
     /// 1.1 захват верный (около 6 с), но на 24.3 с оценка темпа уходит в удвоенный (около 145 BPM),
-    /// захват теряется по смене темпа, самая длинная темная серия 4 доли. При громкости 0.12 и выше
-    /// захват с самого начала на удвоенном темпе и вспышки на «и»; 0.06 и тише без смены темпа.
+    /// захват теряется по смене темпа, самая длинная темная серия 4 доли, после 26 с захват на 147 BPM,
+    /// точность вспышек с захватом ниже 0.95. При громкости 0.12 и выше захват с самого начала на
+    /// удвоенном темпе и вспышки на «и»; 0.06 и тише без смены темпа; без слабой доли все три проверки
+    /// проходят и на 1.1.
     @Test(.disabled("B2-B4: octave guard while the tempo drifts, no hard resets, smooth weight"))
     func ritardandoKeepsGlow() async throws {
         let (scene, result) = await runOffCooperativePool {
@@ -107,6 +109,25 @@ struct OfflineBeatChainTests {
             detections: result.flashes.map(\.time), annotations: beats, window: BeatEvaluation.Options().window
         )
         #expect(dark <= 2, "longest dark run after the first lock at \(lock) s: \(dark) beats")
+        // Захват на удвоенном темпе светил бы и на каждой доле, и на каждом «и» (темных долей нет),
+        // поэтому темп каждой публикации с захватом в пределах 10 % от темпа сцены в этот момент, а
+        // вспышки с захватом почти все в долях.
+        func rampBPM(_ time: Double) -> Double { 80 + (72 - 80) * min(max(time / 30, 0), 1) }
+        let offTempo = result.states.filter { state in
+            guard state.locked, state.time <= 29.5 else { return false }
+            guard let bpm = state.bpm else { return true }
+            return abs(bpm / rampBPM(state.time) - 1) > 0.1
+        }
+        let offTempoCount = offTempo.count
+        #expect(
+            offTempoCount == 0,
+            "locked states off the ramp tempo, first at \(offTempo.first?.time ?? 0) s: \(offTempo.first?.bpm ?? 0) BPM"
+        )
+        let locked = result.flashes.filter { $0.locked && $0.time <= 29.5 + result.outputLatency }.map(\.time)
+        let precision = BeatMetrics.fMeasure(
+            detections: locked, annotations: result.audible(scene.beats), window: BeatEvaluation.Options().window
+        ).precision
+        #expect(locked.count >= 20 && precision >= 0.95, "\(locked.count) locked flashes, precision \(precision)")
     }
 
     @Test func silenceNeverFlashesOrLocks() {
