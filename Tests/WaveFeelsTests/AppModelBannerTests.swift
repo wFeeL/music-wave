@@ -141,6 +141,20 @@ struct AppModelBannerTests {
         #expect(AppSettings(defaults: defaults).showTrackBanner == false)
     }
 
+    @Test func probeTrackBelongsToSourceAndChangesKey() {
+        let music = AudioSource.application(
+            bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Yandex Music.app", displayName: "Яндекс Музыка"
+        )
+        for source in [music, AudioSource.systemWide] {
+            let first = AppModel.probeTrack(index: 1, source: source)
+            let second = AppModel.probeTrack(index: 2, source: source)
+            #expect(first.belongs(to: source))
+            #expect(first.isPlaying)
+            #expect(AppModel.bannerKey(first) != AppModel.bannerKey(second))
+        }
+        #expect(AppModel.probeTrack(index: 1, source: music).bundleIdentifier == "ru.yandex.desktop.music")
+    }
+
     // MARK: - Помощники
 
     /// Модель на чистых настройках, не запущенная: время баннера задают сами тесты.

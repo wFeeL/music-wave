@@ -18,10 +18,18 @@ public enum RenderBucket: String, CaseIterable, Sendable {
         case .collapsed, .hidden: return .collapsed
         }
     }
+
+    /// Корзины, чьи строки замера раз в 10 с пишутся в лог приложения: в замере CPU (`probe`,
+    /// запуск с `--settings-suite`) свернутая и раскрытая в любом состоянии острова, иначе
+    /// только раскрытая и только пока остров раскрыт.
+    public static func logged(state: IslandState, probe: Bool) -> [RenderBucket] {
+        if probe { return [.collapsed, .expanded] }
+        return state == .expanded ? [.expanded] : []
+    }
 }
 
 /// Сводка по одной корзине. Доли от 0 до 1, времена в миллисекундах.
-public struct RenderPacingSummary: Sendable, Equatable {
+public struct RenderPacingSummary: Sendable, Equatable, CustomStringConvertible {
     /// Сколько интервалов в замере.
     public var frames: Int
     /// Интервал меньше 1.5 периода экрана.
@@ -39,11 +47,15 @@ public struct RenderPacingSummary: Sendable, Equatable {
     public var timelineSigmaMs: Double
     /// Доли кадров, на которые пришло 0, 1, 2 и 3+ новых кадров анализа.
     public var analysisFrames: [Double]
+    /// Кадров в секунду, пока остров рисуется: интервалы замера, деленные на их сумму. Паузы
+    /// длиннее `RenderPacing.maxGap` и простой (`RenderPacing.restart()`) не в счет.
+    public var framesPerSecond: Double
 
     public init(
         frames: Int, onTime: Double, oneMissed: Double, twoOrMore: Double,
         p50Ms: Double, p95Ms: Double, maxMs: Double,
-        intervalSigmaMs: Double, timelineSigmaMs: Double, analysisFrames: [Double]
+        intervalSigmaMs: Double, timelineSigmaMs: Double, analysisFrames: [Double],
+        framesPerSecond: Double
     ) {
         self.frames = frames
         self.onTime = onTime
@@ -55,6 +67,7 @@ public struct RenderPacingSummary: Sendable, Equatable {
         self.intervalSigmaMs = intervalSigmaMs
         self.timelineSigmaMs = timelineSigmaMs
         self.analysisFrames = analysisFrames
+        self.framesPerSecond = framesPerSecond
     }
 
     /// «3600 кадров | вовремя 99.1 % | 1 пропуск 0.8 % | 2+ 0.1 % | p50 16.7 мс | p95 16.9 мс | max 34 мс».
@@ -68,6 +81,12 @@ public struct RenderPacingSummary: Sendable, Equatable {
             "p95 \(Self.milliseconds(p95Ms))",
             "max \(String(format: "%.0f", maxMs)) мс",
         ].joined(separator: " | ")
+    }
+
+    /// `pacingText` и частота кадров: «... | max 34 мс | 59.8 кадров/с». Так строка замера
+    /// пишется в лог, оттуда ее берет scripts/cpu-probe.sh.
+    public var description: String {
+        "\(pacingText) | \(String(format: "%.1f", framesPerSecond)) кадров/с"
     }
 
     /// «0: 4 % | 1: 92 % | 2: 4 % | 3+: 0 %».
@@ -206,6 +225,7 @@ public struct RenderPacing: Sendable {
             analysis[sample.analysisFrames] += 1
         }
         let steps = samples.map(\.timelineStep).filter(\.isFinite)
+        let seconds = sorted.reduce(0, +)
         return RenderPacingSummary(
             frames: samples.count,
             onTime: Double(onTime) / count,
@@ -216,7 +236,8 @@ public struct RenderPacing: Sendable {
             maxMs: (sorted.last ?? 0) * 1000,
             intervalSigmaMs: Self.deviation(sorted) * 1000,
             timelineSigmaMs: Self.deviation(steps) * 1000,
-            analysisFrames: analysis.map { $0 / count }
+            analysisFrames: analysis.map { $0 / count },
+            framesPerSecond: seconds > 0 ? count / seconds : 0
         )
     }
 

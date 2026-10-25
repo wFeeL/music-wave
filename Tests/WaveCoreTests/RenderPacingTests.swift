@@ -216,8 +216,37 @@ struct RenderPacingTests {
         #expect(summary.pacingText
             == "100 кадров | вовремя 90.0 % | 1 пропуск 8.0 % | 2+ 2.0 % | p50 16.7 мс | p95 33.3 мс | max 50 мс")
         #expect(summary.analysisFramesText == "0: 10 % | 1: 80 % | 2: 10 % | 3+: 0 %")
+        // 100 интервалов за 1.8694 с.
+        #expect(summary.description == summary.pacingText + " | 53.5 кадров/с")
         #expect(summary.spreadText.hasPrefix("интервал σ "))
         #expect(summary.spreadText.hasSuffix(" мс | шкала σ \(String(format: "%.1f", summary.timelineSigmaMs)) мс"))
+    }
+
+    @Test func loggedBuckets() {
+        #expect(RenderBucket.logged(state: .expanded, probe: false) == [.expanded])
+        #expect(RenderBucket.logged(state: .collapsed, probe: false).isEmpty)
+        #expect(RenderBucket.logged(state: .hidden, probe: false).isEmpty)
+        for state in [IslandState.hidden, .collapsed, .expanded] {
+            #expect(RenderBucket.logged(state: state, probe: true) == [.collapsed, .expanded])
+        }
+    }
+
+    @Test func framesPerSecondOverDrawnIntervals() throws {
+        var pacing = RenderPacing()
+        record([0.01, 0.02, 0.03], into: &pacing)
+        let summary = try #require(pacing.summary(.collapsed, refreshPeriod: Self.period))
+        #expect(abs(summary.framesPerSecond - 50) < 1e-9)
+        #expect(summary.description.hasSuffix(" | 50.0 кадров/с"))
+
+        // Пауза длиннее `maxGap` и кадры после `restart()` в секунды отрисовки не идут.
+        var gapped = RenderPacing()
+        record([0.02, 0.5, 0.02], bucket: .expanded, into: &gapped)
+        gapped.restart()
+        gapped.record(now: 200, timelineTime: 5_200, bucket: .expanded, analysisSequence: 50)
+        gapped.record(now: 200.02, timelineTime: 5_200.02, bucket: .expanded, analysisSequence: 51)
+        let expanded = try #require(gapped.summary(.expanded, refreshPeriod: Self.period))
+        #expect(expanded.frames == 3)
+        #expect(abs(expanded.framesPerSecond - 50) < 1e-6)
     }
 
     @Test func restartSkipsOneInterval() throws {

@@ -41,8 +41,11 @@ final class AppModel {
     /// На сколько раньше доли «вздох» получает ее свечение при захвате ритма, с: время пружины
     /// `BeatPulse` до пика (`beat-sync.md` 2.8).
     nonisolated static let breathLead = 0.05
-    /// Как часто строка «Раскрытый» из «Отрисовки» пишется в файл лога, пока остров раскрыт, с.
+    /// Как часто строки «Отрисовки» пишутся в файл лога, с: «Раскрытый», пока остров раскрыт, в
+    /// замере CPU (`--settings-suite`) «Свернутый» и «Раскрытый» (`RenderBucket.logged`).
     static let renderLogInterval = 10.0
+    /// `--island banner`: как часто имитируется смена трека для баннера, с.
+    static let probeTrackInterval = 6.0
     /// Сколько трек может быть без обложки, прежде чем панель и волны вернутся к стандартной
     /// палитре: адаптер иногда присылает обложку следом за названием.
     static let missingArtworkGrace: Duration = .milliseconds(500)
@@ -157,8 +160,12 @@ final class AppModel {
     @ObservationIgnored private var bannerCandidate: NowPlayingInfo?
     /// Номер подписки на запись Now Playing; `stop()` его меняет, старая подписка не продлевается.
     @ObservationIgnored private var nowPlayingGeneration = 0
-    /// Тесты: запись Now Playing вместо `adapter.info` (адаптер в тестах не запущен).
+    /// Тесты: запись Now Playing вместо `adapter.info` (адаптер в тестах не запущен). Ее же
+    /// ставит `--island banner` (`advanceProbeTrack`).
     @ObservationIgnored var nowPlayingStub: NowPlayingInfo?
+    /// `--island banner`: номер и момент (`systemUptime`) последней имитированной смены трека.
+    @ObservationIgnored private var probeTrackIndex = 0
+    @ObservationIgnored private var probeTrackChangedAt: Double?
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     @ObservationIgnored private var workspaceObservers: [any NSObjectProtocol] = []
     @ObservationIgnored private var appObservers: [any NSObjectProtocol] = []
@@ -199,7 +206,8 @@ final class AppModel {
     @ObservationIgnored private var renderIdleDetector = RenderIdleDetector()
     /// Задача выхода из простоя (`feedRenderIdle`) уже поставлена.
     @ObservationIgnored private var renderIdleExitPending = false
-    /// Когда строка «Раскрытый» последний раз ушла в лог; `nil`, пока остров не раскрыт.
+    /// Когда строки «Отрисовки» последний раз ушли в лог; `nil`, пока писать нечего
+    /// (`RenderBucket.logged` пуст).
     @ObservationIgnored private var lastRenderLog: Double?
     /// Шкала `TimelineView` последнего записанного кадра: SwiftUI пересчитывает сцену и между
     /// тиками, такие пересчеты в замер не идут.
@@ -262,6 +270,12 @@ final class AppModel {
 
         if arguments.noCapture {
             log("захват звука выключен (--no-capture)")
+        }
+        for warning in arguments.warnings {
+            log(warning)
+        }
+        if let island = arguments.island {
+            log("принудительный режим острова: \(island.rawValue) (--island)")
         }
         startSources()
         checkAudioPermission()
@@ -635,6 +649,9 @@ final class AppModel {
         applySettings()
 
         let source = effectiveSource
+        if arguments.island == .banner {
+            advanceProbeTrack(now: now, source: source)
+        }
         let info = nowPlayingStub ?? adapter.info
         let sourceInfo = info.flatMap { Self.belongs($0, to: source) ? $0 : nil }
         let sourcePlaying = sourceInfo?.isPlaying ?? false
@@ -770,6 +787,31 @@ final class AppModel {
     private var currentSourceInfo: NowPlayingInfo? {
         let info = nowPlayingStub ?? adapter.info
         return info.flatMap { Self.belongs($0, to: effectiveSource) ? $0 : nil }
+    }
+
+    /// `--island banner`: раз в `probeTrackInterval` в `nowPlayingStub` встает новая играющая
+    /// запись источника `source` (`probeTrack`), и баннер видит смену трека тем же путем, что и
+    /// настоящую. Первая запись после запуска становится базовым треком без баннера.
+    private func advanceProbeTrack(now: Double, source: AudioSource) {
+        if let changed = probeTrackChangedAt, now - changed < Self.probeTrackInterval { return }
+        probeTrackChangedAt = now
+        probeTrackIndex += 1
+        nowPlayingStub = Self.probeTrack(index: probeTrackIndex, source: source)
+    }
+
+    /// Запись Now Playing для `--island banner`: играет, относится к источнику `source`
+    /// (у всего звука системы от имени WaveFeels), название с номером смены `index`.
+    nonisolated static func probeTrack(index: Int, source: AudioSource) -> NowPlayingInfo {
+        let bundleID: String
+        switch source {
+        case .application(let id, _, _):
+            bundleID = id
+        case .systemWide:
+            bundleID = "com.wfeels.wavefeels"
+        }
+        return NowPlayingInfo(
+            bundleIdentifier: bundleID, title: "Смена трека \(index)", artist: "Замер WaveFeels", isPlaying: true
+        )
     }
 
     /// Правила баннера на момент `now` (секунды `systemUptime`) с записью источника
@@ -1229,8 +1271,8 @@ final class AppModel {
     /// оставался четким. «Вздох»: при захвате ритма пружина получает свечение на 50 мс раньше, без
     /// захвата равен свечению. «Уменьшение движения»: ни свечения, ни «вздоха», ни акцента.
     /// Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр идет в
-    /// замер отрисовки (`timelineTime`: дата `TimelineView`), пока остров раскрыт, раз в 10 с строка
-    /// замера пишется в лог. Уровни, свечение, «вздох» и переход палитры кадра идут в детектор
+    /// замер отрисовки (`timelineTime`: дата `TimelineView`), раз в 10 с строки замера пишутся в
+    /// лог (`recordRender`). Уровни, свечение, «вздох» и переход палитры кадра идут в детектор
     /// простоя (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после
     /// кадра. Снимки (`previewing`) получают
     /// заданные кадр, свечение и «вздох» без шага, детектор не трогают.
@@ -1332,8 +1374,11 @@ final class AppModel {
         }
     }
 
-    /// Кадр отрисовки в `renderPacing`; пока остров раскрыт, строка «Раскрытый» раз в
-    /// `renderLogInterval` в файл лога (первая через 10 с после раскрытия). В простое
+    /// Кадр отрисовки в `renderPacing`; раз в `renderLogInterval` строки корзин
+    /// `RenderBucket.logged` в файл лога (`отрисовка, раскрытый: ...` с частотой кадров,
+    /// `RenderPacingSummary.description`): пока остров раскрыт, «Раскрытый» (первая через 10 с
+    /// после раскрытия), в замере CPU (`--settings-suite`) «Свернутый» и «Раскрытый» в любом
+    /// состоянии (первые через 10 с после первого кадра). В простое
     /// (`renderIdle`) кадры не пишутся: интервалы 83 мс сдвинули бы медиану `measuredRenderPeriod`
     /// и упреждение показа, замер «Отрисовка» и cpu-probe. Замер начинается заново со
     /// следующего кадра, медиана остается прежней.
@@ -1350,7 +1395,8 @@ final class AppModel {
            median.isFinite {
             measuredRenderPeriod = min(max(median, Self.renderPeriodRange.lowerBound), Self.renderPeriodRange.upperBound)
         }
-        guard islandState == .expanded, now.isFinite else {
+        let logged = RenderBucket.logged(state: islandState, probe: arguments.settingsSuite != nil)
+        guard !logged.isEmpty, now.isFinite else {
             lastRenderLog = nil
             return
         }
@@ -1360,8 +1406,11 @@ final class AppModel {
         }
         guard now - lastRenderLog >= Self.renderLogInterval else { return }
         self.lastRenderLog = now
-        let row = renderPacing.summary(.expanded, refreshPeriod: renderPeriod)?.pacingText ?? Self.noRenderData
-        Log.file("отрисовка, раскрытый: \(row)")
+        let period = renderPeriod
+        for bucket in logged {
+            let row = renderPacing.summary(bucket, refreshPeriod: period)?.description ?? Self.noRenderData
+            Log.file("отрисовка, \(Self.renderBucketName(bucket)): \(row)")
+        }
     }
 
     /// Снимки острова: модель не запущена, состояние, трек, палитра и кадр задаются напрямую.
@@ -1665,8 +1714,9 @@ extension AppModel {
     /// экрана не пропуск. Строка «Экран» показывает наибольшую частоту экрана.
     private func renderSection() -> DiagnosticsSection {
         let period = renderPeriod
-        let names = ["свернутый", "раскрытый", "переход"]
-        let summaries = [RenderBucket.collapsed, .expanded, .transition].map {
+        let buckets: [RenderBucket] = [.collapsed, .expanded, .transition]
+        let names = buckets.map { Self.renderBucketName($0) }
+        let summaries = buckets.map {
             renderPacing.summary($0, refreshPeriod: period)
         }
         var analysis: [String] = []
@@ -1791,6 +1841,15 @@ extension AppModel {
 
     private static func describe(_ rect: NSRect) -> String {
         "x \(number(rect.origin.x)), y \(number(rect.origin.y)), \(number(rect.width)) × \(number(rect.height))"
+    }
+
+    /// Корзина замера отрисовки в разделе «Отрисовка» и в строках лога.
+    private static func renderBucketName(_ bucket: RenderBucket) -> String {
+        switch bucket {
+        case .collapsed: "свернутый"
+        case .expanded: "раскрытый"
+        case .transition: "переход"
+        }
     }
 
     private static func describe(_ state: IslandState) -> String {

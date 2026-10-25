@@ -26,6 +26,10 @@ import WaveCore
 /// виден баннер, зона наведения: баннер до верха экрана, и наведение на него раскрывает
 /// полную панель. Если курсор уже стоял там, когда баннер появился, панель раскрывается,
 /// только когда он сдвинется, войдет заново или по баннеру щелкнут.
+/// Замер CPU (`--island`, `LaunchArguments.island`) подменяет только курсор в модели: при
+/// `expanded` он всегда в зоне наведения (остров раскрывается машиной состояний, как при
+/// наведении), при `collapsed` и `banner` всегда вне ее, щелчок по баннеру ничего не делает.
+/// Клики и опрос курсора идут по состоянию острова, как обычно.
 ///
 /// Подписок и таймеров в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
@@ -253,9 +257,17 @@ final class NotchWindowController {
             suppressed: model.islandSuppressed,
             banner: banner
         )
-        let inside = NotchPointer.countsAsHover(
-            inZone: pointer.inHoverZone, moved: movedNow, banner: banner, wasInZone: model.pointerInHoverZone
-        )
+        let inside: Bool
+        switch arguments.island {
+        case .expanded?:
+            inside = true
+        case .collapsed?, .banner?:
+            inside = false
+        case nil:
+            inside = NotchPointer.countsAsHover(
+                inZone: pointer.inHoverZone, moved: movedNow, banner: banner, wasInZone: model.pointerInHoverZone
+            )
+        }
         if panel.ignoresMouseEvents == pointer.acceptsClicks {
             panel.ignoresMouseEvents = !pointer.acceptsClicks
         }
@@ -270,9 +282,10 @@ final class NotchWindowController {
     }
 
     /// Нажатие в панели. По телу баннера (`NotchPointer.acceptsClicks`) раскрывает панель, как
-    /// наведение, даже если курсор не двигался с появления баннера.
+    /// наведение, даже если курсор не двигался с появления баннера. С `--island` курсор задан
+    /// замером, щелчок его не меняет.
     private func panelClicked() {
-        guard isShown, let layout, model.bannerVisible else { return }
+        guard isShown, arguments.island == nil, let layout, model.bannerVisible else { return }
         let pointer = layout.pointer(
             at: NSEvent.mouseLocation,
             state: model.islandState,

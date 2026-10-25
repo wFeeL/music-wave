@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Замер CPU и памяти собранного приложения. Использование:
-#   scripts/cpu-probe.sh [--preset default|max] [--sample] <WaveFeels.app> [секунды]
+#   scripts/cpu-probe.sh [--preset default|max|user] [--island collapsed|expanded|banner] [--sample]
+#                        <WaveFeels.app> [секунды]
+#   scripts/cpu-probe.sh --help
 #
 # Приложение читает настройки не из настроек пользователя, а из отдельного набора
 # com.wfeels.wavefeels.benchmark (--settings-suite), поэтому числа сравнимы между маками и
@@ -9,12 +11,31 @@
 #   default: вид 1.1 по умолчанию (линий 3, заливка 0, радиус свечения 1, свечение 0.6, крылья 64,
 #            толщина 1, амплитуда 1); предел play 15 %, итог в cpu.txt;
 #   max:     верхние границы диапазонов (линий 6, заливка 1, радиус свечения 3, свечение 1, крылья
-#            200, толщина 2, амплитуда 2); предел play 20 %, итог в cpu-max.txt.
-# В обоих наборах «вздох» включен, пауза выключена. Содержимое набора (`defaults read`) пишется в
-# начало отчета, а действующие значения приложение пишет в свой лог строкой «настройки из набора
-# ...»: вид, крыло, которое рисуется на самом деле, энергосбережение и «Уменьшение движения».
+#            200, толщина 2, амплитуда 2); предел play 20 %, итог в cpu-max.txt;
+#   user:    настройки владельца: все ключи wf.* из com.wfeels.wavefeels (`defaults export`, из
+#            словаря остаются только они, затем `defaults import`), пауза выключается
+#            принудительно (wf.paused = 0); предел play 20 %, как у max (диапазоны те же), итог
+#            в cpu-user.txt. Так замер видит настоящий вид владельца на демо-звуке.
+# В наборах default и max «вздох» включен, пауза выключена. Содержимое набора (`defaults read`)
+# пишется в начало отчета, а действующие значения приложение пишет в свой лог строкой «настройки
+# из набора ...»: вид, крыло, которое рисуется на самом деле, энергосбережение и «Уменьшение движения».
 # Строка из прогона play попадает в шапку отчета (applied settings). Прогон без этой строки
 # считается проваленным: сборка без --settings-suite мерила бы настройки пользователя.
+#
+# --island <режим> передается приложению только в прогоне play (прогон silence ждет скрытый
+# остров) и держит остров через его же машину состояний:
+#   collapsed: курсор не раскрывает остров;
+#   expanded:  курсор будто стоит в зоне наведения, остров раскрыт; проверяется строкой лога
+#              «остров: ... -> раскрыт»;
+#   banner:    свернутый остров, раз в 6 с приложение имитирует смену трека; проверяется строкой
+#              «баннер нового трека показан», в набор пишется wf.showTrackBanner = 1.
+# В collapsed и banner строка «-> раскрыт» значит провал. Итог и стеки с режимом идут в файлы с
+# суффиксом режима: cpu-expanded.txt, cpu-user-banner.txt, cpu-max-expanded-sample.txt.
+#
+# Частота кадров. С --settings-suite приложение раз в 10 с пишет в лог строки «отрисовка,
+# свернутый: ...» и «отрисовка, раскрытый: ...» (замер раздела «Отрисовка» и кадров в секунду).
+# Из последней строки корзины прогона (раскрытый для --island expanded, иначе свернутый)
+# частота кадров и p50 идут в раздел прогона, а из прогона play еще и в шапку отчета (render).
 #
 # Два прогона, каждый со своим процессом приложения:
 #   play:    --demo Demo/demo.wav --fake-notch --exit-after <секунды+10>; среднее выше предела
@@ -39,25 +60,67 @@
 # (cpu-max-sample.txt и так далее). Фоновый сторож убивает приложение вместе с потомками через
 # 10 с после его --exit-after (в macOS нет timeout).
 #
-# Итог в $OUT/cpu.txt или $OUT/cpu-max.txt (по умолчанию каталог ci-out), он же печатается в
-# stdout. Код 0, если оба прогона в пределах, 1 при провале, 2 при ошибке вызова или записи набора.
+# Итог в $OUT/cpu.txt, $OUT/cpu-max.txt или $OUT/cpu-user.txt (по умолчанию каталог ci-out), он
+# же печатается в stdout. Код 0, если оба прогона в пределах, 1 при провале, 2 при ошибке вызова
+# или записи набора.
 # Рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 
+USAGE="usage: $0 [--preset default|max|user] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
+
 usage() {
-    echo "usage: $0 [--preset default|max] [--sample] <WaveFeels.app> [seconds]" >&2
+    echo "$USAGE" >&2
+    echo "run $0 --help for details" >&2
     exit 2
 }
 
+print_help() {
+    cat <<EOF
+$USAGE
+
+Measures CPU and memory of a built WaveFeels.app in two runs (play with Demo/demo.wav,
+silence with Demo/silence.wav) on settings from the com.wfeels.wavefeels.benchmark suite.
+Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and prints it.
+
+  --preset default  1.1 default look; play limit 15 %; report cpu.txt (default)
+  --preset max      upper bound of every look slider; play limit 20 %; report cpu-max.txt
+  --preset user     the owner's wf.* keys copied from com.wfeels.wavefeels, wf.paused forced
+                    to 0; play limit 20 %; report cpu-user.txt
+  --island MODE     play run only, the island's state machine still drives it:
+                      collapsed  the pointer never expands the island
+                      expanded   held open as if hovered; checked by "остров: ... -> раскрыт"
+                      banner     a fake track change every 6 s; checked by
+                                 "баннер нового трека показан"; sets wf.showTrackBanner = 1
+                    report and sample files get the mode suffix (cpu-user-expanded.txt)
+  --sample          sample the stacks for 5 s (play: mid-window, silence: after the window)
+  seconds           measuring window after a 5 s warm-up, at least 5 (default 30)
+  -h, --help        this help
+
+The report header has the applied settings and, from the app's last render log line of the
+play run, frames/s and p50 (expanded bucket with --island expanded, collapsed otherwise).
+Exit code: 0 within limits, 1 failure, 2 usage or settings error.
+EOF
+    exit 0
+}
+
 PRESET=default
+ISLAND=""
 SAMPLE=0
 APP_ARG=""
 DURATION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h | --help)
+            print_help
+            ;;
         --preset)
             [[ $# -ge 2 ]] || usage
             PRESET=$2
+            shift 2
+            ;;
+        --island)
+            [[ $# -ge 2 ]] || usage
+            ISLAND=$2
             shift 2
             ;;
         --sample)
@@ -90,8 +153,23 @@ case "$PRESET" in
         PLAY_LIMIT=20
         PREFIX=cpu-max
         ;;
+    user)
+        PLAY_LIMIT=20
+        PREFIX=cpu-user
+        ;;
     *)
-        echo "cpu-probe: unknown preset $PRESET (expected default or max)" >&2
+        echo "cpu-probe: unknown preset $PRESET (expected default, max or user)" >&2
+        usage
+        ;;
+esac
+
+case "$ISLAND" in
+    "") ;;
+    collapsed | expanded | banner)
+        PREFIX="$PREFIX-$ISLAND"
+        ;;
+    *)
+        echo "cpu-probe: unknown island mode $ISLAND (expected collapsed, expanded or banner)" >&2
         usage
         ;;
 esac
@@ -108,6 +186,8 @@ SAMPLE_LIMIT=60
 # Набор настроек замера и строка, которой приложение сообщает о нем в лог (AppDelegate.logSettings).
 SUITE=com.wfeels.wavefeels.benchmark
 SETTINGS_MARK="настройки из набора $SUITE: "
+# Настройки пользователя, из которых --preset user берет ключи wf.*.
+USER_DOMAIN=com.wfeels.wavefeels
 
 cd "$(dirname "$0")/.." || exit 2
 OUT=${OUT:-$PWD/ci-out}
@@ -139,25 +219,66 @@ fi
 # `double(forKey:)` и NSNumber и ограничивает теми же диапазонами, что и ползунки.
 write_preset() {
     local lines fill radius glow wings thickness amplitude
-    if [[ $PRESET == max ]]; then
-        lines=6 fill=1 radius=3 glow=1 wings=200 thickness=2 amplitude=2
+    if [[ $PRESET == user ]]; then
+        copy_user_settings || return 1
     else
-        lines=3 fill=0 radius=1 glow=0.6 wings=64 thickness=1 amplitude=1
+        if [[ $PRESET == max ]]; then
+            lines=6 fill=1 radius=3 glow=1 wings=200 thickness=2 amplitude=2
+        else
+            lines=3 fill=0 radius=1 glow=0.6 wings=64 thickness=1 amplitude=1
+        fi
+        defaults delete "$SUITE" > /dev/null 2>&1
+        defaults write "$SUITE" wf.lineCount -int "$lines" &&
+            defaults write "$SUITE" wf.fill -float "$fill" &&
+            defaults write "$SUITE" wf.glowRadius -float "$radius" &&
+            defaults write "$SUITE" wf.glowIntensity -float "$glow" &&
+            defaults write "$SUITE" wf.wingWidth -float "$wings" &&
+            defaults write "$SUITE" wf.lineThickness -float "$thickness" &&
+            defaults write "$SUITE" wf.waveAmplitude -float "$amplitude" &&
+            defaults write "$SUITE" wf.beatPulse -bool true &&
+            defaults write "$SUITE" wf.paused -bool false || return 1
     fi
+    # Баннер нового трека может быть выключен у владельца, а режим banner мерит именно его.
+    if [[ $ISLAND == banner ]]; then
+        defaults write "$SUITE" wf.showTrackBanner -bool true || return 1
+    fi
+}
+
+# --preset user: ключи wf.* из настроек пользователя в пустой набор замера. Домен выгружается
+# (`defaults export`), переводится в XML (`plutil -convert xml1`), и из словаря верхнего уровня
+# остаются только записи wf.*. plutil начинает запись верхнего уровня строкой «<таб><key>»;
+# запись тянется до следующей такой строки или до «</dict>» без отступа, закрывающего словарь
+# (многострочные значения и вложенные словари внутри; «<» в тексте значений экранируется).
+# Заголовок до первой записи и хвост остаются как есть. Ключи с точкой нельзя адресовать через
+# `plutil -extract` (точка там разделитель пути), поэтому фильтр по строкам. Затем
+# `defaults import` и принудительно wf.paused = 0.
+USER_KEYS=0
+copy_user_settings() {
+    local tab
+    tab=$(printf '\t')
+    if ! defaults export "$USER_DOMAIN" "$TMP/user.plist" > /dev/null 2>&1; then
+        echo "cpu-probe: defaults export $USER_DOMAIN failed (no personal settings yet?)" >&2
+        return 1
+    fi
+    plutil -convert xml1 -o "$TMP/user.xml" "$TMP/user.plist" || return 1
+    awk -v tab="$tab" '
+        index($0, tab "<key>") == 1 { entry = 1; keep = (index($0, tab "<key>wf.") == 1) }
+        $0 == "</dict>" { entry = 0 }
+        entry { if (keep) print; next }
+        { print }
+    ' "$TMP/user.xml" > "$TMP/user-wf.xml" || return 1
+    if ! plutil -lint "$TMP/user-wf.xml" > /dev/null; then
+        echo "cpu-probe: the wf.* keys filtered from $USER_DOMAIN do not form a valid plist" >&2
+        return 1
+    fi
+    USER_KEYS=$(grep -c "^$tab<key>wf\." "$TMP/user-wf.xml")
     defaults delete "$SUITE" > /dev/null 2>&1
-    defaults write "$SUITE" wf.lineCount -int "$lines" &&
-        defaults write "$SUITE" wf.fill -float "$fill" &&
-        defaults write "$SUITE" wf.glowRadius -float "$radius" &&
-        defaults write "$SUITE" wf.glowIntensity -float "$glow" &&
-        defaults write "$SUITE" wf.wingWidth -float "$wings" &&
-        defaults write "$SUITE" wf.lineThickness -float "$thickness" &&
-        defaults write "$SUITE" wf.waveAmplitude -float "$amplitude" &&
-        defaults write "$SUITE" wf.beatPulse -bool true &&
+    defaults import "$SUITE" "$TMP/user-wf.xml" &&
         defaults write "$SUITE" wf.paused -bool false
 }
 
 if ! write_preset; then
-    echo "cpu-probe: defaults write $SUITE failed" >&2
+    echo "cpu-probe: writing preset $PRESET into $SUITE failed" >&2
     exit 2
 fi
 
@@ -304,16 +425,28 @@ finish_sample() { # имя прогона
     } > "$report"
 }
 
+# Частота кадров и p50 из строки лога «отрисовка, <корзина>: ... | p50 16.7 мс | ... | 59.8
+# кадров/с» (RenderPacingSummary.description); пусто, если строки нет или в ней нет данных.
+render_summary() { # строка лога
+    local fps p50
+    fps=$(printf '%s\n' "$1" | sed -n 's/.* | \([0-9.]*\) кадров\/с$/\1/p')
+    p50=$(printf '%s\n' "$1" | sed -n 's/.* | p50 \([0-9.]*\) мс | .*/\1/p')
+    if [[ -n "$fps" && -n "$p50" ]]; then
+        echo "$fps frames/s, p50 $p50 ms"
+    fi
+}
+
 # Один прогон: имя, предел среднего в процентах, сравнение (max: не больше предела, below: строго
-# меньше), каким должен быть остров (shown или hidden), когда снимать стеки (window: в середине
-# окна, after: сразу после него), через сколько секунд приложение выходит само (--exit-after),
-# остальные аргументы приложения.
+# меньше), каким должен быть остров (hidden; shown: показан; collapsed, expanded, banner: показан
+# в режиме --island), когда снимать стеки (window: в середине окна, after: сразу после него),
+# через сколько секунд приложение выходит само (--exit-after), остальные аргументы приложения.
 probe() {
     local name=$1 limit=$2 compare=$3 expect_island=$4 sample_at=$5 exit_after=$6
     shift 6
     local log_start pid wd rc t0 c0 k0 t1 c1 k1 t c r prev_t prev_c sec
     local per_second="" max_sec=0 rss_first="" rss_last=0 rss_max=0 alive=1 sampled=0
     local average children verdict=ok reasons="" app_log="$TMP/$name.log" settings_line
+    local bucket=collapsed bucket_log=свернутый render_line render
 
     report ""
     report "## $name"
@@ -426,8 +559,48 @@ probe() {
         fi
     else
         report "island: hidden (expected $expect_island)"
-        if [[ $expect_island == shown ]]; then
+        if [[ $expect_island != hidden ]]; then
             reasons="$reasons; island never appeared, the measurement does not cover drawing"
+        fi
+    fi
+    # Режим --island: раскрытие и баннер проверяются по строкам лога приложения.
+    case "$expect_island" in
+        expanded)
+            if grep -q 'остров: .* -> раскрыт' "$app_log"; then
+                report "island expanded: yes (--island expanded)"
+            else
+                report "island expanded: no (--island expanded)"
+                reasons="$reasons; island never expanded with --island expanded"
+            fi
+            ;;
+        collapsed | banner)
+            if grep -q 'остров: .* -> раскрыт' "$app_log"; then
+                report "island expanded: yes (--island $expect_island keeps it collapsed)"
+                reasons="$reasons; island expanded although --island $expect_island keeps it collapsed"
+            else
+                report "island expanded: no (--island $expect_island)"
+            fi
+            ;;
+    esac
+    if [[ $expect_island == banner ]]; then
+        if grep -q 'баннер нового трека показан' "$app_log"; then
+            report "banner: shown (--island banner)"
+        else
+            report "banner: never shown (--island banner)"
+            reasons="$reasons; track banner never appeared with --island banner"
+        fi
+    fi
+    # Частота кадров: последняя строка корзины, которую рисует прогон. В тишине ничего не рисуется.
+    if [[ $expect_island != hidden ]]; then
+        if [[ $expect_island == expanded ]]; then
+            bucket=expanded
+            bucket_log=раскрытый
+        fi
+        render_line=$(grep -F "отрисовка, $bucket_log: " "$app_log" | tail -n 1)
+        render=$(render_summary "$render_line")
+        report "render ($bucket): ${render:-not reported}"
+        if [[ $name == play && -n "$render" ]]; then
+            RENDER="$bucket, play run: $render"
         fi
     fi
     if [[ -n "$reasons" ]]; then
@@ -450,6 +623,10 @@ report "# WaveFeels CPU probe"
 report ""
 report "app: $APP"
 report "preset: $PRESET (play: at most $PLAY_LIMIT %, silence: below $SILENCE_LIMIT %)"
+if [[ $PRESET == user ]]; then
+    report "user settings: $USER_KEYS wf.* keys copied from $USER_DOMAIN, wf.paused forced to 0"
+fi
+report "island: ${ISLAND:-not forced} (--island, play run only)"
 report "method: cumulative CPU time from ps over a ${DURATION} s window after ${WARMUP} s warm-up, % of one core"
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 report ""
@@ -460,6 +637,10 @@ APPLIED_PLACEHOLDER="applied settings: not reported by the app"
 APPLIED=""
 report ""
 report "$APPLIED_PLACEHOLDER"
+# Частота кадров и p50 из последней строки отрисовки прогона play (render_summary).
+RENDER_PLACEHOLDER="render: not reported by the app"
+RENDER=""
+report "$RENDER_PLACEHOLDER"
 
 EXIT_AFTER=$((DURATION + 10))
 # С --sample в тишине стеки снимаются после окна, на это приложению нужны лишние 10 с.
@@ -467,17 +648,33 @@ SILENCE_EXIT_AFTER=$EXIT_AFTER
 if [[ $SAMPLE -eq 1 ]]; then
     SILENCE_EXIT_AFTER=$((EXIT_AFTER + 10))
 fi
-probe play "$PLAY_LIMIT" max shown window "$EXIT_AFTER" --demo "$DEMO_DIR/demo.wav" --fake-notch
+# --island только в play: прогон silence ждет скрытый остров.
+PLAY_ARGS=(--demo "$DEMO_DIR/demo.wav" --fake-notch)
+if [[ -n "$ISLAND" ]]; then
+    PLAY_ARGS+=(--island "$ISLAND")
+fi
+probe play "$PLAY_LIMIT" max "${ISLAND:-shown}" window "$EXIT_AFTER" "${PLAY_ARGS[@]}"
 probe silence "$SILENCE_LIMIT" below hidden after "$SILENCE_EXIT_AFTER" --demo "$DEMO_DIR/silence.wav" --fake-notch --no-capture
 
 # Шапка отчета уже записана, поэтому строка подставляется в файл на место заглушки (через
-# ENVIRON, а не -v: awk -v разбирает обратные косые черты). В stdout она идет перед итогом.
-if [[ -n "$APPLIED" ]]; then
-    PLACEHOLDER="$APPLIED_PLACEHOLDER" LINE="applied settings: $APPLIED" \
+# ENVIRON, а не -v: awk -v разбирает обратные косые черты).
+replace_header_line() { # заглушка, строка
+    PLACEHOLDER="$1" LINE="$2" \
         awk '!done && $0 == ENVIRON["PLACEHOLDER"] { print ENVIRON["LINE"]; done = 1; next } { print }' \
         "$REPORT" > "$TMP/report.txt" && cat "$TMP/report.txt" > "$REPORT"
+}
+
+# В stdout строки шапки идут перед итогом.
+if [[ -n "$APPLIED" || -n "$RENDER" ]]; then
     echo ""
+fi
+if [[ -n "$APPLIED" ]]; then
+    replace_header_line "$APPLIED_PLACEHOLDER" "applied settings: $APPLIED"
     echo "applied settings: $APPLIED"
+fi
+if [[ -n "$RENDER" ]]; then
+    replace_header_line "$RENDER_PLACEHOLDER" "render: $RENDER"
+    echo "render: $RENDER"
 fi
 
 report ""

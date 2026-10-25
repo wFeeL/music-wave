@@ -12,6 +12,8 @@ struct LaunchArgumentsTests {
         #expect(parsed.noCapture == false)
         #expect(parsed.exitAfter == nil)
         #expect(parsed.settingsSuite == nil)
+        #expect(parsed.island == nil)
+        #expect(parsed.warnings.isEmpty)
     }
 
     @Test func parsesAllFlags() {
@@ -23,6 +25,7 @@ struct LaunchArgumentsTests {
             "--no-capture",
             "--exit-after", "2.5",
             "--settings-suite", "com.wfeels.wavefeels.benchmark",
+            "--island", "expanded",
         ])
         #expect(parsed.demoFile == URL(fileURLWithPath: "/tmp/demo.wav"))
         #expect(parsed.snapshotDirectory == URL(fileURLWithPath: "/tmp/snapshots", isDirectory: true))
@@ -30,6 +33,8 @@ struct LaunchArgumentsTests {
         #expect(parsed.noCapture)
         #expect(parsed.exitAfter == 2.5)
         #expect(parsed.settingsSuite == "com.wfeels.wavefeels.benchmark")
+        #expect(parsed.island == .expanded)
+        #expect(parsed.warnings.isEmpty)
     }
 
     @Test func ignoresUnknownArguments() {
@@ -67,6 +72,34 @@ struct LaunchArgumentsTests {
         let parsed = LaunchArguments.parse(["--settings-suite", "--fake-notch"])
         #expect(parsed.settingsSuite == nil)
         #expect(parsed.fakeNotch)
+    }
+
+    @Test func parsesEveryIslandValue() {
+        for island in ForcedIsland.allCases {
+            #expect(LaunchArguments.parse(["--island", island.rawValue]) == LaunchArguments(island: island))
+        }
+        #expect(ForcedIsland.allCases.map(\.rawValue) == ["collapsed", "expanded", "banner"])
+    }
+
+    @Test func unknownOrMissingIslandIsIgnoredWithWarning() {
+        let unknown = LaunchArguments.parse(["--island", "open", "--fake-notch"])
+        #expect(unknown.island == nil)
+        #expect(unknown.fakeNotch)
+        #expect(unknown.warnings == [
+            "аргумент --island пропущен (значение «open»): ожидается collapsed, expanded или banner",
+        ])
+
+        let missing = LaunchArguments.parse(["--island", "--no-capture"])
+        #expect(missing.island == nil)
+        #expect(missing.noCapture)
+        #expect(missing.warnings == [
+            "аргумент --island пропущен (значения нет): ожидается collapsed, expanded или banner",
+        ])
+
+        // Неизвестное значение не сбрасывает уже разобранное.
+        let kept = LaunchArguments.parse(["--island", "banner", "--island", "Expanded"])
+        #expect(kept.island == .banner)
+        #expect(kept.warnings.count == 1)
     }
 
     @Test func integerExitAfterIsAccepted() {
