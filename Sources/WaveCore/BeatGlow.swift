@@ -31,15 +31,20 @@ public struct BeatSchedule: Sendable, Equatable {
     public var period: Double?
     public var confidence: Double
     public var locked: Bool
+    /// Почему захват потерян (`BeatTracker.lastUnlockReason`); `nil` с захватом и до первого захвата.
+    public var unlockReason: UnlockReason?
 
     public static let empty = BeatSchedule(events: [], bpm: nil, period: nil, confidence: 0, locked: false)
 
-    public init(events: [GlowEvent], bpm: Double?, period: Double?, confidence: Double, locked: Bool) {
+    public init(
+        events: [GlowEvent], bpm: Double?, period: Double?, confidence: Double, locked: Bool, unlockReason: UnlockReason? = nil
+    ) {
         self.events = events
         self.bpm = bpm
         self.period = period
         self.confidence = confidence
         self.locked = locked
+        self.unlockReason = unlockReason
     }
 
     /// То же расписание на другой оси времени (поток в хост, задержка вывода, сдвиг синхронизации):

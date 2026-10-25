@@ -271,6 +271,41 @@ struct RhythmLogTests {
         #expect(schedules[1]["bpm"] as? Double == 128)
     }
 
+    /// Журнал 1.1 без поля причины потери захвата читается, причина у его расписаний `nil`; новый
+    /// журнал пишет причину только у расписаний без захвата после его потери.
+    @Test func rhythmLogDecodesWithoutUnlockReason() throws {
+        let old = Data(
+            """
+            {"schemaVersion": 1, "kicks": [0.5], "onsets": [0.5], "flashes": [],
+             "meta": {"appVersion": "1.1.0", "build": "1", "commit": "abc1234", "swiftVersion": "6.2.3",
+                      "deviceName": "d", "deviceUID": "u", "latencyMode": "auto", "outputLatency": 0.02,
+                      "syncOffset": 0, "sampleRate": 48000, "renderPeriod": 0.0166, "reduceMotion": false,
+                      "glowIntensity": 1, "beatPulse": true, "lowPower": false, "clippedSamples": 0,
+                      "startHostSeconds": 100, "duration": 30, "audioSeconds": 30, "renderedFrames": 1800,
+                      "renderedUntil": 30, "endReason": "complete"},
+             "schedules": [{"time": 1, "bpm": 120, "confidence": 0.7, "locked": true, "beats": [1.2]},
+                           {"time": 2, "bpm": 120, "confidence": 0.2, "locked": false, "beats": [2.2]}]}
+            """.utf8
+        )
+        let log = try RhythmLog.decode(old)
+        #expect(log.schedules.count == 2)
+        #expect(log.schedules.allSatisfy { $0.unlockReason == nil })
+
+        var recorder = RhythmRecorder(duration: 10, meta: Self.meta())
+        Self.hop(&recorder, endSample: 600)
+        recorder.appendSchedule(Self.schedule(locked: true, bpm: 120, confidence: 0.7, beats: [501]), publishedAtHost: 500.3)
+        var lost = Self.schedule(locked: false, bpm: 120, confidence: 0.2, beats: [501.5])
+        lost.unlockReason = .phaseJump
+        recorder.appendSchedule(lost, publishedAtHost: 500.8)
+        let data = try recorder.finish().encoded()
+        let decoded = try RhythmLog.decode(data)
+        #expect(decoded.schedules.map(\.unlockReason) == [nil, .phaseJump])
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let schedules = try #require(object["schedules"] as? [[String: Any]])
+        #expect(schedules[0]["unlockReason"] == nil)
+        #expect(schedules[1]["unlockReason"] as? String == "phaseJump")
+    }
+
     @Test func otherSchemaVersionsAreRejected() throws {
         var log = RhythmRecorder(duration: 1, meta: Self.meta()).finish()
         log.schemaVersion = 2
@@ -357,15 +392,18 @@ struct RhythmLogTests {
         let schedules = [
             RhythmLog.Schedule(time: 0.5, bpm: nil, confidence: 0.1, locked: false, beats: []),
             RhythmLog.Schedule(time: 2, bpm: 120, confidence: 0.5, locked: true, beats: []),
-            RhythmLog.Schedule(time: 6, bpm: 124, confidence: 0.2, locked: false, beats: []),
+            RhythmLog.Schedule(time: 6, bpm: 124, confidence: 0.2, locked: false, beats: [], unlockReason: .misses),
             RhythmLog.Schedule(time: 8, bpm: 122, confidence: 0.6, locked: true, beats: []),
+            RhythmLog.Schedule(time: 9, bpm: 122, confidence: 0.3, locked: false, beats: []),
         ]
         let timeline = RhythmReplay.Timeline(schedules: schedules, end: 10)
         #expect(timeline.firstLock == 2)
-        #expect(abs(timeline.lockedShare - 0.6) < 1e-12)
-        #expect(timeline.lockChanges == 3)
+        #expect(abs(timeline.lockedShare - 0.5) < 1e-12)
+        #expect(timeline.lockChanges == 4)
         #expect(timeline.lastBPM == 122)
         #expect(timeline.medianLockedBPM == 121)
+        // Потери захвата по времени; у журнала 1.1 причины нет.
+        #expect(timeline.unlocks == [.init(time: 6, reason: .misses), .init(time: 9, reason: nil)])
     }
 
     @Test func timelineWithoutSchedules() {
@@ -415,6 +453,7 @@ struct RhythmLogTests {
         #expect(report.device.firstLock != nil)
         #expect(report.replay.firstLock != nil)
         let text = report.text
+        #expect(text.contains("unlocks replay:"))
         #expect(text.contains("matched"))
         #expect(text.contains("device"))
         #expect(text.contains("replay"))

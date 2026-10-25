@@ -89,6 +89,26 @@ struct OfflineBeatChainTests {
         }
     }
 
+    /// Замедление 80 -> 72 BPM за 30 с с громкой слабой долей (малый на «и» с громкостью 0.1), как в
+    /// журнале ритма 2 владельца: после первого захвата свечение не темнеет дольше 2 долей подряд. На
+    /// 1.1 захват верный (около 6 с), но на 24.3 с оценка темпа уходит в удвоенный (около 145 BPM),
+    /// захват теряется по смене темпа, самая длинная темная серия 4 доли. При громкости 0.12 и выше
+    /// захват с самого начала на удвоенном темпе и вспышки на «и»; 0.06 и тише без смены темпа.
+    @Test(.disabled("B2-B4: octave guard while the tempo drifts, no hard resets, smooth weight"))
+    func ritardandoKeepsGlow() async throws {
+        let (scene, result) = await runOffCooperativePool {
+            let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)
+            return (scene, OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: .init()))
+        }
+        let lock = try #require(result.lockTime)
+        // Последние полсекунды не считаются: анализ кончился, расписание еще предсказывает доли.
+        let beats = result.audible(scene.beats.filter { $0 >= lock && $0 <= 29.5 })
+        let dark = BeatMetrics.longestDarkRun(
+            detections: result.flashes.map(\.time), annotations: beats, window: BeatEvaluation.Options().window
+        )
+        #expect(dark <= 2, "longest dark run after the first lock at \(lock) s: \(dark) beats")
+    }
+
     @Test func silenceNeverFlashesOrLocks() {
         let result = OfflineBeatChain.run(samples: [Float](repeating: 0, count: 48_000 * 3), sampleRate: 48_000, config: .init())
         #expect(result.flashes.isEmpty)

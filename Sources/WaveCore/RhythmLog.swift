@@ -155,13 +155,17 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var locked: Bool
         /// Предсказанные доли расписания, слышимая ось с `syncOffset`.
         public var beats: [Double]
+        /// Почему захват потерян (`BeatSchedule.unlockReason`). В журналах 1.1 поля нет, они читаются
+        /// с `nil`; без причины ключ не пишется.
+        public var unlockReason: UnlockReason?
 
-        public init(time: Double, bpm: Double?, confidence: Double, locked: Bool, beats: [Double]) {
+        public init(time: Double, bpm: Double?, confidence: Double, locked: Bool, beats: [Double], unlockReason: UnlockReason? = nil) {
             self.time = time
             self.bpm = bpm
             self.confidence = confidence
             self.locked = locked
             self.beats = beats
+            self.unlockReason = unlockReason
         }
     }
 
@@ -321,14 +325,14 @@ public struct RhythmRecorder: Sendable {
     }
 
     /// Расписание, опубликованное в момент хоста `host` (ось хоста, с задержкой и сдвигом). Пишется,
-    /// если сменились захват, темп, предсказанные доли (больше чем на 1 мс) или уверенность (на
-    /// 0.01 и больше).
+    /// если сменились захват, причина его потери, темп, предсказанные доли (больше чем на 1 мс) или
+    /// уверенность (на 0.01 и больше).
     public mutating func appendSchedule(_ schedule: BeatSchedule, publishedAtHost host: Double) {
         guard hasStarted, endReason == nil, host.isFinite else { return }
         let zero = meta.startHostSeconds
         let bpm = schedule.bpm.flatMap { $0.isFinite ? $0 : nil }
         let confidence = schedule.confidence.isFinite ? schedule.confidence : 0
-        if let last = schedules.last, last.locked == schedule.locked, last.bpm == bpm,
+        if let last = schedules.last, last.locked == schedule.locked, last.unlockReason == schedule.unlockReason, last.bpm == bpm,
            abs(last.confidence - confidence) < Self.confidenceStep,
            Self.sameBeats(last.beats, schedule, zero: zero) {
             return
@@ -338,7 +342,10 @@ public struct RhythmRecorder: Sendable {
             beats.append(Self.rounded(event.time - zero))
         }
         schedules.append(
-            RhythmLog.Schedule(time: Self.rounded(host - zero), bpm: bpm, confidence: confidence, locked: schedule.locked, beats: beats)
+            RhythmLog.Schedule(
+                time: Self.rounded(host - zero), bpm: bpm, confidence: confidence, locked: schedule.locked, beats: beats,
+                unlockReason: schedule.unlockReason
+            )
         )
     }
 

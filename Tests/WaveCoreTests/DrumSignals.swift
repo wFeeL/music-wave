@@ -179,13 +179,21 @@ enum Drums {
     }
 
     /// Бочка на каждую долю и хэт восьмыми, темп линейно меняется от `from` до `to` за всю сцену.
+    /// `offbeatGain` больше нуля добавляет громкую слабую долю: малый на «и» каждой доли с этой
+    /// громкостью (1 это обычный малый). Широкополосная функция тогда сильна и на «и», как в журнале
+    /// ритма владельца, где оценка темпа ушла в удвоенный.
     static func tempoRamp(
-        from: Double = 120, to: Double = 130, seconds: Double = 20, sampleRate: Double = 48_000, seed: UInt64 = 1
+        from: Double = 120, to: Double = 130, seconds: Double = 20, sampleRate: Double = 48_000, seed: UInt64 = 1,
+        offbeatGain: Float = 0
     ) -> DrumScene {
         var spec = Spec(
             seconds: seconds, sampleRate: sampleRate, bpm: { from + (to - from) * min(max($0 / seconds, 0), 1) }, seed: seed
         )
-        spec.pattern = { _ in [.kick(0), .hat(0), .hat(0.5)] }
+        spec.pattern = { _ in
+            var events: [Event] = [.kick(0), .hat(0), .hat(0.5)]
+            if offbeatGain > 0 { events.append(.snare(0.5, gain: offbeatGain)) }
+            return events
+        }
         return render(spec)
     }
 
@@ -239,7 +247,7 @@ enum Drums {
 
     private enum Event {
         /// Смещения в долях от начала доли.
-        case kick(Double), snare(Double), hat(Double), bass(Double, length: Double)
+        case kick(Double), snare(Double, gain: Float = 1), hat(Double), bass(Double, length: Double)
     }
 
     private struct Spec {
@@ -302,11 +310,11 @@ enum Drums {
                     } else {
                         kick808(into: &samples, at: t, gain: spec.gain, sampleRate: rate)
                     }
-                case .snare(let offset):
+                case .snare(let offset, let gain):
                     let t = snapped(time(beat: beat, offset: offset))
                     guard audible(t) else { continue }
                     snares.append(t)
-                    snare(into: &samples, at: t, gain: spec.gain, sampleRate: rate, rng: &rng)
+                    snare(into: &samples, at: t, gain: spec.gain * gain, sampleRate: rate, rng: &rng)
                 case .hat(let offset):
                     let t = snapped(time(beat: beat, offset: offset))
                     guard audible(t) else { continue }

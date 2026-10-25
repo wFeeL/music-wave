@@ -1,5 +1,12 @@
 import Foundation
 
+/// Почему трекер потерял захват: смена темпа, скачок фазы по гребенке или уверенность упала ниже
+/// `unlockConfidence` от промахов (`BeatTracker.lastUnlockReason`). Пишется в расписание, журнал ритма
+/// и сводку `wave-eval`.
+public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
+    case tempoSwitch, phaseJump, misses
+}
+
 /// Фаза доли, уверенность и события свечения (`beat-sync.md` 2.5-2.6).
 ///
 /// Все времена в секундах потока: «сейчас» трекера это `hop.endTime` последнего шага, онсеты на той
@@ -19,7 +26,7 @@ import Foundation
 /// 4. когда окно доли закрылось, уверенность сдвигается к попаданию или промаху на `confidenceGain`.
 ///    Захват при уверенности от `lockConfidence` и `lockHits` попаданиях подряд, отпускание ниже
 ///    `unlockConfidence`. Смена темпа и скачок фазы делят уверенность пополам, обнуляют счет попаданий
-///    и отпускают захват (`beat-sync.md` 2.6);
+///    и отпускают захват (`beat-sync.md` 2.6). Причина последней потери захвата в `lastUnlockReason`;
 /// 5. энергетический ворот: пик уровня бочки держится и спадает на `gateFallPerBeatDB` за долю (без
 ///    темпа `gateFallNoTempoDB` за 0.25 с), сравнивается со следящим пиком за 10 с,
 ///    `g_E = smoothstep(−24, −12, разность)`. Между бочками ворот открыт, в брейке закрывается;
@@ -171,6 +178,9 @@ public struct BeatTracker: Sendable {
     private(set) var confidence = 0.0
     private(set) var hits = 0
     private(set) var locked = false
+    /// Почему захват потерян в последний раз; `nil`, если захвата еще не было (с `reset()` тоже).
+    /// Меняется только при потере захвата: смена темпа без захвата причину не трогает.
+    public internal(set) var lastUnlockReason: UnlockReason?
     private var disagreements = 0
     private var strengthEMA: Float = 0
     /// Id доли `nextBeat`, у `nextBeat + T` на 1 больше.
@@ -221,7 +231,8 @@ public struct BeatTracker: Sendable {
             bpm: period.map { 60 / $0 },
             period: period,
             confidence: confidence,
-            locked: locked
+            locked: locked,
+            unlockReason: locked ? nil : lastUnlockReason
         )
     }
 
@@ -277,6 +288,7 @@ public struct BeatTracker: Sendable {
         confidence = 0
         hits = 0
         locked = false
+        lastUnlockReason = nil
         disagreements = 0
         strengthEMA = 0
         beatCounter += 2
@@ -310,7 +322,7 @@ public struct BeatTracker: Sendable {
         period = estimate.period
         let comb = phaseCandidate(period: estimate.period, current: estimate.switched ? nil : nextBeat)
         guard let nextBeat, !estimate.switched else {
-            if nextBeat != nil { resetConfidence() }
+            if nextBeat != nil { resetConfidence(.tempoSwitch) }
             if let comb { rephase(to: comb.time) }
             return
         }
@@ -320,7 +332,7 @@ public struct BeatTracker: Sendable {
         if abs(diff) > parameters.phaseJump * estimate.period, stronger {
             disagreements += 1
             if disagreements >= parameters.phaseJumpChecks {
-                resetConfidence()
+                resetConfidence(.phaseJump)
                 rephase(to: comb.time)
             }
         } else {
@@ -329,10 +341,12 @@ public struct BeatTracker: Sendable {
     }
 
     /// Смена темпа или скачок фазы: уверенность вдвое, счет попаданий заново, захват отпущен
-    /// (`beat-sync.md` 2.6), новый захват снова требует `lockHits` попаданий подряд.
-    private mutating func resetConfidence() {
+    /// (`beat-sync.md` 2.6), новый захват снова требует `lockHits` попаданий подряд. `reason`
+    /// запоминается, только если захват был.
+    private mutating func resetConfidence(_ reason: UnlockReason) {
         confidence *= 0.5
         hits = 0
+        if locked { lastUnlockReason = reason }
         locked = false
     }
 
@@ -432,6 +446,7 @@ public struct BeatTracker: Sendable {
             hits = nextMatched ? hits + 1 : 0
             if locked {
                 locked = confidence >= parameters.unlockConfidence
+                if !locked { lastUnlockReason = .misses }
             } else {
                 locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
             }

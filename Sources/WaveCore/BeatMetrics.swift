@@ -113,6 +113,50 @@ public enum BeatMetrics {
         return locked / duration
     }
 
+    /// Самая длинная серия аннотаций подряд, у которых нет ни одной детекции в окне ±`window` (темные
+    /// доли: глаз не видел вспышки на этой доле).
+    public static func longestDarkRun(detections: [Double], annotations: [Double], window: Double) -> Int {
+        let sorted = detections.sorted()
+        var longest = 0
+        var current = 0
+        for annotation in annotations.sorted() {
+            if let nearest = nearestIndex(of: annotation, in: sorted), abs(sorted[nearest] - annotation) <= window + edge {
+                current = 0
+            } else {
+                current += 1
+                longest = max(longest, current)
+            }
+        }
+        return longest
+    }
+
+    /// Смены захвата в опубликованных состояниях с моментом в `[from, through]` (начальное состояние
+    /// сменой не считается) и потери захвата среди них по причинам; потеря без причины входит только в
+    /// `changes`.
+    public static func lockChanges(
+        states: [OfflineBeatChain.State], from: Double, through: Double
+    ) -> (changes: Int, unlocks: [UnlockReason: Int]) {
+        let ordered = states.sorted { $0.time < $1.time }
+        var changes = 0
+        var unlocks: [UnlockReason: Int] = [:]
+        for index in ordered.indices.dropFirst() where ordered[index].time >= from && ordered[index].time <= through {
+            let state = ordered[index]
+            guard ordered[index - 1].locked != state.locked else { continue }
+            changes += 1
+            if !state.locked, let reason = state.unlockReason { unlocks[reason, default: 0] += 1 }
+        }
+        return (changes, unlocks)
+    }
+
+    /// Процентиль по ближайшему рангу: значение с номером `ceil(fraction · n)` по возрастанию; `nil`
+    /// для пустого списка.
+    public static func percentile(_ values: [Double], _ fraction: Double) -> Double? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let rank = Int((fraction * Double(sorted.count)).rounded(.up))
+        return sorted[min(max(rank, 1), sorted.count) - 1]
+    }
+
     // MARK: Внутреннее
 
     /// Наибольшее число пар в окне для отсортированных списков: жадный проход слева направо оптимален,

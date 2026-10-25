@@ -266,6 +266,53 @@ struct BeatTrackerTests {
         #expect(release.before >= 0.25 && release.after < 0.25, "\(release)")
     }
 
+    /// Скачок темпа 100 -> 140 BPM на 12 с: первую потерю захвата дает смена темпа, и причина видна в
+    /// расписании, пока захвата нет.
+    @Test func unlockReasonTempoSwitch() async throws {
+        let hops = await runOffCooperativePool {
+            StreamAnalyzer(sampleRate: 48_000).processSignal(Drums.tempoJump(from: 100, to: 140, at: 12).samples)
+        }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var wasLocked = false
+        var first: (time: Double, reason: UnlockReason?, published: UnlockReason?)?
+        for hop in hops {
+            tracker.process(hop)
+            if first == nil, wasLocked, !tracker.locked {
+                first = (hop.endTime, tracker.lastUnlockReason, tracker.schedule.unlockReason)
+            }
+            wasLocked = tracker.locked
+        }
+        let unlock = try #require(first)
+        #expect(unlock.reason == .tempoSwitch, "first unlock at \(unlock.time) s")
+        #expect(unlock.published == .tempoSwitch)
+        #expect(unlock.time > 12, "first unlock at \(unlock.time) s, before the jump")
+    }
+
+    /// Захват на ровных долях, потом шаги без атак с уровнем бочки как на долях (ворот открыт): захват
+    /// уходит по промахам. С захватом причины в расписании нет; `reset()` забывает причину.
+    @Test func unlockReasonMisses() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        #expect(tracker.lastUnlockReason == nil && tracker.schedule.unlockReason == nil)
+        var time = hops.endTime
+        var unlockedAt: Double?
+        while unlockedAt == nil, time < 20 {
+            time += hops.hop
+            var hop = SyntheticBeats.hop(endTime: time, broadband: nil, kick: nil)
+            hop.kickLevelDB = -6
+            tracker.process(hop)
+            if !tracker.locked { unlockedAt = time }
+        }
+        try #require(unlockedAt != nil)
+        #expect(tracker.energyGate > 0.9)
+        #expect(tracker.lastUnlockReason == .misses)
+        #expect(tracker.schedule.unlockReason == .misses)
+        tracker.reset()
+        #expect(tracker.lastUnlockReason == nil && tracker.schedule.unlockReason == nil)
+    }
+
     /// Смесь доходит от онсетов до предсказания за одну долю после захвата.
     @Test func blendCrossfadesInOneBeat() throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)

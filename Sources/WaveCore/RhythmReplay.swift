@@ -52,6 +52,18 @@ public enum RhythmReplay {
 
     /// Темп и захват по времени.
     public struct Timeline: Sendable, Equatable {
+        /// Потеря захвата: момент публикации без захвата (секунды оси) и причина; у журналов 1.1
+        /// причины нет.
+        public struct Unlock: Sendable, Equatable {
+            public var time: Double
+            public var reason: UnlockReason?
+
+            public init(time: Double, reason: UnlockReason?) {
+                self.time = time
+                self.reason = reason
+            }
+        }
+
         /// Первая публикация с захватом, секунды оси.
         public var firstLock: Double?
         /// Доля времени `[0, end]` с захватом (до первой публикации захвата нет).
@@ -61,27 +73,34 @@ public enum RhythmReplay {
         public var lastBPM: Double?
         /// Медиана темпа по публикациям с захватом.
         public var medianLockedBPM: Double?
+        /// Каждая потеря захвата до `end` по времени.
+        public var unlocks: [Unlock]
 
         public init(schedules: [RhythmLog.Schedule], end: Double) {
-            self.init(points: schedules.map { ($0.time, $0.locked, $0.bpm) }, end: end)
+            self.init(points: schedules.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason) }, end: end)
         }
 
         public init(states: [OfflineBeatChain.State], end: Double) {
-            self.init(points: states.map { ($0.time, $0.locked, $0.bpm) }, end: end)
+            self.init(points: states.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason) }, end: end)
         }
 
-        private init(points: [(time: Double, locked: Bool, bpm: Double?)], end: Double) {
+        private init(points: [(time: Double, locked: Bool, bpm: Double?, reason: UnlockReason?)], end: Double) {
             firstLock = points.first(where: \.locked)?.time
             var locked = 0.0
             var changes = 0
+            var unlocks: [Unlock] = []
             for (index, point) in points.enumerated() where point.time < end {
-                if index > 0, points[index - 1].locked != point.locked { changes += 1 }
+                if index > 0, points[index - 1].locked != point.locked {
+                    changes += 1
+                    if !point.locked { unlocks.append(Unlock(time: point.time, reason: point.reason)) }
+                }
                 guard point.locked else { continue }
                 let next = index + 1 < points.count ? min(points[index + 1].time, end) : end
                 locked += max(next - max(point.time, 0), 0)
             }
             lockedShare = end > 0 ? min(locked / end, 1) : 0
             lockChanges = changes
+            self.unlocks = unlocks
             lastBPM = points.last(where: { $0.time < end })?.bpm
             let tempos = points.filter { $0.locked && $0.time < end }.compactMap(\.bpm).sorted()
             if tempos.isEmpty {
@@ -198,10 +217,7 @@ public enum RhythmReplay {
 
     /// Ближайший ранг: значение с номером `ceil(0.95 n)` по возрастанию.
     static func percentile95(_ values: [Double]) -> Double? {
-        guard !values.isEmpty else { return nil }
-        let sorted = values.sorted()
-        let rank = Int((0.95 * Double(sorted.count)).rounded(.up))
-        return sorted[min(max(rank - 1, 0), sorted.count - 1)]
+        BeatMetrics.percentile(values, 0.95)
     }
 }
 
@@ -325,6 +341,8 @@ extension RhythmReplay.Report {
         lines.append(Self.row(["tempo/lock", "first lock s", "locked share", "lock changes", "median BPM", "last BPM"]))
         lines.append(Self.timelineRow("device", device))
         lines.append(Self.timelineRow("replay", replay))
+        lines.append(Self.unlockLine("device", device))
+        lines.append(Self.unlockLine("replay", replay))
         if options.listFlashes {
             lines.append("")
             lines.append(Self.row(["device s", "kind", "nearest replay s", "diff ms"]))
@@ -361,6 +379,12 @@ extension RhythmReplay.Report {
             ms(comparison.p95Difference),
             ms(comparison.p95AbsoluteDifference),
         ])
+    }
+
+    /// Каждая потеря захвата с временем и причиной (`unknown` у журналов без причины).
+    private static func unlockLine(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {
+        let items = timeline.unlocks.map { String(format: "%.2f s ", $0.time) + ($0.reason?.rawValue ?? "unknown") }
+        return "unlocks \(name): " + (items.isEmpty ? "none" : items.joined(separator: ", "))
     }
 
     private static func timelineRow(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {

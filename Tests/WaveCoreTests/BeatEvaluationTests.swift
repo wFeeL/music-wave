@@ -185,6 +185,74 @@ struct BeatEvaluationTests {
         let text = BeatEvaluation.table(title: "t", summaries: rows)
         #expect(text.contains("TOTAL") && text.contains("lockedFiles") && text.contains("unlockedPrec"))
         #expect(text.contains("offLocked") && text.contains("wrongLock") && text.hasPrefix("t\n"))
+        #expect(text.contains("recall") && text.contains("dark50") && text.contains("dark90"))
+        #expect(text.contains("flips/min") && text.contains("unlocks t/p/m"))
+    }
+
+    /// Темная доля: размеченная доля без вспышки в окне ±70 мс. Доли 0.5...10.0 через 0.5, вспышек нет
+    /// на 4.0-6.0: самая длинная темная серия 5 долей.
+    @Test func longestDarkRunCountsConsecutiveMissedBeats() {
+        let beats = (1...20).map { Double($0) * 0.5 }
+        let lit = beats.filter { $0 < 4.0 || $0 > 6.0 }.map { Self.flash($0 + 0.020) }
+        func longest(_ flashes: [OfflineBeatChain.Flash]) -> Int {
+            BeatEvaluation.score(
+                result: Self.result(flashes: flashes), annotations: beats, duration: 10, options: .init(), path: "a",
+                group: "g", heldout: false
+            ).longestDarkBeats
+        }
+        #expect(longest(lit) == 5)
+        // Вспышка на 60 мс позже доли 5.0 в окне: серия рвется на две по 2 доли.
+        #expect(longest(lit + [Self.flash(5.0 + 0.020 + 0.060)]) == 2)
+        // На 80 мс позже уже мимо окна, и вспышка без захвата считается так же, как с захватом.
+        #expect(longest(lit + [Self.flash(5.0 + 0.020 + 0.080, locked: false)]) == 5)
+        #expect(longest([]) == 20)
+        #expect(longest(beats.map { Self.flash($0 + 0.020, locked: false) }) == 0)
+    }
+
+    /// Смены захвата в минуту и потери захвата по причинам: состояния до конца файла, начальное
+    /// состояние без захвата сменой не считается.
+    @Test func lockFlipsAndUnlockReasonsComeFromStates() {
+        let states = [
+            OfflineBeatChain.State(time: 0, locked: false, bpm: nil, confidence: 0),
+            OfflineBeatChain.State(time: 3, locked: true, bpm: 120, confidence: 0.8),
+            OfflineBeatChain.State(time: 5, locked: false, bpm: 120, confidence: 0.2, unlockReason: .misses),
+            OfflineBeatChain.State(time: 6, locked: true, bpm: 120, confidence: 0.8),
+            OfflineBeatChain.State(time: 8, locked: false, bpm: 140, confidence: 0.4, unlockReason: .tempoSwitch),
+            // Хвост рендера после конца файла не считается.
+            OfflineBeatChain.State(time: 10.3, locked: true, bpm: 140, confidence: 0.8),
+        ]
+        let score = Self.score(Self.result(flashes: [], states: states))
+        #expect(abs(score.lockFlipsPerMinute - 4 * 6) < 1e-9)
+        #expect(score.unlocks == [.misses: 1, .tempoSwitch: 1])
+        // Пропущенное начало не считается: от 5.5 с остаются две смены за 4.5 с.
+        let skipped = Self.score(Self.result(flashes: [], states: states), options: .init(skipSeconds: 5.5))
+        #expect(abs(skipped.lockFlipsPerMinute - 2 * 60 / 4.5) < 1e-9)
+        #expect(skipped.unlocks == [.tempoSwitch: 1])
+    }
+
+    /// Сводка: медиана и 90-й процентиль самой длинной темной серии по файлам (ближайший ранг), среднее
+    /// смен захвата в минуту, сумма потерь захвата по причинам.
+    @Test func summaryReportsDarkRunsFlipsAndUnlocks() throws {
+        let base = BeatEvaluation.score(
+            result: Self.result(flashes: []), annotations: Self.beats, duration: Self.duration, options: .init(),
+            path: "a", group: "g", heldout: false
+        )
+        let scores = (1...10).map { index -> BeatEvaluation.FileScore in
+            var score = base
+            score.longestDarkBeats = 11 - index
+            score.lockFlipsPerMinute = Double(index)
+            score.unlocks = index % 2 == 0 ? [.misses: 2] : [.phaseJump: 1, .tempoSwitch: 1]
+            return score
+        }
+        let summary = BeatEvaluation.summarize(name: "g", scores: scores)
+        #expect(summary.darkRunMedian == 5 && summary.darkRunP90 == 9)
+        #expect(abs(summary.lockFlipsPerMinute - 5.5) < 1e-12)
+        #expect(summary.unlocks == [.misses: 10, .phaseJump: 5, .tempoSwitch: 5])
+        let empty = BeatEvaluation.summarize(name: "none", scores: [])
+        #expect(empty.darkRunMedian == 0 && empty.darkRunP90 == 0 && empty.unlocks.isEmpty)
+        let row = BeatEvaluation.table(title: "t", summaries: [summary])
+        // t/p/m: смена темпа, скачок фазы, промахи.
+        #expect(row.contains("5/5/10"))
     }
 
     /// Четыре на пол 120 BPM через настоящую цепочку: вспышки лежат на долях, чуть раньше.

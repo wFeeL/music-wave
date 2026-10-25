@@ -73,12 +73,15 @@ public struct OfflineBeatChain: Sendable {
         public var locked: Bool
         public var bpm: Double?
         public var confidence: Double
+        /// Почему захват потерян (`BeatSchedule.unlockReason`); `nil` с захватом и до первого захвата.
+        public var unlockReason: UnlockReason?
 
-        public init(time: Double, locked: Bool, bpm: Double?, confidence: Double) {
+        public init(time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil) {
             self.time = time
             self.locked = locked
             self.bpm = bpm
             self.confidence = confidence
+            self.unlockReason = unlockReason
         }
     }
 
@@ -230,7 +233,10 @@ public struct OfflineBeatChain: Sendable {
             let published = tracker.schedule.shifted(by: shift)
             analysis.publications.append((wake, published))
             analysis.states.append(
-                State(time: wake - hostStart, locked: published.locked, bpm: published.bpm, confidence: published.confidence)
+                State(
+                    time: wake - hostStart, locked: published.locked, bpm: published.bpm, confidence: published.confidence,
+                    unlockReason: published.unlockReason
+                )
             )
             for event in published.events where event.predicted && wake <= event.time - BeatGlow.lead {
                 analysis.predicted[event.id] = event.time
