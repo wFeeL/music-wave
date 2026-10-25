@@ -118,6 +118,50 @@ struct TempoStickinessTests {
         #expect(tempo.period == 1.0)
     }
 
+    /// Сырые оценки журнала ритма 2 владельца, как их видел код 1.1 (BPM, каждые 0.25 с с 5.26 с
+    /// потока; снято зондом по записи журнала): захват на 78.8 BPM,
+    /// музыка замедляется к ~72, оценка уходит в удвоенный темп, который плывет вместе с музыкой
+    /// (157.9, затем 149.0 и 150.7, то есть 5.5 % и 4.4 % от 2 × 78.8 при допуске 4 %), потом
+    /// возвращается к основному темпу. На 1.1 оценка 149.0 считалась далекой некратной, и две такие
+    /// оценки подряд переключали темп на 150.7 на 7.01 с; обратно к 72 он шел 12 оценок из 16.
+    private static let ownerLog2: [Double] = [
+        77.7, 78.6, 77.7, 79.1, 79.0, 157.9, 149.0, 150.7, 157.5, 151.9, 151.0, 151.0, 151.9, 150.5, 151.5, 150.5,
+        145.1, 73.4, 145.1, 72.9, 72.9, 72.9, 72.9, 72.9, 72.6, 72.8, 72.6, 72.4, 72.4, 72.3, 71.8, 72.0, 71.8,
+    ]
+
+    /// Удвоенная оценка, которая плывет вместе с замедлением, остается кратной: темп не уходит на ~150,
+    /// а переходит к основному ~72, как только оценки к нему вернулись.
+    @Test func driftDoesNotFlipOctave() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 60 / 78.8)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 1)
+        var switches: [Double] = []
+        for bpm in Self.ownerLog2 {
+            let estimate = tempo.accept(period: 60 / bpm)
+            #expect(60 / estimate.period < 100, "raw \(bpm) BPM gave \(60 / estimate.period) BPM")
+            if estimate.switched { switches.append(60 / estimate.period) }
+        }
+        #expect(switches.count <= 1, "switches to \(switches) BPM")
+        let final = 60 / (tempo.period ?? 0)
+        #expect(abs(final / 72 - 1) < 0.04, "final \(final) BPM")
+    }
+
+    /// Верная удвоенная оценка, которая плывет (GTZAN metal.00052 с 12.01 с: 162.0 -> 155.0 при
+    /// захвате на 81.0 BPM, разброс 4.5 %), все равно набирает 12 согласных из 16: согласие считается
+    /// до 6 %, а не до 4 %. На 1.1 этот файл переключался по правилу двух далеких на 14.26 с.
+    @Test func driftingOctaveStillSwitchesAfterTwelve() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 60 / 81.0)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 1)
+        let doubled: [Double] = [162.0, 162.1, 161.8, 160.8, 160.3, 160.1, 159.4, 159.7, 156.2, 155.0, 156.0, 155.2]
+        #expect(doubled.count == TempoEstimator.relatedSwitchUpdates)
+        for (index, bpm) in doubled.enumerated() {
+            let estimate = tempo.accept(period: 60 / bpm)
+            #expect(estimate.switched == (index == doubled.count - 1), "#\(index + 1): \(bpm) BPM")
+        }
+        #expect(abs(60 / (tempo.period ?? 0) - 155.2) < 0.01)
+    }
+
     /// Импульсы ровно на 120 BPM при 187.5 шагах в секунду (93.75 шага на долю).
     private static func impulses(seconds: Double, bpm: Double = 120) -> [Float] {
         let fps = 187.5
@@ -286,6 +330,21 @@ struct TempoEstimatorTests {
         for (time, estimate) in run.estimates where time >= 4 && time < 12 {
             #expect(abs(estimate.period * from / 60 - 1) < 0.04, "t \(time): \(60 / estimate.period) BPM")
         }
+    }
+
+    /// Настоящий скачок темпа на некратный (или почти кратный) принимается не позже, чем в 1.1: допуск
+    /// дрейфа для октавы не должен задерживать его правилом кратных. `limit` в секундах после скачка
+    /// снят с кода 1.1 на этой же сцене (2.0, 2.0 и 1.504 с). 100 -> 140 и 90 -> 128 лежат между 4/3
+    /// и 3/2 (1.40 и 1.42), 80 -> 150 в 6 % от удвоения.
+    @Test(arguments: [(100.0, 140.0, 2.001), (90, 128, 2.001), (80, 150, 1.505)])
+    func realJumpStillSwitches(from: Double, to: Double, limit: Double) async {
+        let run = await runOffCooperativePool {
+            Self.run(Drums.tempoJump(from: from, to: to, at: 12, seconds: 18).samples)
+        }
+        let switches = run.estimates.filter { $0.time >= 4 && $0.estimate.switched }
+        let target = 60 / to
+        let change = switches.first { $0.time > 12 && abs($0.estimate.period - target) / target < 0.04 }
+        #expect(change.map { $0.time - 12 <= limit } == true, "switches \(switches.map { ($0.time, 60 / $0.estimate.period) })")
     }
 
     /// Функция бочки из розового шума (без долей) рядом с широкополосной функцией барабанов 160 BPM:

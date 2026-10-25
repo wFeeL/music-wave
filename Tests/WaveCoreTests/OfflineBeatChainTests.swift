@@ -95,8 +95,10 @@ struct OfflineBeatChainTests {
     /// захват теряется по смене темпа, самая длинная темная серия 4 доли, после 26 с захват на 147 BPM,
     /// точность вспышек с захватом ниже 0.95. При громкости 0.12 и выше захват с самого начала на
     /// удвоенном темпе и вспышки на «и»; 0.06 и тише без смены темпа; без слабой доли все три проверки
-    /// проходят и на 1.1.
-    @Test(.disabled("B2-B4: octave guard while the tempo drifts, no hard resets, smooth weight"))
+    /// проходят и на 1.1. Защита октавы при дрейфе (B2) этот случай не меняет: удвоенные оценки
+    /// 148-150 BPM лежат в 1.3 % от 2 × 75.1 и держатся 3.5 с, так что 12 из 16 набираются по правилу
+    /// кратных; захват сбрасывает сама смена темпа.
+    @Test(.disabled("B3-B4: an exact octave switch still resets the lock, no hard resets, smooth weight"))
     func ritardandoKeepsGlow() async throws {
         let (scene, result) = await runOffCooperativePool {
             let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)
