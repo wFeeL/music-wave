@@ -30,19 +30,13 @@ struct NowPlayingTests {
     @Test func diffMergesAndNullDeletes() throws {
         var parser = NowPlayingStreamParser()
         _ = try parser.consume(line: Self.fullLine)
-        let paused = try #require(try parser.consume(
-            line: #"{"type":"data","diff":true,"payload":{"playing":false}}"#))
-        #expect(!paused.isPlaying)
-        #expect(paused.album == "Группа крови")
-        #expect(paused.duration == 215)
         let info = try #require(try parser.consume(
-            line: #"{"type":"data","diff":true,"payload":{"album":null}}"#))
+            line: #"{"type":"data","diff":true,"payload":{"album":null,"playing":false}}"#))
         #expect(info.album == nil)
         #expect(!info.isPlaying)
         #expect(info.title == "Кино 🎸")
         #expect(info.artist == "Цой")
-        // Альбом входит в ключ трека: его смена считается сменой трека, тайминг прошлого снят.
-        #expect(info.duration == nil)
+        #expect(info.duration == 215)
     }
 
     @Test func emptyDiffKeepsState() throws {
@@ -284,8 +278,10 @@ struct NowPlayingTests {
     /// тайминг прошлого трека не достается новому, прогресса нет до нового тайминга.
     @Test func trackChangeDropsStaleTiming() throws {
         var parser = NowPlayingStreamParser()
-        _ = try parser.consume(line: Self.snapshotA)
-        let b = try #require(try parser.consume(line: Self.line(diff: true, ["title": #""B""#, "artist": #""b""#])))
+        _ = try parser.consume(line: Self.snapshotA, receivedAt: Self.t0Date)
+        let b = try #require(try parser.consume(
+            line: Self.line(diff: true, ["title": #""B""#, "artist": #""b""#]),
+            receivedAt: Self.t0Date.addingTimeInterval(3)))
         #expect(b.title == "B")
         #expect(b.duration == nil)
         #expect(b.elapsedTime == nil)
@@ -296,7 +292,7 @@ struct NowPlayingTests {
             "durationMicros": Self.micros(200),
             "elapsedTimeMicros": Self.micros(1),
             "timestampEpochMicros": Self.micros(Self.t0 + 5),
-        ])))
+        ]), receivedAt: Self.t0Date.addingTimeInterval(5)))
         #expect(timed.title == "B")
         #expect(timed.isPlaying)
         #expect(timed.playbackPosition(at: Self.t0Date.addingTimeInterval(6))?.passedSeconds == 2)
@@ -320,15 +316,79 @@ struct NowPlayingTests {
     /// прогресс не показывает.
     @Test func partialTimingHidesProgress() throws {
         var parser = NowPlayingStreamParser()
-        _ = try parser.consume(line: Self.snapshotA)
+        _ = try parser.consume(line: Self.snapshotA, receivedAt: Self.t0Date)
         let b = try #require(try parser.consume(line: Self.line(diff: true, [
             "title": #""B""#,
             "durationMicros": Self.micros(200),
-        ])))
+        ]), receivedAt: Self.t0Date.addingTimeInterval(3)))
         #expect(b.duration == 200)
         #expect(b.elapsedTime == nil)
         #expect(b.timestamp == nil)
         #expect(b.playbackPosition(at: Self.t0Date) == nil)
+    }
+
+    /// Сценарий A: адаптер шлет дифф только по изменившимся ключам. Тайминг нового трека
+    /// пришел, пока название еще старое, а название следом: свежий тайминг остается, иначе
+    /// адаптер его больше не пришлет и полосы не будет весь трек.
+    @Test func timingBeforeTitleOfNextTrackIsKept() throws {
+        for titleDelay in [0.5, 2.5] {
+            var parser = NowPlayingStreamParser()
+            _ = try parser.consume(line: Self.snapshotA, receivedAt: Self.t0Date)
+            _ = try parser.consume(line: Self.line(diff: true, [
+                "durationMicros": Self.micros(200),
+                "elapsedTimeMicros": Self.micros(0),
+                "timestampEpochMicros": Self.micros(Self.t0 + 3),
+            ]), receivedAt: Self.t0Date.addingTimeInterval(3))
+            let b = try #require(try parser.consume(
+                line: Self.line(diff: true, ["title": #""B""#, "artist": #""b""#]),
+                receivedAt: Self.t0Date.addingTimeInterval(3 + titleDelay)))
+            #expect(b.title == "B")
+            #expect(b.duration == 200)
+            #expect(b.elapsedTime == 0)
+            #expect(b.timestamp == Self.t0Date.addingTimeInterval(3))
+            #expect(b.playbackPosition(at: Self.t0Date.addingTimeInterval(10))?.passedSeconds == 7)
+        }
+    }
+
+    /// Сценарий B: у нового трека та же длительность, адаптер ее не повторяет. Позиция нового
+    /// трека свежая (у начала), значит длительность остается.
+    @Test func sameDurationOnNextTrackIsKept() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA, receivedAt: Self.t0Date)
+        let b = try #require(try parser.consume(line: Self.line(diff: true, [
+            "title": #""B""#,
+            "artist": #""b""#,
+            "elapsedTimeMicros": Self.micros(0),
+            "timestampEpochMicros": Self.micros(Self.t0 + 3),
+        ]), receivedAt: Self.t0Date.addingTimeInterval(3)))
+        #expect(b.duration == 133)
+        #expect(b.elapsedTime == 0)
+        #expect(b.playbackPosition(at: Self.t0Date.addingTimeInterval(4))?.passedSeconds == 1)
+    }
+
+    /// Строка с ключом тайминга не дольше секунды назад: тайминг тоже считается свежим, даже
+    /// если позиция в состоянии далеко от начала.
+    @Test func timingFromLastSecondIsKept() throws {
+        var parser = NowPlayingStreamParser()
+        _ = try parser.consume(line: Self.snapshotA, receivedAt: Self.t0Date)
+        _ = try parser.consume(
+            line: Self.line(diff: true, ["durationMicros": Self.micros(200)]),
+            receivedAt: Self.t0Date.addingTimeInterval(3))
+        let b = try #require(try parser.consume(
+            line: Self.line(diff: true, ["title": #""B""#]), receivedAt: Self.t0Date.addingTimeInterval(3.8)))
+        #expect(b.duration == 200)
+        #expect(b.elapsedTime == 130)
+
+        // Через 1,5 с после строки с таймингом и при позиции далеко от начала он уже чужой.
+        var late = NowPlayingStreamParser()
+        _ = try late.consume(line: Self.snapshotA, receivedAt: Self.t0Date)
+        _ = try late.consume(
+            line: Self.line(diff: true, ["durationMicros": Self.micros(200)]),
+            receivedAt: Self.t0Date.addingTimeInterval(3))
+        let stale = try #require(try late.consume(
+            line: Self.line(diff: true, ["title": #""B""#]), receivedAt: Self.t0Date.addingTimeInterval(4.5)))
+        #expect(stale.duration == nil)
+        #expect(stale.elapsedTime == nil)
     }
 
     @Test func diffWithoutTitleKeepsTiming() throws {
@@ -476,9 +536,45 @@ struct NowPlayingTests {
         #expect(watch.observe(Self.track("B"), at: Self.t0Date).isEmpty)
         // Трек без тайминга после трека без тайминга: не о чем сообщать.
         #expect(watch.observe(Self.track("C"), at: Self.t0Date).isEmpty)
-        // Длительность без позиции тоже тайминг не дает, но и строку «без длительности и позиции» не пишет.
+        // Длительность без позиции: своя строка, тоже один раз.
         #expect(watch.observe(Self.track("D", duration: 100, elapsed: 5), at: Self.t0Date).isEmpty)
+        #expect(watch.observe(Self.track("E", duration: 100), at: Self.t0Date) == [.trackChangedWithoutPosition])
         #expect(watch.observe(Self.track("E", duration: 100), at: Self.t0Date).isEmpty)
+    }
+
+    /// Полоса пропала посреди трека без новой строки: срок проверки известен заранее,
+    /// проверка в этот срок пишет строку один раз.
+    @Test func watchFindsOverrunWithoutNewLine() throws {
+        var watch = NowPlayingTimingWatch()
+        let a = Self.track("A", duration: 133, elapsed: 100)
+        #expect(watch.observe(a, at: Self.t0Date.addingTimeInterval(10)).isEmpty)
+        let deadline = try #require(watch.overrunDeadline)
+        #expect(abs(deadline.timeIntervalSince(Self.t0Date)
+            - (35 + NowPlayingTimingWatch.checkMargin)) < 1e-6)
+        #expect(a.playbackPosition(at: deadline) == nil)
+        #expect(watch.check(at: deadline.addingTimeInterval(-1)).isEmpty)
+        let events = watch.check(at: deadline)
+        #expect(events.count == 1)
+        if case let .positionBeyondDuration(elapsed, duration, stampAge)? = events.first {
+            #expect(abs(elapsed - (135 + NowPlayingTimingWatch.checkMargin)) < 1e-6)
+            #expect(duration == 133)
+            #expect(abs((stampAge ?? 0) - (35 + NowPlayingTimingWatch.checkMargin)) < 1e-6)
+        } else {
+            Issue.record("нет строки о позиции: \(events)")
+        }
+        #expect(watch.check(at: deadline.addingTimeInterval(5)).isEmpty)
+        #expect(watch.overrunDeadline == nil)
+
+        // На паузе позиция стоит: проверять нечего. Пустой снимок проверку снимает.
+        var paused = NowPlayingTimingWatch()
+        #expect(paused.observe(Self.track("A", duration: 133, elapsed: 100, playing: false), at: Self.t0Date).isEmpty)
+        #expect(paused.overrunDeadline == nil)
+        var emptied = NowPlayingTimingWatch()
+        _ = emptied.observe(a, at: Self.t0Date)
+        #expect(emptied.overrunDeadline != nil)
+        _ = emptied.observe(nil, at: Self.t0Date)
+        #expect(emptied.overrunDeadline == nil)
+        #expect(emptied.check(at: Self.t0Date.addingTimeInterval(100)).isEmpty)
     }
 
     @Test func watchReportsOverrunOncePerTrack() {
@@ -495,6 +591,9 @@ struct NowPlayingTests {
     @Test func watchEventMessages() {
         #expect(NowPlayingTimingWatch.Event.trackChangedWithoutTiming.logMessage
             == "адаптер: трек сменился без длительности и позиции")
+        #expect(NowPlayingTimingWatch.Event.trackChangedWithoutPosition.logMessage
+            == "адаптер: трек сменился с длительностью, но без позиции")
+        #expect(NowPlayingTimingWatch.checkMargin == 0.1)
         #expect(NowPlayingTimingWatch.Event.positionBeyondDuration(elapsed: 160, duration: 133, stampAge: 60.24).logMessage
             == "адаптер: позиция вне длительности (позиция 160.0 с, длительность 133.0 с, метка 60.2 с назад)")
         #expect(NowPlayingTimingWatch.Event.positionBeyondDuration(elapsed: 150, duration: 133, stampAge: nil).logMessage

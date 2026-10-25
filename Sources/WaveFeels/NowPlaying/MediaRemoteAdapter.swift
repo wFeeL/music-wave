@@ -108,9 +108,12 @@ final class MediaRemoteAdapter {
     @ObservationIgnored private var emptyHold = NowPlayingHold<NowPlayingInfo>()
     /// Срок удержания после пустого снимка, на который поставлен `holdTask`; `nil`, если не держится.
     @ObservationIgnored private var emptyHoldUntil: Double?
-    /// Строки лога о тайминге трека (позиция за длительностью, смена трека без тайминга),
-    /// не чаще раза на трек.
+    /// Строки лога о тайминге трека (позиция за длительностью, смена трека без тайминга
+    /// или без позиции), не чаще раза на трек.
     @ObservationIgnored private var timingWatch = NowPlayingTimingWatch()
+    /// Проверка позиции в срок `timingWatch.overrunDeadline`: полоса может пропасть посреди
+    /// трека без новой строки. Одна на последнюю строку потока.
+    @ObservationIgnored private var overrunCheckTask: Task<Void, Never>?
     /// Смерти потока подряд; сбрасывается, когда поток выдал настоящий трек или прожил `stableRun`.
     @ObservationIgnored private var restarts = 0
     @ObservationIgnored private var restartTask: Task<Void, Never>?
@@ -182,6 +185,7 @@ final class MediaRemoteAdapter {
         holdTask = nil
         holdingInfo = false
         resetEmptyHold()
+        cancelOverrunCheck()
         test?.terminate()
         test = nil
         stream?.terminate()
@@ -385,6 +389,7 @@ final class MediaRemoteAdapter {
         holdTask?.cancel()
         holdTask = nil
         resetEmptyHold()
+        cancelOverrunCheck()
         holdingInfo = restart && info != nil
         if holdingInfo {
             holdTask = Task { [weak self, timing = self.timing] in
@@ -466,6 +471,32 @@ final class MediaRemoteAdapter {
         return result.published
     }
 
+    /// Ставит проверку позиции на срок, когда она сама уйдет за длительность (`timingWatch`);
+    /// прежняя проверка снимается. Без срока (пауза, нет тайминга, уже написано) не ставит.
+    private func scheduleOverrunCheck(token: Int) {
+        cancelOverrunCheck()
+        guard let deadline = timingWatch.overrunDeadline else { return }
+        let wait = max(0, deadline.timeIntervalSinceNow)
+        overrunCheckTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled else { return }
+            self?.overrunCheckFired(token: token)
+        }
+    }
+
+    private func overrunCheckFired(token: Int) {
+        overrunCheckTask = nil
+        guard token == streamToken else { return }
+        for event in timingWatch.check(at: Date()) {
+            log(event.logMessage)
+        }
+    }
+
+    private func cancelOverrunCheck() {
+        overrunCheckTask?.cancel()
+        overrunCheckTask = nil
+    }
+
     /// Строка потока, уже разобранная вне главного потока (`NowPlayingLineDecoder`).
     private func streamOutput(_ output: AdapterOutput, token: Int) {
         guard token == streamToken else { return }
@@ -483,6 +514,7 @@ final class MediaRemoteAdapter {
         for event in timingWatch.observe(next, at: Date()) {
             log(event.logMessage)
         }
+        scheduleOverrunCheck(token: token)
         // Перезапущенный поток начинает с пустого снимка: прежний трек пока остается.
         if holdingInfo {
             guard next != nil else { return }

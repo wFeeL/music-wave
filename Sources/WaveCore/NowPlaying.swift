@@ -168,12 +168,17 @@ public struct NowPlayingTimingWatch: Sendable {
         case positionBeyondDuration(elapsed: Double, duration: Double, stampAge: Double?)
         /// Трек сменился, у нового нет ни длительности, ни позиции, а у прошлого были.
         case trackChangedWithoutTiming
+        /// Трек сменился, новый принес длительность без позиции, а у прошлого были обе:
+        /// прогресс скрыт до позиции.
+        case trackChangedWithoutPosition
 
         /// Строка лога.
         public var logMessage: String {
             switch self {
             case .trackChangedWithoutTiming:
                 return "адаптер: трек сменился без длительности и позиции"
+            case .trackChangedWithoutPosition:
+                return "адаптер: трек сменился с длительностью, но без позиции"
             case let .positionBeyondDuration(elapsed, duration, stampAge):
                 let stamp = stampAge.map { "метка \(Self.seconds($0)) с назад" } ?? "без метки"
                 return "адаптер: позиция вне длительности (позиция \(Self.seconds(elapsed)) с, "
@@ -199,30 +204,62 @@ public struct NowPlayingTimingWatch: Sendable {
     private var lastHadTiming = false
     /// Трек, о позиции которого уже написано.
     private var reportedOverrun: Track?
+    /// Последнее непустое состояние: по нему `check(at:)` проверяет позицию без новой строки.
+    /// Пустой снимок его снимает.
+    private var lastInfo: NowPlayingInfo?
+
+    /// Насколько позже границы допуска проверять позицию: в сам момент границы она еще видна.
+    public static let checkMargin = 0.1
 
     public init() {}
 
     /// Очередное состояние Now Playing на момент `now`; возвращает строки, которые пора написать.
     public mutating func observe(_ info: NowPlayingInfo?, at now: Date) -> [Event] {
+        lastInfo = info
         guard let info else { return [] }
-        let track = Track(
-            bundleIdentifier: info.bundleIdentifier, title: info.title, artist: info.artist, album: info.album)
+        let track = Self.track(of: info)
         let hasTiming = info.duration != nil && info.elapsedTime != nil
         var events: [Event] = []
         if track != last {
-            if last != nil, lastHadTiming, info.duration == nil, info.elapsedTime == nil {
-                events.append(.trackChangedWithoutTiming)
+            if last != nil, lastHadTiming, info.elapsedTime == nil {
+                events.append(info.duration == nil ? .trackChangedWithoutTiming : .trackChangedWithoutPosition)
             }
             last = track
         }
         lastHadTiming = hasTiming
-        if hasTiming, reportedOverrun != track, info.playbackPosition(at: now) == nil,
-           let duration = info.duration, let raw = info.rawElapsed(at: now) {
-            events.append(.positionBeyondDuration(
-                elapsed: raw, duration: duration, stampAge: info.timestamp.map { now.timeIntervalSince($0) }))
-            reportedOverrun = track
-        }
+        events += overrun(of: info, at: now)
         return events
+    }
+
+    /// Когда звать `check(at:)`: последний трек играет, и его позиция уйдет за длительность
+    /// дальше допуска сама, без новой строки (так полоса пропадает посреди трека). `nil`, если
+    /// трек на паузе, тайминга нет или о позиции этого трека уже написано.
+    public var overrunDeadline: Date? {
+        guard let info = lastInfo, info.isPlaying, reportedOverrun != Self.track(of: info),
+              let duration = info.duration, let elapsed = info.elapsedTime, let timestamp = info.timestamp,
+              duration.isFinite, elapsed.isFinite
+        else { return nil }
+        return timestamp.addingTimeInterval(duration + PlaybackPosition.overrunTolerance - elapsed + Self.checkMargin)
+    }
+
+    /// Проверка позиции последнего трека без новой строки, не чаще раза на трек.
+    public mutating func check(at now: Date) -> [Event] {
+        guard let info = lastInfo else { return [] }
+        return overrun(of: info, at: now)
+    }
+
+    private mutating func overrun(of info: NowPlayingInfo, at now: Date) -> [Event] {
+        let track = Self.track(of: info)
+        guard reportedOverrun != track, info.elapsedTime != nil, let duration = info.duration,
+              info.playbackPosition(at: now) == nil, let raw = info.rawElapsed(at: now)
+        else { return [] }
+        reportedOverrun = track
+        return [.positionBeyondDuration(
+            elapsed: raw, duration: duration, stampAge: info.timestamp.map { now.timeIntervalSince($0) })]
+    }
+
+    private static func track(of info: NowPlayingInfo) -> Track {
+        Track(bundleIdentifier: info.bundleIdentifier, title: info.title, artist: info.artist, album: info.album)
     }
 }
 
@@ -305,8 +342,14 @@ public struct NowPlayingStreamParser: Sendable {
     /// Трек, которому принадлежат длительность, позиция и метка в `state`. `nil`, пока трек
     /// неизвестен: тогда тайминг достается первому названию, как обложка.
     private var timingOwner: TrackKey?
+    /// Когда пришла последняя строка, в payload которой был ключ тайминга (не `null`).
+    private var lastTimingAt: Date?
 
     private static let timingKeys = ["durationMicros", "elapsedTimeMicros", "timestampEpochMicros"]
+    /// Тайминг при смене трека свежий, если сырая позиция не дальше этого от начала (секунды)...
+    static let freshPosition: Double = 3
+    /// ...или строка с ключом тайминга пришла не раньше этого до смены (секунды).
+    static let freshTimingWindow: Double = 1
 
     public init() {}
 
@@ -316,7 +359,10 @@ public struct NowPlayingStreamParser: Sendable {
     ///
     /// Тайминг (длительность, позиция, метка) принадлежит треку. Дифф со сменой трека удаляет
     /// каждый ключ тайминга, которого в нем нет: позиция прошлого трека иначе досталась бы
-    /// новому, и прогресс стоял бы на «−0:00». `receivedAt`: когда строка пришла. Позиция без
+    /// новому, и прогресс стоял бы на «−0:00». Свежий тайминг остается (позиция у начала трека
+    /// или строка с таймингом только что): адаптер шлет в диффе только изменившиеся ключи, и
+    /// тайминг нового трека, пришедший раньше названия или совпавший с прошлым, он больше не
+    /// повторит. `receivedAt`: когда строка пришла. Позиция без
     /// метки отсчитывается от этого момента, а смена `playing` без метки переносит позицию
     /// на него, чтобы пауза не попадала во время игры.
     @discardableResult
@@ -344,6 +390,7 @@ public struct NowPlayingStreamParser: Sendable {
             state = [:]
             current = nil
             timingOwner = nil
+            lastTimingAt = nil
             return nil
         }
 
@@ -371,11 +418,17 @@ public struct NowPlayingStreamParser: Sendable {
             // Тайминг пришел раньше названия: он принадлежит первому названию.
             timingOwner = key
         } else if let key, key != timingOwner {
-            // Трек сменился: тайминг, не пришедший в этом диффе, остался от прошлого трека.
-            for timingKey in Self.timingKeys where payload[timingKey] == nil {
-                state[timingKey] = nil
+            // Трек сменился: тайминг, не пришедший в этом диффе, остался от прошлого трека,
+            // если только он не свежий.
+            if !timingIsFresh(payload: payload, receivedAt: receivedAt) {
+                for timingKey in Self.timingKeys where payload[timingKey] == nil {
+                    state[timingKey] = nil
+                }
             }
             timingOwner = key
+        }
+        if Self.timingKeys.contains(where: { name in payload[name].map { $0 != .null } ?? false }) {
+            lastTimingAt = receivedAt
         }
 
         let stamp = JSONValue.number(receivedAt.timeIntervalSince1970 * 1_000_000)
@@ -421,6 +474,23 @@ public struct NowPlayingStreamParser: Sendable {
         }
         current = info
         return info
+    }
+
+    /// Тайминг в `state` (после слияния строки) при смене трека свежий: сырая позиция на момент
+    /// строки не дальше `freshPosition` от начала, или прошлая строка с ключом тайминга пришла
+    /// не раньше `freshTimingWindow` назад. Позиция без метки считается на момент строки.
+    private func timingIsFresh(payload: [String: JSONValue], receivedAt: Date) -> Bool {
+        if let last = lastTimingAt, receivedAt.timeIntervalSince(last) <= Self.freshTimingWindow {
+            return true
+        }
+        let unstamped = payload["elapsedTimeMicros"]?.double != nil && payload["timestampEpochMicros"] == nil
+        let position = NowPlayingInfo.rawPosition(
+            elapsed: stateElapsed,
+            timestamp: unstamped ? receivedAt : stateTimestamp,
+            isPlaying: state["playing"]?.flag ?? false,
+            at: receivedAt)
+        guard let position, position.isFinite else { return false }
+        return position <= Self.freshPosition
     }
 
     private func currentTrackKey() -> TrackKey? {
