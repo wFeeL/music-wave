@@ -109,6 +109,29 @@ public struct RenderPacing: Sendable {
         framesPerSecond > 0 ? 1 / Double(framesPerSecond) : 1.0 / 60
     }
 
+    /// Доля периода экрана в `timelineInterval`. Расписание `.animation` на macOS 26 идет сеткой
+    /// 120 Гц и на экране 60 Гц: тик через 16.7 мс проходит, через 8.3 мс нет, а ровно период
+    /// экрана из-за дрожания часов пропускал бы кадры. Гипотеза до замера частоты кадров на маке:
+    /// если кадров заметно больше частоты экрана, поставить 1.0.
+    public static let intervalSlack = 0.9
+
+    /// Наименьший интервал `TimelineView(.animation(minimumInterval:))` острова, с: в режиме
+    /// энергосбережения ровно 1/30 (не больше 30 кадров), иначе `intervalSlack` периода экрана
+    /// `refreshPeriod` (без конечного положительного 1/60 с).
+    public static func timelineInterval(refreshPeriod: Double, lowPower: Bool) -> Double {
+        if lowPower { return 1.0 / 30 }
+        let period = refreshPeriod.isFinite && refreshPeriod > 0 ? refreshPeriod : 1.0 / 60
+        return intervalSlack * period
+    }
+
+    /// Период отрисовки для упреждения показа, с: замер `measured` (без конечного замера период
+    /// экрана), но не короче периода экрана `refreshPeriod`. Кадр не показывается чаще экрана,
+    /// лишние пересчеты сцены между кадрами экрана упреждение не укорачивают.
+    public static func effectivePeriod(measured: Double?, refreshPeriod: Double) -> Double {
+        guard let measured, measured.isFinite else { return refreshPeriod }
+        return max(measured, refreshPeriod)
+    }
+
     private struct Sample: Sendable {
         var interval: Double
         /// Шаг шкалы, может быть не конечным, если шкала дала странное значение.

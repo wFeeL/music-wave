@@ -120,14 +120,17 @@ final class NotchWindowController {
 
         newLayout.wingWidth = CGFloat(model.settings.wingWidth)
         newLayout.glowRadius = model.settings.glowRadius
-        if newLayout != layout {
-            log(Self.describe(newLayout))
-            place(newLayout)
-        }
+        // Период до нового острова: вид с новой рамкой сразу берет частоту кадров нового экрана.
+        // Без смены рамки (у экрана сменилась частота) остров пересчитывается по наблюдению
+        // за `AppModel.refreshPeriod`.
         let period = Self.refreshPeriod(screenID: newLayout.screenID)
         if model.refreshPeriod != period {
             model.refreshPeriod = period
             log("экран острова: \(Int((1 / period).rounded())) Гц")
+        }
+        if newLayout != layout {
+            log(Self.describe(newLayout))
+            place(newLayout)
         }
         if isShown {
             panel?.orderFrontRegardless()

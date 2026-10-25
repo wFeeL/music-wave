@@ -165,8 +165,9 @@ extension PreviewPlayer {
 /// Свернутый остров на фоне строки меню, как на снимках (`SnapshotBackdrop`): условный вырез
 /// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн, яркость
 /// свечения и «вздох» из настроек, крыло не шире, чем позволит экран острова (`wingLimit`).
-/// Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`. Пока
-/// предпросмотр не активен (`PreviewPlayer.isActive`), `TimelineView` стоит.
+/// Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с частотой экрана
+/// острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
+/// (`PreviewPlayer.isActive`, у калибровки окно настроек не видно), `TimelineView` стоит.
 ///
 /// С игроком калибровки (`PreviewPlayer.isCalibrating`) часы кадров это часы хоста, как у острова,
 /// период обновления берется у экрана острова (`AppModel.refreshPeriod`), а яркость свечения не
@@ -221,7 +222,12 @@ struct IslandPreview: View {
                         layout: layout, screenSize: size, menuBarHeight: Self.notchSize.height,
                         appearance: colorScheme == .dark ? .dark : .light
                     ) {
-                        TimelineView(.animation(paused: !active)) { context in
+                        TimelineView(.animation(
+                            minimumInterval: RenderPacing.timelineInterval(
+                                refreshPeriod: model.refreshPeriod, lowPower: false
+                            ),
+                            paused: !active
+                        )) { context in
                             let visuals = calibrating
                                 ? player.calibrationVisuals(
                                     now: CACurrentMediaTime(), refreshPeriod: model.refreshPeriod, palette: palette

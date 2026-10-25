@@ -180,6 +180,32 @@ struct RenderPacingTests {
         #expect(RenderPacing.refreshPeriod(framesPerSecond: -5) == 1.0 / 60)
     }
 
+    @Test func timelineIntervalFollowsScreen() {
+        let slack = RenderPacing.intervalSlack
+        #expect(slack == 0.9)
+        #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 60, lowPower: false) - slack / 60) < 1e-9)
+        #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: false) - slack / 120) < 1e-9)
+        // Энергосбережение как в 1.1: ровно 1/30 (IslandView.swift:101), не больше 30 кадров.
+        #expect(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 60, lowPower: true) == 1.0 / 30)
+        #expect(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: true) == 1.0 / 30)
+        // Странный период экрана: как у экрана 60 Гц.
+        #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 0, lowPower: false) - slack / 60) < 1e-9)
+        #expect(abs(RenderPacing.timelineInterval(refreshPeriod: .nan, lowPower: false) - slack / 60) < 1e-9)
+    }
+
+    @Test func effectivePeriodNeverBelowScreen() {
+        #expect(RenderPacing.effectivePeriod(measured: 1.0 / 120, refreshPeriod: 1.0 / 60) == 1.0 / 60)
+        #expect(RenderPacing.effectivePeriod(measured: 1.0 / 40, refreshPeriod: 1.0 / 60) == 1.0 / 40)
+        #expect(RenderPacing.effectivePeriod(measured: nil, refreshPeriod: 1.0 / 60) == 1.0 / 60)
+        // Энергосбережение: замер 30 Гц дает упреждение показа от 33 мс и больше.
+        let lowPower = RenderPacing.effectivePeriod(measured: 1.0 / 30, refreshPeriod: 1.0 / 60)
+        #expect(lowPower == 1.0 / 30)
+        #expect(LatencyCalculator.presentationLead(refreshPeriod: lowPower) >= 0.033)
+        // Остров переехал на экран 120 Гц, замер еще со старого экрана 60 Гц: держится замер.
+        #expect(RenderPacing.effectivePeriod(measured: 1.0 / 60, refreshPeriod: 1.0 / 120) == 1.0 / 60)
+        #expect(RenderPacing.effectivePeriod(measured: .nan, refreshPeriod: 1.0 / 60) == 1.0 / 60)
+    }
+
     @Test func summaryText() throws {
         var pacing = RenderPacing()
         let intervals = [Double](repeating: 0.0167, count: 90)

@@ -17,10 +17,16 @@ import WaveCore
 /// Esc и выход из приложения с открытым листом возвращают все сдвиги, какими они были при
 /// открытии. Сменилось устройство вывода: правка относилась к прежнему, поэтому лист закрывается
 /// как по «Отмене». Метроном не включился: под текстом строка об этом.
+///
+/// Лист привязан к окну настроек и виден, только пока видно окно: окно закрыто другими, ушло на
+/// другой рабочий стол, свернуто или приложение скрыто (`WindowPresence.isVisible`), а лист все
+/// еще открыт. Тогда предпросмотр стоит, метроном продолжает щелкать.
 struct CalibrationView: View {
     static let width: CGFloat = 460
 
     let model: AppModel
+    /// Окно настроек, к которому привязан лист.
+    let presence: WindowPresence
     /// UID устройства вывода при открытии; пустой: устройство неизвестно, правится общий сдвиг.
     let deviceUID: String
     /// Имя устройства для подписи и записи в `SyncOffsets` (без имени там UID).
@@ -34,8 +40,9 @@ struct CalibrationView: View {
     /// Нажато «Готово»: при закрытии значение остается.
     @State private var confirmed = false
 
-    init(model: AppModel, deviceUID: String, deviceName: String) {
+    init(model: AppModel, presence: WindowPresence, deviceUID: String, deviceName: String) {
         self.model = model
+        self.presence = presence
         self.deviceUID = deviceUID
         self.deviceName = deviceName
         let metronome = Metronome()
@@ -59,7 +66,9 @@ struct CalibrationView: View {
                 Label("Не удалось включить метроном", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             }
-            IslandPreview(model: model, player: player, active: true, wingLimit: nil)
+            IslandPreview(
+                model: model, player: player, active: presence.isOpen && presence.isVisible, wingLimit: nil
+            )
             SettingsSliderRow(
                 "Сдвиг синхронизации",
                 subtitle: deviceUID.isEmpty ? nil : "Для устройства: \(deviceName)",

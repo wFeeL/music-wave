@@ -101,13 +101,17 @@ final class AppModel {
     /// Фазы волн. Сдвигаются на каждом кадре отрисовки, поэтому не наблюдаются.
     @ObservationIgnored var motion = WaveMotion()
     /// Период кадра экрана острова, с (`1 / NSScreen.maximumFramesPerSecond`). Ставит
-    /// `NotchWindowController.relayout()`.
-    @ObservationIgnored var refreshPeriod = 1.0 / 60
+    /// `NotchWindowController.relayout()`. Наблюдается: остров и предпросмотр берут из него
+    /// частоту кадров (`RenderPacing.timelineInterval`) и должны пересчитаться, когда остров
+    /// переехал на другой экран или у экрана сменилась частота, даже если рамка та же.
+    var refreshPeriod = 1.0 / 60
     /// Период отрисовки R, с: медиана последних 60 интервалов кадров в пределах 1/120...1/30
-    /// (энергосбережение 30 Гц, ProMotion), до 60 кадров `refreshPeriod`. Медиана считается
-    /// при записи кадра в замер (`recordRender`) раз в 15 кадров, а не на каждом чтении.
+    /// (энергосбережение 30 Гц, ProMotion), но не короче `refreshPeriod`
+    /// (`RenderPacing.effectivePeriod`): кадр не показывается чаще экрана. До 60 кадров
+    /// `refreshPeriod`. Медиана считается при записи кадра в замер (`recordRender`) раз в 15
+    /// кадров, а не на каждом чтении.
     var renderPeriod: Double {
-        measuredRenderPeriod ?? refreshPeriod
+        RenderPacing.effectivePeriod(measured: measuredRenderPeriod, refreshPeriod: refreshPeriod)
     }
     /// Когда последний раз сменился `islandState`, секунды хоста (`CACurrentMediaTime()`).
     @ObservationIgnored private(set) var islandStateChangedAt: Double = 0

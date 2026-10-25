@@ -156,7 +156,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .sheet(item: $calibration) { target in
-            CalibrationView(model: model, deviceUID: target.uid, deviceName: target.name)
+            CalibrationView(model: model, presence: presence, deviceUID: target.uid, deviceName: target.name)
         }
     }
 
