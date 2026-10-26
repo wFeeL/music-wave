@@ -243,8 +243,10 @@ struct IslandPreview: View {
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,
                                     reduceMotion: reduceMotion, softPulse: softPulse
                                 )
+                            // Предпросмотр показывает свернутый остров без баннера.
                             let breath = IslandView.breathing(
-                                look: appearance.look, visuals: visuals, canBreathe: canBreathe, beatPulse: beatPulse
+                                look: appearance.look, visuals: visuals, collapsed: true, canBreathe: canBreathe,
+                                beatPulse: beatPulse
                             )
                             PreviewScene(
                                 visuals: visuals, geometry: geometry, glow: glow, appearance: appearance,

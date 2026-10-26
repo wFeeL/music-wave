@@ -150,20 +150,32 @@ struct IslandWavesView: View {
     /// Какие наборы волн строить на кадре. `wings`: волны свернутого острова нужны (`layers.wing`
     /// и `wingLayer`), `panelLayer`: слой раскрытой панели жив (`layers.panel`), `bannerLayer`:
     /// нужны волны баннера, `collapsedStyle`: раскладка свернутого острова (`.wing` у выреза,
-    /// `.panel` у капсулы, тогда свернутая линия берет набор панели). «Пульс» волн у свернутого
-    /// острова не рисует (ни крыльев, ни линии капсулы, ни волн баннера): набора крыла нет, набор
-    /// панели только у раскрытой панели.
+    /// `.panel` у капсулы, тогда свернутая линия берет набор панели). `collapsed`: есть ли вообще
+    /// слои волн свернутого острова и баннера; единственное место, где это решается. «Пульс» волн
+    /// у свернутого острова не рисует (ни крыльев, ни линии капсулы, ни волн баннера): этих слоев
+    /// нет, набора крыла нет, набор панели только у раскрытой панели.
     static func neededSets(
         look: WaveLook, wings: Bool, panelLayer: Bool, bannerLayer: Bool, collapsedStyle: WaveStyle
-    ) -> (wing: Bool, panel: Bool) {
+    ) -> (wing: Bool, panel: Bool, collapsed: Bool) {
         switch look {
         case .pulse:
-            return (wing: false, panel: panelLayer)
+            return (wing: false, panel: panelLayer, collapsed: false)
         case .waves, .spectrum, .minimal:
             return (
                 wing: (wings && collapsedStyle == .wing) || bannerLayer,
-                panel: panelLayer || (wings && collapsedStyle == .panel)
+                panel: panelLayer || (wings && collapsedStyle == .panel),
+                collapsed: true
             )
+        }
+    }
+
+    /// Высота точки удара у выреза в прямоугольнике крыла `rect`: там, где начинается линия.
+    /// От середины (`rect.midY`, как раньше) или от нижней базовой линии холста
+    /// (`WaveDrawing`: высота минус поле крыла `wingEdgeMargin`).
+    static func accentY(in rect: CGRect, baseline: WaveLookGeometry.Baseline) -> CGFloat {
+        switch baseline {
+        case .center: rect.midY
+        case .bottom: rect.maxY - WaveDrawing.wingEdgeMargin
         }
     }
 
@@ -171,8 +183,7 @@ struct IslandWavesView: View {
         // У капсулы свернутая линия и полоса панели одного стиля: точки общие.
         let collapsedStyle: WaveStyle = geometry.hasNotch ? .wing : .panel
         let wings = layers.wing && wingLayer
-        // В «Пульсе» у свернутого острова волн нет: слоев крыльев, капсулы и баннера нет вовсе.
-        let collapsedLines = appearance.look != .pulse
+        // `sets.collapsed`: слоев крыльев, капсулы и баннера может не быть вовсе («Пульс»).
         let sets = Self.neededSets(
             look: appearance.look, wings: wings, panelLayer: layers.panel, bannerLayer: bannerLayer,
             collapsedStyle: collapsedStyle
@@ -180,18 +191,18 @@ struct IslandWavesView: View {
         // nil: слой сейчас не нужен, холстов в нем нет.
         let panelSet: WaveSet? = sets.panel ? makeSet(.panel) : nil
         let wingSet: WaveSet? = sets.wing ? makeSet(.wing) : nil
-        let collapsedSet: WaveSet? = wings ? (collapsedStyle == .panel ? panelSet : wingSet) : nil
+        let collapsedSet: WaveSet? = wings && sets.collapsed ? (collapsedStyle == .panel ? panelSet : wingSet) : nil
         let shownPanelSet: WaveSet? = layers.panel ? panelSet : nil
         let form = banner && state == .collapsed
         // Форма, которой обрезаются волны крыльев и панели.
         let mask = reduceMotion ? false : form
 
         ZStack(alignment: .topLeading) {
-            if collapsedLines {
+            if sets.collapsed {
                 collapsedWaves(collapsedSet, maskBanner: mask)
                     .opacity(state == .expanded || form ? 0 : 1)
             }
-            if bannerLayer && collapsedLines {
+            if bannerLayer && sets.collapsed {
                 waveLayer(wingSet, rect: geometry.bannerWaves, mirrored: false, maskBanner: reduceMotion || form)
                     .opacity(form ? 1 : 0)
             }
@@ -219,14 +230,19 @@ struct IslandWavesView: View {
     @ViewBuilder
     private func collapsedWaves(_ waves: WaveSet?, maskBanner: Bool) -> some View {
         if geometry.hasNotch {
+            let baseline = appearance.lookGeometry.baseline
             ZStack(alignment: .topLeading) {
                 waveLayer(
                     waves, rect: geometry.leftWing, mirrored: true, maskBanner: maskBanner,
-                    accent: CGPoint(x: geometry.notch.minX - Self.accentSize / 2, y: geometry.leftWing.midY)
+                    accent: CGPoint(
+                        x: geometry.notch.minX - Self.accentSize / 2, y: Self.accentY(in: geometry.leftWing, baseline: baseline)
+                    )
                 )
                 waveLayer(
                     waves, rect: geometry.rightWing, mirrored: false, maskBanner: maskBanner,
-                    accent: CGPoint(x: geometry.notch.maxX + Self.accentSize / 2, y: geometry.rightWing.midY)
+                    accent: CGPoint(
+                        x: geometry.notch.maxX + Self.accentSize / 2, y: Self.accentY(in: geometry.rightWing, baseline: baseline)
+                    )
                 )
             }
         } else {

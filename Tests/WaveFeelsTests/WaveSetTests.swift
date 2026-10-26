@@ -259,8 +259,9 @@ struct WaveSetTests {
         ))
     }
 
-    /// «Пульс» не строит наборы свернутого острова: ни крыльев у выреза, ни линии капсулы, ни волн
-    /// баннера. Набор панели только у раскрытой панели. Остальные стили решают как раньше.
+    /// «Пульс» не строит наборы и слои свернутого острова: ни крыльев у выреза, ни линии капсулы, ни
+    /// волн баннера (`collapsed == false`). Набор панели только у раскрытой панели. Остальные стили
+    /// решают как раньше, слои свернутого острова у них есть.
     @Test func pulseBuildsNoCollapsedSets() {
         for collapsedStyle in Self.styles {
             for panelLayer in [false, true] {
@@ -269,6 +270,7 @@ struct WaveSetTests {
                 )
                 #expect(sets.wing == false)
                 #expect(sets.panel == panelLayer)
+                #expect(sets.collapsed == false)
             }
         }
         for look in [WaveLook.waves, .spectrum, .minimal] {
@@ -288,7 +290,21 @@ struct WaveSetTests {
                 look: look, wings: false, panelLayer: true, bannerLayer: false, collapsedStyle: .wing
             )
             #expect(!expanded.wing && expanded.panel)
+            #expect(notch.collapsed && pill.collapsed && banner.collapsed && expanded.collapsed)
         }
+    }
+
+    /// Точка удара у выреза стоит там, где начинается линия: у середины крыла, у «Спектра» на
+    /// нижней базовой линии холста.
+    @Test func accentSitsOnTheBaseline() {
+        let wing = CGRect(x: 100, y: 40, width: 64, height: 32)
+        #expect(IslandWavesView.accentY(in: wing, baseline: .center) == wing.midY)
+        #expect(IslandWavesView.accentY(in: wing, baseline: .bottom) == wing.maxY - WaveDrawing.wingEdgeMargin)
+        #expect(IslandWavesView.accentY(in: wing, baseline: .bottom) == 66)
+        var spectrum = WaveAppearance.standard
+        spectrum.look = .spectrum
+        #expect(spectrum.lookGeometry.baseline == .bottom)
+        #expect(WaveAppearance.standard.lookGeometry.baseline == .center)
     }
 
     /// «Минимал»: одна тонкая линия общего уровня, без заливки при любой «Заливке» в настройках.
@@ -362,23 +378,35 @@ struct WaveSetTests {
         }
     }
 
-    /// «Пульс» дышит без «Вздоха на битах» и светится громкостью, остальные стили как раньше.
+    /// «Пульс» дышит без «Вздоха на битах» и у свернутого острова светится громкостью; у раскрытой
+    /// панели и баннера свечение доли, как у остальных стилей. Остальные стили как раньше.
     @Test func pulseBreathesWithoutBeatPulse() {
         let visuals = IslandVisuals(
             frame: Self.frame, sampled: Self.frame, motion: WaveMotion(), palette: PaletteExtractor.fallback,
             glow: 0, pulse: 0.5, ambient: 0, time: 1
         )
         let level = Self.frame.level
-        let pulse = IslandView.breathing(look: .pulse, visuals: visuals, canBreathe: true, beatPulse: false)
+        let pulse = IslandView.breathing(
+            look: .pulse, visuals: visuals, collapsed: true, canBreathe: true, beatPulse: false
+        )
         let breath = PulseLook.breath(pulse: 0.5, ambient: 0, level: level)
         #expect(pulse.scale == 1 + CGFloat(PulseLook.breathDepth) * CGFloat(breath))
         #expect(pulse.glow == PulseLook.glow(glow: 0, ambient: 0, level: level))
         #expect(pulse.glow > 0)
-        #expect(IslandView.breathing(look: .pulse, visuals: visuals, canBreathe: false, beatPulse: true).scale == 1)
+        let expanded = IslandView.breathing(
+            look: .pulse, visuals: visuals, collapsed: false, canBreathe: false, beatPulse: true
+        )
+        #expect(expanded.scale == 1)
+        #expect(expanded.glow == visuals.glow)
 
-        let waves = IslandView.breathing(look: .waves, visuals: visuals, canBreathe: true, beatPulse: true)
+        let waves = IslandView.breathing(
+            look: .waves, visuals: visuals, collapsed: true, canBreathe: true, beatPulse: true
+        )
         #expect(waves.scale == 1 + IslandView.breathDepth * 0.5)
         #expect(waves.glow == 0)
-        #expect(IslandView.breathing(look: .waves, visuals: visuals, canBreathe: true, beatPulse: false).scale == 1)
+        let still = IslandView.breathing(
+            look: .waves, visuals: visuals, collapsed: true, canBreathe: true, beatPulse: false
+        )
+        #expect(still.scale == 1)
     }
 }

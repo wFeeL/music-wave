@@ -76,19 +76,23 @@ struct IslandView: View {
     /// «Вздох»: насколько остров увеличивается на полном ударе.
     static let breathDepth: CGFloat = 0.03
 
-    /// Масштаб «вздоха» и свечение под островом на кадре по стилю. `canBreathe`: остров может
-    /// дышать (свернут, без баннера, без «Уменьшения движения»). «Пульс»: остров дышит всегда, когда
-    /// может, без оглядки на «Вздох на битах», масштабом `1 + PulseLook.breathDepth ×
-    /// PulseLook.breath`, свечение `PulseLook.glow` (удары, мягкий пульс и громкость). Остальные
-    /// стили как раньше: «вздох» `1 + breathDepth × pulse` только с `beatPulse`, свечение доли.
+    /// Масштаб «вздоха» и свечение под островом на кадре по стилю. `collapsed`: остров свернут и
+    /// без баннера; `canBreathe`: к тому же без «Уменьшения движения». «Пульс»: остров дышит всегда,
+    /// когда может, без оглядки на «Вздох на битах», масштабом `1 + PulseLook.breathDepth ×
+    /// PulseLook.breath`; у свернутого острова свечение `PulseLook.glow` (удары, мягкий пульс и
+    /// громкость), у раскрытой панели и баннера свечение доли, как у других стилей, без ровного
+    /// свечения от громкости. Остальные стили как раньше: «вздох» `1 + breathDepth × pulse` только с
+    /// `beatPulse`, свечение доли.
     static func breathing(
-        look: WaveLook, visuals: IslandVisuals, canBreathe: Bool, beatPulse: Bool
+        look: WaveLook, visuals: IslandVisuals, collapsed: Bool, canBreathe: Bool, beatPulse: Bool
     ) -> (scale: CGFloat, glow: Float) {
         switch look {
         case .pulse:
             let level = visuals.frame.level
             let breath = PulseLook.breath(pulse: visuals.pulse, ambient: visuals.ambient, level: level)
-            let glow = PulseLook.glow(glow: visuals.glow, ambient: visuals.ambient, level: level)
+            let glow = collapsed
+                ? PulseLook.glow(glow: visuals.glow, ambient: visuals.ambient, level: level)
+                : visuals.glow
             return (canBreathe ? 1 + CGFloat(PulseLook.breathDepth) * CGFloat(breath) : 1, glow)
         case .waves, .spectrum, .minimal:
             return (canBreathe && beatPulse ? 1 + breathDepth * CGFloat(visuals.pulse) : 1, visuals.glow)
@@ -247,10 +251,10 @@ struct IslandView: View {
         // Волны баннера только у свернутого острова: у раскрытой панели они не видны.
         let bannerMoving = now - model.bannerVisibleChangedAt < IslandTransition.overlap
         // У выреза и у капсулы на внешнем экране одинаково.
+        let collapsedQuiet = state == .collapsed && !bannerVisible
         let breath = Self.breathing(
-            look: appearance.look, visuals: visuals,
-            canBreathe: state == .collapsed && !bannerVisible && !reduceMotion,
-            beatPulse: model.settings.beatPulse
+            look: appearance.look, visuals: visuals, collapsed: collapsedQuiet,
+            canBreathe: collapsedQuiet && !reduceMotion, beatPulse: model.settings.beatPulse
         )
         let scale = breath.scale
         let anchor = geometry.anchor
