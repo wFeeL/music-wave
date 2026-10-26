@@ -260,7 +260,7 @@ struct BeatGlowTests {
     }
 
     /// Без энергии и без уверенности пульса нет; энергия одна дает ровный слой по
-    /// `0.12 × smoothstep(1.0, 1.6, energy)` на любой фазе.
+    /// `0.12 × smoothstep(1.2, 1.6, energy)` на любой фазе.
     @Test func ambientFadesWithEnergyAndConfidence() {
         let quiet = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0)
         var t = 0.0
@@ -272,10 +272,14 @@ struct BeatGlowTests {
         let level = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
         #expect(abs(BeatGlow.ambient(at: 1.5, info: level) - 0.12) < 1e-6)
         #expect(abs(BeatGlow.ambient(at: 1.75, info: level) - 0.12) < 1e-6)
-        let half = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.3)
+        let half = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.4)
         #expect(abs(BeatGlow.ambient(at: 1.6, info: half) - 0.06) < 1e-6)
         let flat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.0)
         #expect(BeatGlow.ambient(at: 1.5, info: flat) == 0)
+        // Нижний край 1.2: ровный шум с отношением до 1.2 слоя не дает.
+        #expect(BeatGlow.ambientEnergyLow == 1.2)
+        let swell = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.2)
+        #expect(BeatGlow.ambient(at: 1.5, info: swell) == 0)
         // Уверенность вдвое меньше: горб вдвое ниже.
         let unsure = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0.5, energy: 0)
         #expect(abs(BeatGlow.ambient(at: 1.5, info: unsure) - 0.04) < 1e-6)
@@ -323,7 +327,7 @@ struct BeatGlowTests {
         let info = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
         var frame = WaveFrame.silent
         #expect(BeatGlow.ambient(at: 1.75, info: info, frame: frame) == 0)
-        frame.kickEnergy = 1.3
+        frame.kickEnergy = 1.4
         #expect(abs(BeatGlow.ambient(at: 1.75, info: info, frame: frame) - 0.06) < 1e-6)
         #expect(BeatGlow.ambient(at: 1.75, info: nil, frame: frame) == 0)
         let beat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 1, energy: 0)

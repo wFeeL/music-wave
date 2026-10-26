@@ -133,8 +133,10 @@ public struct BeatGlow: Sendable {
     public static let ambientEnergyScale: Float = 0.12
     public static let ambientBeatScale: Float = 0.08
     public static let ambientCeiling: Float = 0.18
-    /// Энергия бочки от `ambientEnergyLow` (ровный уровень, слоя нет) до `ambientEnergyHigh` (полный слой).
-    public static let ambientEnergyLow: Float = 1.0
+    /// Энергия бочки от `ambientEnergyLow` (слоя нет) до `ambientEnergyHigh` (полный слой). Нижний край
+    /// 1.2, а не 1.0: на ровном шуме без ударов отношение колеблется около 1 (95-й процентиль 1.24), и
+    /// от 1.0 случайные всплески давали мерцание мимо долей на каждом пятом шаге.
+    public static let ambientEnergyLow: Float = 1.2
     public static let ambientEnergyHigh: Float = 1.6
     /// Допуск округления на границе атаки.
     private static let edgeTolerance = 1e-9
@@ -207,7 +209,7 @@ public struct BeatGlow: Sendable {
 
     /// Формула мягкого пульса на момент `time` с энергией из `info` (проверки формулы; рендер и
     /// офлайн-цепочка зовут `ambient(at:info:frame:)`, энергия расписания трекера всегда 0):
-    /// `0.12 × smoothstep(1.0, 1.6, energy) + 0.08 × confidence ×
+    /// `0.12 × smoothstep(1.2, 1.6, energy) + 0.08 × confidence ×
     /// ((1 + cos 2πφ) / 2)^6`, `φ = (time − anchor) / period`, не выше `ambientCeiling` (0.18).
     /// Отдельный канал: в `value` не входит, рендер рисует `max(свечение, пульс)`. Горб узкий (вдвое
     /// ниже пика примерно через 0.1 периода от доли), без опережения: момент показа уже учтен. Без

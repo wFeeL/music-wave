@@ -99,8 +99,8 @@ struct BeatTrackerTests {
     /// дают пульс в такт, который в брейке без бочки (`Drums.breakdown`, 10-18 с) гаснет вместе с
     /// энергией и воротом, а после возврата бочки возвращается. То же, когда под всей сценой лежит
     /// ровная подложка в полосе бочки (коричневый шум -24 dBFS и бас 55 Гц): бочка над ней дает
-    /// ясный горб, а в брейке пульс почти гаснет (замер: пик 0.025, от 0.01 4 % шагов; до брейка пик
-    /// 0.17). После `reset()` пульса нет, энергия в расписании всегда 0.
+    /// ясный горб (замер: пик у бочек 6-10 с в медиане 0.13, не ниже 0.08), а в брейке пульс почти
+    /// гаснет (пик 0.025, от 0.01 4 % шагов). После `reset()` пульса нет, энергия в расписании всегда 0.
     @Test func ambientFollowsKicksAndFadesInBreakdown() async {
         let (bare, bed) = await runOffCooperativePool {
             let scene = SharedScenes.breakdown
@@ -125,20 +125,26 @@ struct BeatTrackerTests {
         let bedBreak = Self.ambientStats(values, 12..<18)
         #expect(bedBefore.peak > 0.1, "peak over the bed before the break \(bedBefore.peak)")
         #expect(bedBefore.low < bedBefore.peak / 2, "low \(bedBefore.low) peak \(bedBefore.peak)")
+        let kickPeaks = SharedScenes.breakdown.kicks.filter { (6..<10).contains($0) }.map { kick in
+            values.filter { $0.time >= kick - 0.03 && $0.time <= kick + 0.1 }.map(\.value).max() ?? 0
+        }.sorted()
+        #expect(kickPeaks.count >= 7)
+        #expect(kickPeaks[kickPeaks.count / 2] > 0.1 && kickPeaks[0] > 0.05, "kick peaks over the bed \(kickPeaks)")
         #expect(bedBreak.peak < 0.05 && bedBreak.lit < 0.1, "break over the bed: peak \(bedBreak.peak), lit \(bedBreak.lit)")
         #expect(Self.ambientStats(values, 20..<24).peak > 0.1, "peak over the bed after the break")
     }
 
     /// Ровный неровный звук без ударов (коричневый шум -20 dBFS, основная энергия в полосе бочки): в
-    /// среднем энергия около 1, и пульс от 0.01 только на случайных всплесках шума (замер: 18 % шагов,
-    /// пик 0.12), а не постоянным слоем. Против среднего сырого уровня было около 1.4 и слой 0.086.
+    /// среднем энергия около 1 (95-й процентиль 1.24), и с нижним краем 1.2 пульс от 0.01 только на
+    /// редких всплесках шума (замер: 4.0 % шагов, при крае 1.0 было 18 %), а не постоянным слоем.
+    /// Против среднего сырого уровня было около 1.4 и слой 0.086.
     @Test func steadyNoiseKeepsThePulseLow() async {
         let hops = await runOffCooperativePool {
             StreamAnalyzer(sampleRate: 48_000).processSignal(Drums.brownNoise(levelDB: -20, count: 48_000 * 12, seed: 5))
         }
         let values = Self.ambientTrace(hops).values
         let stats = Self.ambientStats(values, 3..<12)
-        #expect(stats.lit < 0.25, "share of steps with pulse >= 0.01: \(stats.lit)")
+        #expect(stats.lit < 0.08, "share of steps with pulse >= 0.01: \(stats.lit)")
         let sorted = values.filter { (3..<12).contains($0.time) }.map(\.value).sorted()
         #expect(sorted[sorted.count / 2] == 0, "median pulse \(sorted[sorted.count / 2])")
     }
