@@ -547,9 +547,11 @@ public enum WavePaint {
     ///
     /// Цвет идет по частотам. Без «Цвета по частотам» цвета палитры (после `distinct`) стоят
     /// кольцом c0 → c1 → c2 → c0, точка на расстоянии u от выреза (в панели от середины) берет
-    /// место кольца `0.67 × u − сдвиг`, где сдвиг это `flowSpeed × time` плюс фаза переливания
-    /// `options.flowPhase`: у выреза цвет баса, к краю цвета идут по кольцу и со временем плывут
-    /// наружу, все три цвета в деле. С «Цветом по частотам» сдвига нет и кольцо не замыкается:
+    /// место кольца `0.67 × u − flowSpeed × time + options.flowPhase`: у выреза цвет баса, к краю
+    /// цвета идут по кольцу и со временем плывут наружу, все три цвета в деле. Фаза переливания
+    /// поворачивает кольцо в другую сторону: цвет у выреза идет c0, c1, c2, как у линии баса
+    /// «Волн» (`PaletteFlow.apply`). Поэтому на самой малой скорости переливания (период 20 с,
+    /// те же 0.05 оборота в секунду) цвета стоят, на большей идут внутрь. С «Цветом по частотам» сдвига нет и кольцо не замыкается:
     /// цвет баса у выреза, середины в середине, верха у края (палитра после переливания, как у
     /// `sectionStops`). Внутри каждого отрезка между двумя цветами смешение в OKLab по smoothstep
     /// на весь отрезок, без резких краев.
@@ -570,8 +572,10 @@ public enum WavePaint {
         let colors = options.colorByBand ? flowingColors(source, phase: options.flowPhase) : distinct(source)
         let paint = LevelPaint(level: level, options: options)
         let opacity = paint.opacity * layerOpacity[WaveLayer.mid.rawValue]
+        // Переливание поворачивает кольцо навстречу течению: цвет у выреза идет c0, c1, c2, как
+        // цвет линии баса у «Волн» (`PaletteFlow.apply`) и свечение под островом.
         let flow = options.flowPhase.isFinite ? options.flowPhase : 0
-        let shift = flowShift(time: time) + flow
+        let shift = flowShift(time: time) - flow
 
         for (index, raw) in locations.enumerated() {
             let point = LinePoint(raw, profile: profile)

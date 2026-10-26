@@ -430,8 +430,8 @@ struct SpectrumStopsTests {
         }
     }
 
-    /// Кольцо сдвигается на 0.05 в секунду плюс фаза переливания: через 20 с цвета те же, фаза
-    /// 0.25 равна 5 с времени.
+    /// Кольцо сдвигается на 0.05 в секунду, фаза переливания поворачивает его навстречу: через
+    /// 20 с цвета те же, фаза 0.25 возвращает кольцо на 5 с времени назад (то же, что 15 с вперед).
     @Test func ringShiftPeriod() {
         let palette = WavePreset.rainbow.colors
         for profile in WaveProfile.allCases {
@@ -440,7 +440,7 @@ struct SpectrumStopsTests {
             let flowed = Self.stops(
                 palette, heights: Self.flat(0.4), time: 2, profile: profile, options: WavePaint.Options(flowPhase: 0.25)
             )
-            let shifted = Self.stops(palette, heights: Self.flat(0.4), time: 7, profile: profile)
+            let shifted = Self.stops(palette, heights: Self.flat(0.4), time: 17, profile: profile)
             for index in start.indices {
                 #expect(start[index].color.oklab.distance(to: later[index].color.oklab) < 1e-3)
                 #expect(flowed[index].color.oklab.distance(to: shifted[index].color.oklab) < 1e-3)
@@ -471,6 +471,32 @@ struct SpectrumStopsTests {
         )
         let moved = later.first { abs($0.location - 0.0625) < 1e-12 }!
         #expect(Self.hueGap(Self.hue(moved.color.oklab), hue0) < 3, "\(Self.hue(moved.color.oklab)) vs \(hue0)")
+    }
+
+    /// «Скорость переливания» ведет цвет у выреза (в панели в середине) по палитре в ту же
+    /// сторону, что цвет линии баса у «Волн» (`PaletteFlow.apply`): c0, c1, c2. Фаза 1/3 и 2/3
+    /// дает ровно второй и третий цвет, малая фаза сдвигает цвет от первого ко второму.
+    @Test func flowTurnsColorsLikeWaveLayers() {
+        let palette = WavePreset.rainbow.colors
+        let ring = WavePaint.distinct(palette)
+        for profile in WaveProfile.allCases {
+            let start = profile == .wing ? 0.0 : 0.5
+            func notchHue(_ phase: Double) -> Float {
+                let result = Self.stops(
+                    palette, heights: Self.flat(0.3), time: 0, profile: profile,
+                    options: WavePaint.Options(flowPhase: phase)
+                )
+                return Self.hue(result.first { $0.location == start }!.color.oklab)
+            }
+            for (phase, index) in [(0.0, 0), (1.0 / 3, 1), (2.0 / 3, 2)] {
+                let bass = PaletteFlow.apply(ring, phase: phase)[0]
+                #expect(Self.hueGap(Self.hue(bass), Self.hue(ring[index])) < 1)
+                #expect(Self.hueGap(notchHue(phase), Self.hue(ring[index])) < 2, "\(profile) \(phase)")
+            }
+            let gapBefore = Self.hueGap(notchHue(0), Self.hue(ring[1]))
+            let gapAfter = Self.hueGap(notchHue(0.1), Self.hue(ring[1]))
+            #expect(gapAfter < gapBefore - 5, "\(profile): \(gapAfter) vs \(gapBefore)")
+        }
     }
 
     /// «Цвет по частотам»: цвет баса у выреза, середины в середине, верха у края, от времени не
