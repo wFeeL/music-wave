@@ -81,8 +81,17 @@ struct BeatSyncTests {
         }
         let period = 60 / bpm
         let beats = results[0].audible(scene.beats)
+        // Быстрее `everyOtherPeriod` (160 BPM) вспыхивает каждая вторая доля: F из точности против всех
+        // долей и полноты против долей одной четности (лучшей из двух), порог тот же. Вспышки должны
+        // быть в долях и накрывать одну четность без перескоков; до выбора четности (история гребенки
+        // 2T) светятся все доли, и они в точность засчитываются. На остальных темпах это прежнее F.
+        let references = period < BeatTracker.Parameters().everyOtherPeriod
+            ? [0, 1].map { parity in beats.enumerated().filter { $0.offset % 2 == parity }.map(\.element) }
+            : [beats]
         for (k, result) in results.enumerated() {
-            let f = result.fMeasure(reference: beats, tolerance: 0.05, from: Self.from)
+            let precision = result.precisionAndRecall(reference: beats, tolerance: 0.05, from: Self.from).precision
+            let recall = references.map { result.precisionAndRecall(reference: $0, tolerance: 0.05, from: Self.from).recall }.max() ?? 0
+            let f = precision + recall > 0 ? 2 * precision * recall / (precision + recall) : 0
             #expect(f >= 0.9, "phase \(k): \(Self.describe(result, f: f, offsets: nil))")
         }
         // Анализ от фазы рендера не зависит: захват, темп и предсказания одни на все фазы.

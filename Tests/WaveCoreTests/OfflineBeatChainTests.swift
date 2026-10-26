@@ -110,7 +110,12 @@ struct OfflineBeatChainTests {
     /// После B4 темная серия 6 долей: на замедлении сетка с захватом уходит раньше долей (с -35 до
     /// -70 мс к 24 с, период оценки отстает от темпа), после смены на удвоенный темп вес держит
     /// предсказанные доли вместо поздних онсетов бочки, и они ложатся чуть дальше окна ±70 мс.
-    @Test(.disabled("needs the octave display rule (B8): exact double at 24.3 s; after B4 the early ramp grid leaves 6 dark beats"))
+    /// После B8 (вспышки через долю на быстрой сетке) удвоенная сетка с 24.3 с вспыхивает на бочках
+    /// (-16...-37 мс) вместо «и» (+380 мс), темная серия 1 доля (без правила 6), точность вспышек с
+    /// захватом 0.93 (без правила 0.81). Не проходят две проверки: точность ниже 0.95 из-за ранней
+    /// сетки на замедлении (-70...-76 мс на 20-23 с, до смены темпа) и темп публикаций: трекер по
+    /// замыслу остается на удвоенном темпе, через долю идет только показ.
+    @Test(.disabled("B8 fixed the doubled grid (dark 1, flashes on the kicks); the early ramp grid (B4) keeps locked precision at 0.93, and the tempo check asserts the tracker tempo, which stays doubled by design"))
     func ritardandoKeepsGlow() async throws {
         let (scene, result) = await runOffCooperativePool {
             let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)

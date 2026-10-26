@@ -1168,6 +1168,114 @@ struct BeatTrackerTests {
         #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 60 / bpm)) < 0.02, "next beat \(next)")
     }
 
+    /// Быстрая сетка (160 BPM), бочка через долю, широкополосный онсет на каждой (на долях с бочкой
+    /// сильнее, как в музыке): предсказанные доли вспыхивают через одну, на долях с бочкой, а мягкий
+    /// пульс стоит на каждой доле (период сетки). Четность решает широкополосный акцент: с акцентом на
+    /// долях без бочки вспыхивают они. Тот же рисунок на 100 BPM (период выше `everyOtherPeriod`) и с
+    /// выключенным правилом светит каждую долю.
+    @Test(arguments: [
+        (160.0, 0.42, true, true), (160.0, 0.42, false, true), (100.0, 0.42, true, false), (160.0, 0.0, true, false),
+    ])
+    func fastTempoFlashesEveryOtherBeat(bpm: Double, everyOtherPeriod: Double, accentOnKicks: Bool, halves: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: .init(everyOtherPeriod: everyOtherPeriod))
+        var hops = SyntheticBeats(bpm: bpm)
+        hops.kickEvery = 2
+        hops.beatODF = accentOnKicks ? [60, 50] : [50, 60]
+        hops.feed(&tracker, until: 8)
+        try #require(tracker.locked)
+        let period = try #require(tracker.period)
+        try #require(abs(period * bpm / 60 - 1) < 0.02, "locked at \(60 / period) BPM")
+        // Доли сцены на 0.25 + k · 60 / bpm, бочка на четных k. Яркость доли берется, когда время
+        // потока до нее дошло (дальше она не меняется).
+        let scenePeriod = 60 / bpm
+        let amplitudes = Self.predictedAmplitudes(&tracker, &hops, from: 9, until: 14, scenePeriod: scenePeriod) { tracker in
+            guard let ambient = tracker.schedule.ambient else { return }
+            #expect(abs(ambient.period - scenePeriod) / scenePeriod < 0.05, "pulse period \(ambient.period)")
+            #expect(abs(BeatTracker.circularDifference(ambient.anchor - 0.25, period: scenePeriod)) < 0.05 * scenePeriod)
+            #expect(ambient.confidence > 0.5, "pulse height \(ambient.confidence)")
+        }
+        try #require(Double(amplitudes.count) >= 4.5 / scenePeriod, "\(amplitudes.count) beats checked")
+        let shown = accentOnKicks ? 0 : 1
+        for (beat, amplitude) in amplitudes.sorted(by: { $0.key < $1.key }) {
+            let flashes = amplitude > OfflineBeatChain.eventRise
+            #expect(flashes == (!halves || beat % 2 == shown), "beat \(beat): amplitude \(amplitude)")
+        }
+    }
+
+    /// Бочка раз в 2T и тишина в полосе бочки между ними (160 BPM): удержание ворота тянется на период
+    /// показа, и показанные доли с бочкой вспыхивают. С удержанием на T ворот к доле с бочкой уже
+    /// закрыт (28 дБ спада) и сетка через долю темнеет; без правила вспыхивают только доли без бочки,
+    /// куда ворот еще открыт (так было в `ritardandoKeepsGlow` после смены на удвоенный темп).
+    @Test(arguments: [(0.42, true), (0.0, false)])
+    func everyOtherKeepsTheGateOpenForShownBeats(everyOtherPeriod: Double, kickBeatsFlash: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: .init(everyOtherPeriod: everyOtherPeriod))
+        var hops = SyntheticBeats(bpm: 160)
+        hops.kickEvery = 2
+        hops.beatODF = [60, 50]
+        hops.quietBetweenKicks = true
+        hops.feed(&tracker, until: 8)
+        try #require(tracker.locked)
+        let amplitudes = Self.predictedAmplitudes(&tracker, &hops, from: 9, until: 14, scenePeriod: 60.0 / 160)
+        let kickBeats = amplitudes.filter { $0.key % 2 == 0 }.map(\.value)
+        try #require(kickBeats.count >= 5)
+        let flashing = kickBeats.filter { $0 > OfflineBeatChain.eventRise }.count
+        // Без правила яркость доли фиксируется по вороту до звука бочки; доля, которую ФАПЧ поставила чуть
+        // позже шага бочки, еще может вспыхнуть.
+        #expect(kickBeatsFlash ? flashing == kickBeats.count : flashing <= 1, "kick beats \(kickBeats)")
+    }
+
+    /// Яркость предсказанных долей сцены (номер доли k на 0.25 + k · период сцены) с `from` до `until`,
+    /// какой она была, когда время потока до доли дошло.
+    private static func predictedAmplitudes(
+        _ tracker: inout BeatTracker, _ hops: inout SyntheticBeats, from: Double, until end: Double, scenePeriod: Double,
+        each: (BeatTracker) -> Void = { _ in }
+    ) -> [Int: Float] {
+        var amplitudes: [Int: Float] = [:]
+        hops.feed(&tracker, until: end) { tracker in
+            for event in tracker.schedule.events where event.predicted && event.time <= tracker.now && event.time >= from {
+                amplitudes[Int(((event.time - 0.25) / scenePeriod).rounded())] = event.amplitude
+            }
+            each(tracker)
+        }
+        return amplitudes
+    }
+
+    /// Четность показа через долю держится, пока гребенка другой четности не выше больше чем на
+    /// `everyOtherHold` (по умолчанию в 1.5 раза): на 160 BPM с акцентом на четных долях вспыхивают
+    /// четные; акцент на нечетных в 1.3 раза сильнее показ не перебрасывает (без удержания
+    /// перебрасывает), в 2.6 раза перебрасывает.
+    @Test(arguments: [(nil, false), (0.0, true)] as [(Double?, Bool)])
+    func everyOtherParityHoldsUntilClearlyBeaten(hold: Double?, flipsOnWeakAccent: Bool) throws {
+        let parameters = hold.map { BeatTracker.Parameters(everyOtherHold: $0) } ?? BeatTracker.Parameters()
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 160)
+        let scenePeriod = 60.0 / 160
+        // Какая четность долей сцены вспыхивала за последние 1.5 с отрезка: 0, 1 или nil (обе или ни
+        // одной).
+        func shownParity(until end: Double) throws -> Int? {
+            var bright: Set<Int> = []
+            var dark: Set<Int> = []
+            hops.feed(&tracker, until: end) { tracker in
+                for event in tracker.schedule.events where event.predicted && event.time <= tracker.now && event.time >= end - 1.5 {
+                    let beat = Int(((event.time - 0.25) / scenePeriod).rounded())
+                    if event.amplitude > OfflineBeatChain.eventRise { bright.insert(beat % 2) } else { dark.insert(beat % 2) }
+                }
+            }
+            try #require(tracker.locked, "lost the lock by \(end) s")
+            let period = try #require(tracker.period)
+            try #require(abs(period / scenePeriod - 1) < 0.02, "tempo \(60 / period) BPM at \(end) s")
+            guard bright.count == 1, let parity = bright.first, !dark.contains(parity) else { return nil }
+            return parity
+        }
+        hops.beatODF = [60, 50]
+        #expect(try shownParity(until: 10) == 0)
+        hops.beatODF = [50, 65]
+        #expect(try shownParity(until: 17) == (flipsOnWeakAccent ? 1 : 0))
+        // Сильный акцент берет показ раньше, чем оценка темпа уходит на половинный темп.
+        hops.beatODF = [50, 130]
+        #expect(try shownParity(until: 20.5) == 1)
+    }
+
     /// Близкая смена темпа, пока ФАПЧ отстала от долей (журнал 2: доли на 0.18 периода позже ФАПЧ,
     /// потом смена 77.9 -> 73.5 BPM): уверенность и захват остаются, фаза переходит к гребенке. Те же
     /// доли на «и» (полпериода) это другая сетка, захват сбрасывается. Если гребенка у старой фазы не
@@ -1434,6 +1542,14 @@ struct SyntheticBeats {
     /// Широкополосная функция на «и» (без онсета): ее видит только гребенка фазы. 0 выключает.
     var offbeatODF: Float = 0
     var nextOffbeatTime = 0.0
+    /// Онсет и функция бочки только на каждой `kickEvery`-й доле (с первой), широкополосный онсет на
+    /// каждой.
+    var kickEvery = 1
+    /// Широкополосная функция на долях по кругу (доля k берет `beatODF[k % count]`).
+    var beatODF: [Float] = [50]
+    /// Уровень бочки громкий только на шагах с онсетом бочки (иначе на любой доле).
+    var quietBetweenKicks = false
+    private var beatIndex = 0
 
     init(bpm: Double) {
         self.bpm = bpm
@@ -1443,11 +1559,18 @@ struct SyntheticBeats {
         while endTime + hop <= end {
             endTime += hop
             var onset: OnsetEvent?
+            var kick: OnsetEvent?
+            var odf: Float = 50
             if nextBeatTime <= endTime {
                 onset = OnsetEvent(time: nextBeatTime, strength: 1)
+                if beatIndex % max(kickEvery, 1) == 0 { kick = onset }
+                if !beatODF.isEmpty { odf = beatODF[beatIndex % beatODF.count] }
+                beatIndex += 1
                 nextBeatTime += 60 / bpm
             }
-            var hop = Self.hop(endTime: endTime, broadband: onset, kick: onset)
+            var hop = Self.hop(endTime: endTime, broadband: onset, kick: kick)
+            if onset != nil { hop.broadbandODF = odf }
+            if quietBetweenKicks, kick == nil { hop.kickLevelDB = -40 }
             if offbeatODF > 0, nextOffbeatTime <= endTime {
                 hop.broadbandODF = max(hop.broadbandODF, offbeatODF)
                 nextOffbeatTime += 60 / bpm
