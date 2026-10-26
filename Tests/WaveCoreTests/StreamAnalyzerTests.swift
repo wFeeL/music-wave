@@ -36,6 +36,33 @@ struct StreamAnalyzerTests {
         #expect(frame.layers[WaveLayer.high.rawValue] > frame.layers[WaveLayer.bass.rawValue] + 0.3)
     }
 
+    /// Полоса после сигнала 0.5 с и нулей: берется первый шаг, окно которого целиком из нулей,
+    /// через `hold + fall` и еще один шаг после него.
+    private func bandAfterSignal(frequency: Double) throws -> (peak: Float, later: Float) {
+        let rate = Self.rate
+        let band = try #require(BandMapper(fftSize: AnalysisConfig(sampleRate: rate).fftSize, sampleRate: rate).band(containing: frequency))
+        let signalEnd = 24_000
+        let tone = TestSignals.sine(frequency: frequency, amplitude: 0.5, sampleRate: rate, count: signalEnd)
+        let analyzer = StreamAnalyzer(sampleRate: rate)
+        let hops = analyzer.processSignal(tone + TestSignals.silence(count: 48_000))
+        let config = analyzer.config
+        let firstZero = try #require(hops.first { Int($0.endTime * rate + 0.5) >= signalEnd + config.fftSize })
+        let moment = firstZero.endTime + GravityRelease.hold + GravityRelease.fall + config.hopDuration
+        let later = try #require(hops.first { $0.endTime >= moment - 1e-9 })
+        let peak = hops.filter { $0.endTime <= 0.5 }.map { $0.frame.bands[band] }.max() ?? 0
+        return (peak, later.frame.bands[band])
+    }
+
+    @Test func bassBandsFallWithGravity() throws {
+        let bass = try bandAfterSignal(frequency: 60)
+        #expect(BandMapper(fftSize: 1024, sampleRate: Self.rate).bands(for: .bass).contains(1))
+        #expect(bass.peak > 0.5)
+        #expect(bass.later == 0)
+        let mid = try bandAfterSignal(frequency: 1000)
+        #expect(mid.peak > 0.5)
+        #expect(mid.later > 0)
+    }
+
     @Test func silenceDecaysToFlat() throws {
         let tone = TestSignals.sine(frequency: 440, amplitude: 0.5, sampleRate: Self.rate, count: 48_000)
         let hops = StreamAnalyzer(sampleRate: Self.rate).processSignal(tone + TestSignals.silence(count: 48_000))
@@ -189,7 +216,7 @@ struct StreamAnalyzerTests {
     }
 
     /// Слои волн по шагам, как в `processHop` (нормировка, сглаживание, половина пика и половина
-    /// среднего), но с заданным наклоном. Времена это центры окон.
+    /// среднего, бас с гравитацией), но с заданным наклоном. Времена это центры окон.
     private static func layerSeries(_ samples: [Float], tiltDB: [Float]) -> (times: [Double], layers: [[Float]]) {
         let config = AnalysisConfig(sampleRate: rate)
         let mapper = BandMapper(fftSize: config.fftSize, sampleRate: rate)
@@ -200,6 +227,7 @@ struct StreamAnalyzerTests {
             repeating: AttackRelease(attack: StreamAnalyzer.attack, release: StreamAnalyzer.release),
             count: BandMapper.bandCount
         )
+        var bassSmoothers = [GravityRelease](repeating: GravityRelease(), count: ranges[WaveLayer.bass.rawValue].count)
         var times: [Double] = []
         var layers: [[Float]] = []
         var end = config.fftSize
@@ -208,7 +236,12 @@ struct StreamAnalyzerTests {
             let normalized = processor.normalize(levels, dt: config.hopDuration, settings: LevelSettings())
             var bands = [Float](repeating: 0, count: BandMapper.bandCount)
             for band in bands.indices {
-                bands[band] = smoothers[band].step(toward: normalized[band], dt: config.hopDuration)
+                if ranges[WaveLayer.bass.rawValue].contains(band) {
+                    bands[band] = bassSmoothers[band - ranges[WaveLayer.bass.rawValue].lowerBound]
+                        .step(toward: normalized[band], dt: config.hopDuration)
+                } else {
+                    bands[band] = smoothers[band].step(toward: normalized[band], dt: config.hopDuration)
+                }
             }
             layers.append(ranges.map { range in
                 var peak: Float = 0

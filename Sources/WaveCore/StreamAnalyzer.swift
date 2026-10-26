@@ -117,6 +117,9 @@ public final class StreamAnalyzer {
     private var layerRanges: [Range<Int>]
     private var levelProcessor: LevelProcessor
     private var smoothers: [AttackRelease]
+    /// Гравитация басовых полос `layerRanges[WaveLayer.bass.rawValue]`, индекс это номер полосы
+    /// минус начало диапазона.
+    private var bassSmoothers: [GravityRelease]
     private var envelope = BeatEnvelope(decay: StreamAnalyzer.envelopeDecay)
     private var kickBins: Range<Int>
     private var kickFlux: SuperFlux
@@ -138,6 +141,7 @@ public final class StreamAnalyzer {
         layerRanges = Self.makeLayerRanges(for: mapper)
         levelProcessor = Self.makeLevelProcessor(for: mapper)
         smoothers = Self.makeSmoothers()
+        bassSmoothers = Self.makeBassSmoothers(layerRanges)
         kickBins = Self.makeKickBins(for: config)
         kickFlux = Self.makeKickFlux(bins: kickBins)
         broadbandFlux = Self.makeBroadbandFlux(for: mapper)
@@ -157,6 +161,7 @@ public final class StreamAnalyzer {
         fft = RealFFT(size: config.fftSize)
         self.mapper = mapper
         layerRanges = Self.makeLayerRanges(for: mapper)
+        bassSmoothers = Self.makeBassSmoothers(layerRanges)
         kickBins = Self.makeKickBins(for: config)
         kickFlux = Self.makeKickFlux(bins: kickBins)
         broadbandFlux = Self.makeBroadbandFlux(for: mapper)
@@ -172,6 +177,9 @@ public final class StreamAnalyzer {
         levelProcessor = Self.makeLevelProcessor(for: mapper)
         for index in smoothers.indices {
             smoothers[index].reset()
+        }
+        for index in bassSmoothers.indices {
+            bassSmoothers[index].reset()
         }
         envelope = BeatEnvelope(decay: Self.envelopeDecay)
         kickFlux.reset()
@@ -255,8 +263,13 @@ public final class StreamAnalyzer {
             }
         }
         var bands = [Float](repeating: 0, count: BandMapper.bandCount)
+        let bassRange = layerRanges[WaveLayer.bass.rawValue]
         for band in 0..<BandMapper.bandCount {
-            bands[band] = smoothers[band].step(toward: normalized[band], dt: dt)
+            if bassRange.contains(band) {
+                bands[band] = bassSmoothers[band - bassRange.lowerBound].step(toward: normalized[band], dt: dt)
+            } else {
+                bands[band] = smoothers[band].step(toward: normalized[band], dt: dt)
+            }
         }
         var layers = [Float](repeating: 0, count: layerRanges.count)
         for layer in 0..<layerRanges.count {
@@ -309,6 +322,10 @@ public final class StreamAnalyzer {
 
     private static func makeSmoothers() -> [AttackRelease] {
         [AttackRelease](repeating: AttackRelease(attack: attack, release: release), count: BandMapper.bandCount)
+    }
+
+    private static func makeBassSmoothers(_ layerRanges: [Range<Int>]) -> [GravityRelease] {
+        [GravityRelease](repeating: GravityRelease(), count: layerRanges[WaveLayer.bass.rawValue].count)
     }
 
     /// Бины с центром до 150 Гц, бин 0 не входит (1-3 при 1024 и 48 кГц).
