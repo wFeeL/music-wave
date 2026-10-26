@@ -240,7 +240,7 @@ extension BeatTracker.Parameters {
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "weightLow",
         "weightHigh", "weightRiseBeats", "weightFallBeats", "weightHits", "kickConfirmFloor", "kickConfirmLow",
         "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceDim", "coastGate",
-        "gateFallPerBeatDB", "gateFallNoTempoDB",
+        "gateFallPerBeatDB", "gateFallNoTempoDB", "plpShadow",
     ]
 
     /// Задает поле по имени. `false`, если имени нет или значение не подходит (целые поля берут только
@@ -272,6 +272,7 @@ extension BeatTracker.Parameters {
         case "raceDim": raceDim = Float(value)
         case "gateFallPerBeatDB": gateFallPerBeatDB = Float(value)
         case "gateFallNoTempoDB": gateFallNoTempoDB = Float(value)
+        case "plpShadow": plpShadow = value
         case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes", "weightHits":
             guard value == value.rounded(), abs(value) < 1e9 else { return false }
             switch name {

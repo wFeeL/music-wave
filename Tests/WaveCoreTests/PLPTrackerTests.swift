@@ -198,7 +198,7 @@ struct PLPTrackerTests {
     }
 
     /// Розовый шум без долей: средняя уверенность после 3 с ниже 0.3 (в среднем 0.24-0.27), и она ни
-    /// разу не доходит до 0.8, где фаза PLP верна в четырех случаях из пяти (пики 0.51-0.67).
+    /// разу не доходит до уровня, с которого PLP предлагает фазу трекеру (`plpShadow`; пики 0.51-0.67).
     @Test(arguments: [UInt64(1), 2, 3])
     func plpConfidenceDropsOnNoise(seed: UInt64) async {
         let scene = Drums.noiseOnly(seed: seed)
@@ -216,7 +216,7 @@ struct PLPTrackerTests {
         }
         let mean = sum / Double(max(count, 1))
         #expect(mean < 0.3, "mean confidence in noise \(mean)")
-        #expect(highest < 0.8, "confidence in noise rose to \(highest)")
+        #expect(Double(highest) < BeatTracker.Parameters().plpShadow, "confidence in noise rose to \(highest)")
     }
 
     /// Скачок 100 -> 110 BPM на 12 с (бочка и хэт на каждой доле): через 3 с период уже новый и дальше

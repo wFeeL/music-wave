@@ -22,7 +22,9 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    кругу в `(−T/2, T/2]`) больше чем на `phaseJump · T`, а его оценка выше оценки гребенки у фазы
 ///    ФАПЧ больше чем на `phaseJumpMargin`, на `phaseJumpChecks` проверках подряд, ФАПЧ прыгает на него
 ///    с теми же последствиями, что и смена темпа. При уверенном захвате вместо скачка кандидат идет
-///    тенью и должен выиграть гонку (`raceBeats`, `raceVotes`), сетка берет его счет;
+///    тенью и должен выиграть гонку (`raceBeats`, `raceVotes`), сетка берет его счет. Тень при
+///    уверенном захвате предлагает real-time PLP (`PLPTracker` на той же функции онсетов), когда он
+///    сам уверен (`plpShadow`), иначе гребенка;
 /// 3. широкополосный онсет у ближайшей доли (в пределах `matchWindow · T`) подстраивает фазу
 ///    (`alpha`) и период (`beta`) и засчитывает долю. Онсеты бочки ФАПЧ не трогают, они дают только
 ///    события свечения;
@@ -164,6 +166,20 @@ public struct BeatTracker: Sendable {
         /// числа как без наката, а 0.25-0.75 держали захват в местах с бочкой потише и дали wrongLock
         /// 17-19.
         public var coastGate: Float
+        /// Теневую фазу при уверенном захвате предлагает PLP (`PLPTracker`, второе мнение о фазе), а не
+        /// гребенка, когда уверенность PLP от этого значения, а его период близок к периоду сетки или к
+        /// удвоенному (`carryTolerance`); иначе как раньше гребенка. 0 выключает. Уверенность PLP на
+        /// GTZAN tune (steady) откалибрована: от 0.9 фаза PLP верна в 96 % кадров, 0.8-0.9 в 79 %,
+        /// 0.5-0.6 в 52 %; в розовом шуме она не выше 0.67. Взято 0.8: точность всех вспышек 0.8572 ->
+        /// 0.8575, покрытие долей 0.4345 -> 0.4342, вспышек мимо долей всего / с захватом 2356 / 757 ->
+        /// 2348 / 749, wrongLock 15 / 308 -> 15 / 301 (изменились 5 файлов; на 120 Гц и с seed 2 тот же
+        /// сдвиг). 0.75 и 0.85 дают то же, 0.7 и 0.6 нет (0.8571 и 0.8562, wrongLock 16), 0.9 ничего не
+        /// меняет. Отклоненные варианты, по одному изменению: PLP вместо гребенки и без уверенности
+        /// (0.8538, wrongLock 17 / 401); согласие с PLP в весе показа
+        /// `уверенность × (0.5 + 0.5 max(0, cos 2π(φ − φ_PLP)))` (0.8408, вспышек с захватом мимо долей
+        /// 970, wrongLock 17 / 348; вариантами 0.853-0.856); фаза мягкого пульса от PLP, когда он
+        /// увереннее трекера (числа долей те же, но видимых горбов пульса мимо долей втрое больше).
+        public var plpShadow: Double
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -198,6 +214,7 @@ public struct BeatTracker: Sendable {
             raceVotes: Int = 3,
             raceDim: Float = 0.2,
             coastGate: Float = 0.1,
+            plpShadow: Double = 0.8,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -229,6 +246,7 @@ public struct BeatTracker: Sendable {
             self.raceVotes = raceVotes
             self.raceDim = raceDim
             self.coastGate = coastGate
+            self.plpShadow = plpShadow
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -278,6 +296,8 @@ public struct BeatTracker: Sendable {
     public let parameters: Parameters
 
     private var tempo: TempoEstimator
+    /// Второе мнение о фазе (real-time PLP) на той же широкополосной функции онсетов.
+    private var plp: PLPTracker
     private let hopDuration: Double
     /// Время потока следующей оценки темпа, `nil` до первого шага.
     private var nextUpdate: Double?
@@ -351,6 +371,7 @@ public struct BeatTracker: Sendable {
         self.parameters = parameters
         hopDuration = 1 / framesPerSecond
         tempo = TempoEstimator(framesPerSecond: framesPerSecond)
+        plp = PLPTracker(framesPerSecond: framesPerSecond)
         // Гребенке нужно (зубцов + 1) самых длинных периодов и шаг запаса; ФАПЧ может чуть вытянуть период.
         let longest = 1.1 * 60 / TempoEstimator.minBPM
         odfRing = [Float](repeating: 0, count: Int((Double(Self.phaseTeeth + 1) * longest * framesPerSecond).rounded(.up)) + 4)
@@ -408,6 +429,7 @@ public struct BeatTracker: Sendable {
         }
         let odf = hop.broadbandODF.isFinite ? max(hop.broadbandODF, 0) : 0
         tempo.append(odf, kick: hop.kickODF)
+        plp.process(odf: odf)
         odfRing[odfWrite] = odf
         odfWrite = (odfWrite + 1) % odfRing.count
         odfCount = min(odfCount + 1, odfRing.count)
@@ -441,6 +463,7 @@ public struct BeatTracker: Sendable {
     /// Счетчики id не сбрасываются, новые доли получают новые id.
     public mutating func reset() {
         tempo.reset()
+        plp.reset()
         nextUpdate = nil
         now = 0
         for index in odfRing.indices {
@@ -513,6 +536,11 @@ public struct BeatTracker: Sendable {
             if let comb { rephase(to: comb.time) }
             return
         }
+        if locked, confidence >= parameters.lockConfidence, let candidate = plpCandidate(period: estimate.period) {
+            // Уверенный PLP вместо гребенки: тень и голоса за нее дает он.
+            proposeShadow(candidate, next: nextBeat, period: estimate.period)
+            return
+        }
         guard let comb else { return }
         let diff = Self.circularDifference(comb.time - nextBeat, period: estimate.period)
         let stronger = comb.score > (1 + parameters.phaseJumpMargin) * comb.currentScore
@@ -534,6 +562,25 @@ public struct BeatTracker: Sendable {
         } else {
             disagreements = 0
             shadowVotes = 0
+        }
+    }
+
+    /// Уверенный PLP вместо гребенки при уверенном захвате (`plpShadow`): расхождение его доли с ФАПЧ
+    /// дальше `phaseJump` на `phaseJumpChecks` проверках подряд запускает тень, согласие PLP с тенью
+    /// дает ей голоса (`raceVotes`); согласие с ФАПЧ сбрасывает счет. Гонка та же, что у гребенки.
+    private mutating func proposeShadow(_ candidate: Double, next nextBeat: Double, period: Double) {
+        guard abs(Self.circularDifference(candidate - nextBeat, period: period)) > parameters.phaseJump * period else {
+            disagreements = 0
+            shadowVotes = 0
+            return
+        }
+        disagreements += 1
+        if let shadow = shadowNext {
+            let agrees = abs(Self.circularDifference(candidate - shadow, period: period)) <= parameters.phaseJump * period
+            shadowVotes = agrees ? shadowVotes + 1 : 0
+        }
+        if disagreements >= parameters.phaseJumpChecks, shadowNext == nil {
+            startShadow(at: candidate)
         }
     }
 
@@ -725,6 +772,25 @@ public struct BeatTracker: Sendable {
     private func odf(age: Int) -> Float {
         guard age < odfCount else { return 0 }
         return odfRing[(odfWrite - 1 - age + 2 * odfRing.count) % odfRing.count]
+    }
+
+    /// Последняя доля PLP на оси онсетов и ее период; `nil`, пока у PLP нет оценки. Фаза PLP относится
+    /// к последнему кадру функции онсетов, то есть к `now − StreamAnalyzer.onsetLag` на оси онсетов.
+    var plpBeat: (time: Double, period: Double)? {
+        guard let period = plp.period else { return nil }
+        return (now - StreamAnalyzer.onsetLag - plp.phase * period, period)
+    }
+
+    /// Уверенность PLP последнего шага.
+    var plpConfidence: Float { plp.confidence }
+
+    /// Доля PLP как кандидат фазы сетки периода `period`: PLP уверен не ниже `plpShadow`, а его период
+    /// близок к `period` или к удвоенному (`carryTolerance`). `nil` иначе.
+    private func plpCandidate(period: Double) -> Double? {
+        guard parameters.plpShadow > 0, Double(plp.confidence) >= parameters.plpShadow, let beat = plpBeat else { return nil }
+        let ratio = beat.period / period
+        guard abs(ratio - 1) < parameters.carryTolerance || abs(ratio / 2 - 1) < parameters.carryTolerance else { return nil }
+        return beat.time
     }
 
     /// Разность по кругу периода в `(−T/2, T/2]`.

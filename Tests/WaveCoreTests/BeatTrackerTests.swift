@@ -492,6 +492,61 @@ struct BeatTrackerTests {
         #expect(lockedUntilMove)
     }
 
+    /// Тень от PLP (`plpShadow`): гребенка выключена огромным запасом (`phaseJumpMargin`), «и» без
+    /// онсетов вдвое сильнее доли. PLP переходит на «и» за несколько секунд, и когда он там уверен (не
+    /// ниже `plpShadow`), он запускает тень и голосует за нее: сетка уходит на «и» без потери
+    /// захвата. С выключенным PLP (0) тени нет и сетка стоит.
+    @Test(arguments: [(0.8, true), (0.0, false)])
+    func confidentPLPProposesTheShadow(plpShadow: Double, moves: Bool) throws {
+        #expect(BeatTracker.Parameters().plpShadow == 0.8)
+        var parameters = BeatTracker.Parameters()
+        parameters.plpShadow = plpShadow
+        parameters.phaseJumpMargin = 1e9
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked && tracker.confidence >= parameters.lockConfidence)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var shadowStart: (time: Double, plpConfidence: Float, plpBeat: Double)?
+        var moved: Double?
+        var lockedUntilMove = true
+        // Доля PLP на каждом шаге в конце сцены (не только на проверках темпа раз в 0.25 с, где фаза на
+        // 120 BPM всегда около 0 или 0.5), когда PLP уверен.
+        var worstPLPBeat = 0.0
+        var confidentSteps = 0
+        hops.feed(&tracker, until: 18) { tracker in
+            if tracker.now >= 16, Double(tracker.plpConfidence) >= 0.8, let beat = tracker.plpBeat {
+                worstPLPBeat = max(worstPLPBeat, abs(BeatTracker.circularDifference(beat.time - 0.5, period: 0.5)))
+                confidentSteps += 1
+            }
+            if shadowStart == nil, let shadow = tracker.shadowNext {
+                shadowStart = (tracker.now, tracker.plpConfidence, tracker.plpBeat?.time ?? .nan)
+                #expect(abs(BeatTracker.circularDifference(shadow - 0.5, period: 0.5)) < 0.03, "shadow at \(shadow)")
+            }
+            let onOffbeat = tracker.nextBeat.map { abs(BeatTracker.circularDifference($0 - 0.5, period: 0.5)) < 0.03 } == true
+            if moved == nil, onOffbeat { moved = tracker.now }
+            if moved == nil { lockedUntilMove = lockedUntilMove && tracker.locked }
+        }
+        let next = try #require(tracker.nextBeat)
+        #expect(confidentSteps > 300)
+        #expect(worstPLPBeat < 0.03, "PLP beat off the offbeat by \(worstPLPBeat) s")
+        if moves {
+            let start = try #require(shadowStart, "no shadow phase")
+            #expect(Double(start.plpConfidence) >= plpShadow, "PLP confidence \(start.plpConfidence) at the shadow start")
+            #expect(abs(BeatTracker.circularDifference(start.plpBeat - 0.5, period: 0.5)) < 0.03, "PLP beat \(start.plpBeat)")
+            let move = try #require(moved, "the grid never moved")
+            let votes = Double(parameters.raceVotes) * TempoEstimator.updateInterval
+            #expect(move - start.time >= votes - 0.01 && move - start.time <= votes + 0.5 + 0.01, "moved \(move - start.time) s after the shadow")
+            #expect(lockedUntilMove)
+            #expect(abs(BeatTracker.circularDifference(next - 0.5, period: 0.5)) < 0.03, "next beat \(next)")
+        } else {
+            #expect(shadowStart == nil)
+            #expect(moved == nil)
+            #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.02, "next beat \(next)")
+        }
+    }
+
     /// Перехват тенью (голоса гребенки, `combVotesDecideTheRace`) дает новую сетку со счетом тени:
     /// вес сразу не выше цели по уверенности тени, полный вес старой сетки не переходит на «и».
     @Test func shadowTakeoverTakesItsOwnWeight() throws {
