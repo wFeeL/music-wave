@@ -17,8 +17,8 @@ struct SnapshotRendererTests {
         "18-six-lines", "19-glow-radius-3x", "21-banner", "21-banner-light", "21-banner-long-title",
         "21-banner-pill", "21-banner-no-artwork", "21-banner-wide-wings",
         "13-settings-appearance-tall", "13-settings-features", "13-settings-features-dark",
-        "22-style-spectrum", "22-style-spectrum-expanded", "23-color-by-band", "23-color-by-band-spectrum",
-        "23-color-flow", "24-progress-line", "24-progress-line-pill", "25-artwork-glow", "26-high-contrast",
+        "22-style-spectrum", "22-style-spectrum-wide", "22-style-spectrum-expanded", "23-color-by-band",
+        "23-color-by-band-spectrum", "23-color-flow", "24-progress-line", "24-progress-line-pill", "25-artwork-glow", "26-high-contrast",
         "26-reduce-transparency", "05-expanded-stale-progress",
     ]
 

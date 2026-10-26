@@ -2,12 +2,26 @@ import Testing
 @testable import WaveCore
 
 struct SettingsTextTests {
-    /// Строки «Вида», которые прячет стиль: у «Спектра» количество волн.
+    /// Строки «Вида», которые прячет стиль: у «Спектра» количество волн, у «Волн» след пиков.
     @Test func lookHidesUnusedRows() {
-        let table: [(look: WaveLook, count: Bool)] = [(.waves, true), (.spectrum, false)]
+        let table: [(look: WaveLook, count: Bool, peaks: Bool)] = [(.waves, true, false), (.spectrum, false, true)]
         #expect(table.map(\.look) == WaveLook.allCases)
         for row in table {
             #expect(row.look.usesLineCount == row.count, "\(row.look): количество")
+            #expect(row.look.usesSpectrumPeaks == row.peaks, "\(row.look): след пиков")
+        }
+    }
+
+    /// «След пиков» показан ровно там, где он меняет линии острова и панели.
+    @Test func peaksRowMatchesDrawing() {
+        for look in WaveLook.allCases {
+            var on = WaveAppearance.standard
+            on.look = look
+            on.spectrumPeaks = true
+            var off = on
+            off.spectrumPeaks = false
+            let matters = on.lines(for: .wing) != off.lines(for: .wing) || on.lines(for: .panel) != off.lines(for: .panel)
+            #expect(look.usesSpectrumPeaks == matters, "\(look): след пиков")
         }
     }
 

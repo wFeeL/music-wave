@@ -252,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "амплитуда \(number(settings.waveAmplitude))",
             "переливание \(number(settings.colorFlow))",
             "цвет по частотам \(yesNo(settings.colorByBand))",
+            "след пиков \(yesNo(settings.spectrumPeaks))",
             "вздох \(yesNo(settings.beatPulse))",
             "мягкий пульс \(yesNo(settings.softPulse))",
             "пауза \(yesNo(settings.paused))",

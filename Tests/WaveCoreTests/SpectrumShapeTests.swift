@@ -265,19 +265,4 @@ struct SpectrumShapeTests {
         #expect(samples(bands, count: 0).isEmpty)
         #expect(samples(bands, count: 1).count == 1)
     }
-
-    /// Старый вызов без σ и ряби (приложение до подключения нового «Спектра»): σ крыла по ширине
-    /// по умолчанию, в панели наименьшее, без ряби.
-    @Test func legacyCallUsesDefaultSmoothing() {
-        var rng = SplitMix64(seed: 23)
-        let bands = Self.random(&rng)
-        for profile in WaveProfile.allCases {
-            var legacy = [Float](repeating: 0, count: 64)
-            legacy.withUnsafeMutableBufferPointer {
-                SpectrumShape.samples(bands: bands, count: 64, profile: profile, gain: 1.2, into: $0)
-            }
-            let sigma = profile == .wing ? SpectrumShape.sigma(halfWidth: WaveAppearance.standard.wingWidth) : 1
-            #expect(legacy == samples(bands, count: 64, profile: profile, gain: 1.2, smoothing: sigma))
-        }
-    }
 }

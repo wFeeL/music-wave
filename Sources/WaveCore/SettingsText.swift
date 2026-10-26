@@ -44,4 +44,13 @@ extension WaveLook {
         case .spectrum: false
         }
     }
+
+    /// Стилю нужна строка «След пиков» (`WaveAppearance.spectrumPeaks`): призрак пика есть
+    /// только у «Спектра».
+    public var usesSpectrumPeaks: Bool {
+        switch self {
+        case .waves: false
+        case .spectrum: true
+        }
+    }
 }

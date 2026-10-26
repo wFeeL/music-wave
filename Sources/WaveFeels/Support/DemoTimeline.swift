@@ -16,6 +16,9 @@ nonisolated struct DemoMoment: Sendable {
     /// Расписание трекера на этот момент: из него предпросмотр пересчитывает свечение со своей
     /// «Длительностью вспышки» (`glow` посчитано со спадом 1×). `nil` у моментов без расписания.
     var schedule: BeatSchedule?
+    /// Пружины полос и призрак пика «Спектра» на этот момент (`DemoTimeline.withSpectrum`). Есть
+    /// только у моментов снимков: хранить их у каждого момента прогона незачем.
+    var spectrum: SpectrumMotion?
 }
 
 /// Прогон демо по шагам через `StreamAnalyzer` и `BeatTracker` вне реального времени, момент
@@ -105,6 +108,20 @@ nonisolated struct DemoTimeline: Sendable {
     }
 
     var last: DemoMoment { moments[moments.count - 1] }
+
+    /// `moment` со «Спектром» на его время: пружины полос и призрак пика проходят полосы кадров
+    /// прогона с первого момента до `moment` с шагом `step`, как на острове при 60 Гц. Состояние
+    /// повторяемо и не зависит от машины (снимки).
+    func withSpectrum(_ moment: DemoMoment) -> DemoMoment {
+        var spectrum = SpectrumMotion()
+        for item in moments {
+            guard item.time <= moment.time + Self.step / 2 else { break }
+            spectrum.step(bands: item.frame.bands, dt: Self.step)
+        }
+        var result = moment
+        result.spectrum = spectrum
+        return result
+    }
 
     /// Пик свечения доли в промежутке: вспышка на сильной доле.
     func strongestBeat(in range: ClosedRange<Double>) -> DemoMoment {

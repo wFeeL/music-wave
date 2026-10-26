@@ -231,6 +231,8 @@ final class AppModel {
     /// Пружины уровней трех слоев (по `WaveLayer.rawValue`) и общего уровня на кадрах отрисовки.
     @ObservationIgnored private var layerSprings = [LevelSpring](repeating: LevelSpring(), count: WaveLayer.allCases.count)
     @ObservationIgnored private var levelSpring = LevelSpring()
+    /// Пружины полос «Спектра» и призрак пика (`ShownSpectrum`): идут, только пока стиль «Спектр».
+    @ObservationIgnored private var shownSpectrum = ShownSpectrum()
     /// Замер отрисовки для раздела «Отрисовка».
     @ObservationIgnored private var renderPacing = RenderPacing()
     /// Простой отрисовки по входам кадров `islandVisuals`; `renderIdle` берет его последний
@@ -1506,6 +1508,10 @@ final class AppModel {
     /// выглядело бы случайной вспышкой. Пружины не трогаются. Затем к басу показанных слоев прибавляется акцент доли от большего из свечения и
     /// пульса (`BeatGlow.accented`), уже после пружин, чтобы он оставался четким.
     ///
+    /// «Спектр» (`ShownSpectrum`): пружины полос и призрак пика идут к полосам после мягкой
+    /// остановки, только пока стиль «Спектр»; другой стиль сбрасывает их в ноль. На паузе и в
+    /// тишине полосы, а за ними линия и призрак приходят ровно в 0.
+    ///
     /// Переливание (`PaletteFlow`) двигается на тот же ограниченный шаг, что и пружины («Уменьшение
     /// движения» его останавливает), фаза идет в `flowPhase`, палитра кадра остается без течения.
     /// «Уменьшение движения»: ни свечения, ни «вздоха», ни пульса, ни акцента, ни переливания. Шаг
@@ -1513,11 +1519,11 @@ final class AppModel {
     /// же `now` ничего не двигает. Кадр идет в замер отрисовки (`timelineTime`: дата `TimelineView`),
     /// раз в 10 с строки замера пишутся в лог (`recordRender`), и в запись ритма вместе с пульсом
     /// (свечение и пульс расписания до мягкой остановки: сверка синхронизации смотрит на цепочку
-    /// ритма). Уровни, свечение, «вздох» и пульс после
-    /// мягкой остановки, а еще идущие переход палитры, угасание и переливание идут в детектор простоя
-    /// (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после кадра.
-    /// Снимки (`previewing`) получают заданные кадр, свечение, «вздох» и фазу переливания без шага,
-    /// без пульса и без мягкой остановки, детектор не трогают.
+    /// ритма). Уровни (вместе с наибольшим из линии и призрака «Спектра»), свечение, «вздох» и пульс
+    /// после мягкой остановки, а еще идущие переход палитры, угасание и переливание идут в детектор
+    /// простоя (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после кадра.
+    /// Снимки (`previewing`) получают заданные кадр, свечение, «вздох», фазу переливания и
+    /// состояние «Спектра» без шага, без пульса и без мягкой остановки, детектор не трогают.
     func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
         let period = renderPeriod
         let presented = now + LatencyCalculator.presentationLead(refreshPeriod: period)
@@ -1528,9 +1534,11 @@ final class AppModel {
                 sampled, layers: layerSprings.map(\.value), bands: sampled.bands, level: levelSpring.value, glow: glow
             )
             let shown = paletteFade.palette(target: wavePalette, now: now)
+            let spectrum = shownSpectrum.step(look: settings.look, bands: sampled.bands, dt: 0)
             return IslandVisuals(
                 frame: frame, sampled: sampled, motion: motion, palette: shown,
-                glow: glow, pulse: reduceMotion ? 0 : previewPulse, time: now, flowPhase: paletteFlow.phase
+                glow: glow, pulse: reduceMotion ? 0 : previewPulse, time: now, flowPhase: paletteFlow.phase,
+                spectrum: spectrum
             )
         }
         var dt = 0.0
@@ -1596,6 +1604,9 @@ final class AppModel {
             softStop = SoftStop()
         }
         let frame = springFrame(sampled, layers: layers, bands: bands, level: level, glow: max(glow, ambient))
+        // «Спектр» идет за полосами после мягкой остановки; повторный вызов с тем же `now` (шаг 0)
+        // отдает те же полосы.
+        let spectrum = shownSpectrum.step(look: settings.look, bands: bands, dt: dt)
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
             rhythmRecording.frame(
@@ -1606,12 +1617,12 @@ final class AppModel {
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
         feedRenderIdle(
-            level: max(layers.max() ?? 0, level), glow: glow, pulse: max(breath, ambient),
+            level: max(layers.max() ?? 0, level, shownSpectrum.highest), glow: glow, pulse: max(breath, ambient),
             flowing: PaletteFlow.period(speed: flowSpeed) != nil, now: now
         )
         return IslandVisuals(
             frame: frame, sampled: sampled, motion: motion, palette: shown, glow: glow, pulse: breath, ambient: ambient,
-            time: now, flowPhase: paletteFlow.phase
+            time: now, flowPhase: paletteFlow.phase, spectrum: spectrum
         )
     }
 
@@ -1710,7 +1721,8 @@ final class AppModel {
     /// Обложка трека разбирается здесь же, синхронно, тем же путем, что в работе; палитра
     /// берется из нее же или задается явно (`palette`). `displayOptions`: системные опции экрана
     /// снимка, а не машины, где его снимают. `flowPhase`: фаза переливания снимка, на кадрах она не
-    /// двигается.
+    /// двигается. `spectrum`: пружины полос и призрак пика «Спектра» снимка (прогон демо до этого
+    /// момента), без него линия и призрак стоят на полосах `frame`.
     func showPreview(
         state: IslandState,
         track: NowPlayingInfo?,
@@ -1723,7 +1735,8 @@ final class AppModel {
         nowPlayingAvailable: Bool = true,
         showsBanner: Bool = false,
         displayOptions: DisplayOptions = .standard,
-        flowPhase: Double = 0
+        flowPhase: Double = 0,
+        spectrum: SpectrumMotion? = nil
     ) {
         islandState = state
         self.displayOptions = displayOptions
@@ -1748,6 +1761,11 @@ final class AppModel {
             layerSprings[index].reset(to: index < frame.layers.count ? frame.layers[index] : 0)
         }
         levelSpring.reset(to: frame.level)
+        if let spectrum {
+            shownSpectrum.show(spectrum)
+        } else {
+            shownSpectrum.show(bands: frame.bands)
+        }
         previewing = true
         self.motion = motion
         previewGlow = glow
@@ -1814,10 +1832,13 @@ struct IslandVisuals {
     /// цвет палитры с переливанием (RGB-вариант `PaletteFlow.apply`, `distinct` там нет). Считается
     /// один раз на кадр, при создании и при смене `palette` или `flowPhase`, а не на каждом чтении.
     private(set) var glowSourceColor: PaletteColor
+    /// «Спектр»: полосы после пружин и призрак пика над ними (`ShownSpectrum`). `nil` при другом
+    /// стиле; тогда «Спектр», если он все же рисуется, идет через полосы `frame.bands`.
+    var spectrum: SpectrumLevels?
 
     init(
         frame: WaveFrame, sampled: WaveFrame, motion: WaveMotion, palette: [PaletteColor], glow: Float, pulse: Float,
-        ambient: Float = 0, time: Double, flowPhase: Double = 0
+        ambient: Float = 0, time: Double, flowPhase: Double = 0, spectrum: SpectrumLevels? = nil
     ) {
         self.frame = frame
         self.sampled = sampled
@@ -1829,6 +1850,7 @@ struct IslandVisuals {
         self.time = time
         self.flowPhase = flowPhase
         glowSourceColor = Self.glowSource(palette: palette, flowPhase: flowPhase)
+        self.spectrum = spectrum
     }
 
     private static func glowSource(palette: [PaletteColor], flowPhase: Double) -> PaletteColor {

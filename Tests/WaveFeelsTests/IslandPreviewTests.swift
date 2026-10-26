@@ -211,6 +211,41 @@ struct IslandPreviewTests {
         #expect(opening.sampled == short.moment(at: 0).frame)
     }
 
+    /// «Спектр» предпросмотра: первый кадр встает на полосы демо, дальше пружины идут к ним;
+    /// «Волны» полос не получают и сбрасывают пружины, новый «Спектр» растет с нуля.
+    @Test func previewStepsSpectrumOnlyForSpectrumStyle() throws {
+        let cache = PreviewTimelineCache()
+        cache.timeline = Self.timeline(seconds: 20) { time in (level: Float(time / 20), glow: 0, pulse: 0) }
+        let player = PreviewPlayer(cache: cache)
+        let palette = PaletteExtractor.fallback
+        let first = player.visuals(now: 1000, palette: palette, reduceMotion: false, look: .spectrum)
+        let shown = try #require(first.spectrum)
+        #expect(shown.values == first.sampled.bands && shown.peaks == first.sampled.bands)
+        let next = player.visuals(now: 1000 + 1.0 / 60, palette: palette, reduceMotion: false, look: .spectrum)
+        #expect(next.spectrum != nil)
+        let waves = player.visuals(now: 1000 + 2.0 / 60, palette: palette, reduceMotion: false, look: .waves)
+        #expect(waves.spectrum == nil)
+        let again = player.visuals(now: 1000 + 3.0 / 60, palette: palette, reduceMotion: false, look: .spectrum)
+        let rising = try #require(again.spectrum)
+        #expect(zip(rising.values, again.sampled.bands).allSatisfy { $0 > 0 && $0 < $1 })
+    }
+
+    /// Снимки берут «Спектр» прогона до своего момента: те же пружины и призрак, что прошли кадры
+    /// с шагом 1/60 с, при повторном расчете то же самое. Через 0.2 с после спада призрак над линией.
+    @Test func demoMomentCarriesSpectrumState() throws {
+        let timeline = Self.timeline(seconds: 2) { time in (level: time < 1 ? 0.9 : 0.1, glow: 0, pulse: 0) }
+        let moment = timeline.moment(at: 1.2)
+        #expect(moment.spectrum?.values == nil)
+        let shot = try #require(timeline.withSpectrum(moment).spectrum)
+        var manual = SpectrumMotion()
+        for item in timeline.moments where item.time <= moment.time + DemoTimeline.step / 2 {
+            manual.step(bands: item.frame.bands, dt: DemoTimeline.step)
+        }
+        #expect(shot.values == manual.values && shot.peaks == manual.peaks)
+        #expect(zip(shot.peaks, shot.values).allSatisfy { $0 > $1 })
+        #expect(timeline.withSpectrum(moment).spectrum?.peaks == shot.peaks)
+    }
+
     /// Калибровка: свечение только по расписанию метронома на момент показа кадра, как у острова
     /// (`now + presentationLead`, вспышка за `BeatGlow.lead` до слышимого щелчка); волны тихие,
     /// «вздоха» нет, хотя в демо есть и свечение, и «вздох».

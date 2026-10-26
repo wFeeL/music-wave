@@ -157,21 +157,6 @@ public enum SpectrumShape {
         }
     }
 
-    /// Прежний вызов без σ и ряби: в крыле σ ширины крыла по умолчанию
-    /// (`WaveAppearance.standard.wingWidth`), в панели `minimumSigma`, без ряби. Для приложения
-    /// до того, как оно передает σ своей ширины и рябь.
-    /// - Precondition: `output.count == max(count, 0)`.
-    public static func samples(
-        bands: [Float], count: Int, profile: WaveProfile, gain: Double,
-        into output: UnsafeMutableBufferPointer<Float>
-    ) {
-        let sigma = switch profile {
-        case .wing: Self.sigma(halfWidth: WaveAppearance.standard.wingWidth)
-        case .panel: minimumSigma
-        }
-        samples(bands: bands, count: count, profile: profile, gain: gain, smoothing: sigma, ripple: .none, into: output)
-    }
-
     /// Однородный кубический B-сплайн на отрезке `segment` (между полосами `segment` и
     /// `segment + 1`) в доле `t`: контрольные точки `points[segment...segment + 3]` (полосы
     /// `segment − 1...segment + 2`), базис `((1 − t)³, 3t³ − 6t² + 4, −3t³ + 3t² + 3t + 1, t³) / 6`.

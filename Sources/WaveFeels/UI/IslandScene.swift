@@ -203,10 +203,13 @@ struct IslandWavesView: View {
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
     }
 
+    /// Набор волн раскладки `style`. «Спектр» берет полосы и пики кадра (`IslandVisuals.spectrum`),
+    /// σ сглаживания в панели по ширине ее полосы волн (капсула делит этот набор с панелью).
     private func makeSet(_ style: WaveStyle) -> WaveSet {
         WaveSet(
             frame: visuals.frame, palette: visuals.palette, motion: visuals.motion, time: visuals.time, style: style,
-            appearance: appearance, flowPhase: visuals.flowPhase
+            appearance: appearance, flowPhase: visuals.flowPhase, spectrum: visuals.spectrum,
+            panelWidth: Double(geometry.panelWaves.width)
         )
     }
 

@@ -18,6 +18,10 @@ struct WaveSetTests {
         layers: [0.5, 0.4, 0.3], beat: 0, level: 0.6, rawLevelDB: -20
     )
     static let styles: [WaveStyle] = [.wing, .panel]
+    /// Полосы «Спектра» после пружин (полосы `bandFrame`) и пики над ними.
+    static let spectrumLevels = SpectrumLevels(
+        values: bandFrame.bands, peaks: bandFrame.bands.map { min($0 + 0.15, 1) }
+    )
 
     static func waves(
         _ change: (inout WaveAppearance) -> Void, style: WaveStyle = .wing, frame: WaveFrame = WaveSetTests.frame
@@ -171,6 +175,8 @@ struct WaveSetTests {
             #expect(waves.thickness == 1)
             #expect(waves.fillGradients.isEmpty)
             #expect(waves.layers.map(\.shape) == [.bass, .mid, .high])
+            // «Волны» без перцептивного смешения, толщина и заливка как раньше.
+            #expect(waves.layers.allSatisfy { $0.perceptualGradient == nil && $0.fills && $0.widthScale == 1 })
             let locations = style == .wing ? WaveSet.wingLocations : WaveSet.panelLocations
             for layer in waves.layers {
                 let level = Self.frame.layers[layer.shape.rawValue]
@@ -188,29 +194,95 @@ struct WaveSetTests {
         #expect(WaveSet(empty: .wing).geometry == .standard)
     }
 
-    /// «Спектр»: одна линия формы середины через уровни полос (`SpectrumShape`), цвет от общего
-    /// уровня, со свечением, во всю ширину крыла или панели.
-    @Test func spectrumSetHasOneLine() {
+    /// «Спектр»: линия формы середины через полосы после пружин (`SpectrumShape` с σ по ширине,
+    /// рябью и «дыханием» по фазе середины) и призрак пика через пики: прозрачность 0.35, толщина
+    /// × 0.7, без свечения и заливки, в крыле на 32 точках. Цвет из `spectrumStops` с высотой
+    /// самой линии, призрак в том же наборе, градиенты в перцептивном пространстве.
+    @Test func spectrumSetHasLineAndPeak() {
+        var motion = WaveMotion()
+        motion.advance(layers: [0.5, 0.6, 0.4], dt: 0.5)
         for style in Self.styles {
-            let waves = Self.waves({ $0.look = .spectrum }, style: style, frame: Self.bandFrame)
-            #expect(waves.layers.count == 1)
+            var appearance = WaveAppearance.standard
+            appearance.look = .spectrum
+            let waves = WaveSet(
+                frame: Self.bandFrame, palette: PaletteExtractor.fallback, motion: motion, time: 1, style: style,
+                appearance: appearance, spectrum: Self.spectrumLevels, panelWidth: 600
+            )
+            #expect(waves.layers.count == 2)
             let line = waves.layers[0]
-            #expect(line.shape == .mid)
+            let peak = waves.layers[1]
+            #expect(line.shape == .mid && peak.shape == .mid)
             #expect(line.level == Self.bandFrame.level)
-            #expect(line.glows)
+            #expect(line.glows && !peak.glows)
+            #expect(line.fills && !peak.fills)
+            #expect(line.widthScale == 1 && peak.widthScale == 0.7)
+            #expect(line.opacity == 1 && peak.opacity == 0.35)
+            #expect(line.stopSet == peak.stopSet)
+            #expect(line.baseStops == peak.baseStops)
+            #expect(line.perceptualGradient != nil && peak.perceptualGradient != nil)
             let count = style == .wing ? WaveSet.wingPoints : WaveSet.panelPoints
-            var expected = [Float](repeating: -1, count: count)
-            expected.withUnsafeMutableBufferPointer {
-                SpectrumShape.samples(bands: Self.bandFrame.bands, count: count, profile: style.profile, gain: 1, into: $0)
+            let peakCount = style == .wing ? WaveSet.wingEchoPoints : WaveSet.panelPoints
+            #expect(line.samples.count == count && peak.samples.count == peakCount)
+            // σ: крыло 64 pt дает 2.25, половина панели 300 pt дает 1.
+            let sigma = SpectrumShape.sigma(halfWidth: style == .wing ? 64 : 300)
+            let ripple = SpectrumShape.Ripple(
+                phase: motion.phase(.mid, profile: style.profile),
+                floor: SpectrumShape.Ripple.floor(slowLevel: motion.slowLevel(.mid))
+            )
+            func expected(_ bands: [Float], count: Int) -> [Float] {
+                var result = [Float](repeating: -1, count: count)
+                result.withUnsafeMutableBufferPointer {
+                    SpectrumShape.samples(
+                        bands: bands, count: count, profile: style.profile, gain: 1, smoothing: sigma, ripple: ripple,
+                        into: $0
+                    )
+                }
+                return result
             }
-            #expect(Array(line.samples) == expected)
+            #expect(Array(line.samples) == expected(Self.spectrumLevels.values, count: count))
+            #expect(Array(peak.samples) == expected(Self.spectrumLevels.peaks, count: peakCount))
             // Линия стоит на нижней базовой линии: y без знака.
             #expect(line.samples.allSatisfy { $0 >= 0 })
-            // В тишине полос линия лежит на базовой линии.
+            #expect(Array(line.baseStops) == WavePaint.spectrumStops(
+                palette: PaletteExtractor.fallback, heights: Array(line.samples), level: Self.bandFrame.level, time: 1,
+                profile: style.profile
+            ))
+            let locations = style == .wing ? WaveSet.wingSpectrumLocations : WaveSet.panelSpectrumLocations
+            #expect(line.baseStops.map(\.location) == locations)
+
+            // Без полос после пружин линия и призрак идут через полосы кадра.
+            let raw = WaveSet(
+                frame: Self.bandFrame, palette: PaletteExtractor.fallback, motion: motion, time: 1, style: style,
+                appearance: appearance, panelWidth: 600
+            )
+            #expect(Array(raw.layers[0].samples) == expected(Self.bandFrame.bands, count: count))
+            #expect(Array(raw.layers[1].samples) == expected(Self.bandFrame.bands, count: peakCount))
+
+            // Без «Следа пиков» одна линия.
+            appearance.spectrumPeaks = false
+            let single = WaveSet(
+                frame: Self.bandFrame, palette: PaletteExtractor.fallback, motion: motion, time: 1, style: style,
+                appearance: appearance, spectrum: Self.spectrumLevels, panelWidth: 600
+            )
+            #expect(single.layers.count == 1)
+            #expect(Array(single.layers[0].samples) == Array(line.samples))
+
+            // В тишине полос линия и призрак лежат на базовой линии.
             let flat = Self.waves({ $0.look = .spectrum }, style: style)
-            #expect(flat.layers.count == 1)
-            #expect(flat.layers[0].samples.allSatisfy { $0 == 0 })
+            #expect(flat.layers.count == 2)
+            #expect(flat.layers.allSatisfy { $0.samples.allSatisfy { $0 == 0 } })
         }
+    }
+
+    /// σ сглаживания «Спектра»: в крыле по «Ширине крыльев», в панели по половине ее полосы волн,
+    /// без ширины панель считается широкой.
+    @Test func spectrumSmoothingFollowsWidth() {
+        var appearance = WaveAppearance.standard
+        appearance.wingWidth = 120
+        #expect(WaveSet.spectrumHalfWidth(style: .wing, appearance: appearance, panelWidth: 500) == 120)
+        #expect(WaveSet.spectrumHalfWidth(style: .panel, appearance: appearance, panelWidth: 500) == 250)
+        #expect(SpectrumShape.sigma(halfWidth: WaveSet.spectrumHalfWidth(style: .panel, appearance: appearance, panelWidth: nil))
+            == SpectrumShape.minimumSigma)
     }
 
     /// «Спектр» рисуется от нижней базовой линии с обычной толщиной, заливка из настроек.
@@ -223,7 +295,10 @@ struct WaveSetTests {
             #expect(waves.geometry.baseline == .bottom)
             #expect(waves.geometry.widthScale == 1)
             #expect(waves.fill == 0.5)
+            // Один набор на линию и призрак пика, заливка в перцептивном пространстве.
             #expect(waves.fillGradients.count == 1)
+            #expect(waves.perceptualFillGradients.count == 1)
+            #expect(waves.perceptualFillGradients.allSatisfy { $0 != nil })
         }
     }
 
@@ -252,8 +327,9 @@ struct WaveSetTests {
         #expect(WaveAppearance.standard.lookGeometry.baseline == .center)
     }
 
-    /// Цвет по частотам: одна линия красится участками (`sectionStops`) на точках с краями
-    /// смешения, линии слоев своим цветом на обычных точках.
+    /// Цвет по частотам: одна волна красится участками (`sectionStops`) на точках с краями
+    /// смешения, линии слоев своим цветом на обычных точках, «Спектр» своими точками
+    /// (`spectrumStops` с «Цветом по частотам»).
     @Test func colorByBandPaintsOneLineBySections() {
         for style in Self.styles {
             let sectionLocations = style == .wing ? WaveSet.wingSectionLocations : WaveSet.panelSectionLocations
@@ -265,6 +341,13 @@ struct WaveSetTests {
                     $0.lineCount = 1
                     $0.colorByBand = true
                 }, style: style)
+                if look == .spectrum {
+                    #expect(Array(waves.layers[0].baseStops) == WavePaint.spectrumStops(
+                        palette: PaletteExtractor.fallback, heights: Array(waves.layers[0].samples), level: Self.frame.level,
+                        time: 1, profile: style.profile, options: options
+                    ))
+                    continue
+                }
                 #expect(waves.layers.count == 1)
                 var expected = [WavePaint.Stop](
                     repeating: WavePaint.Stop(location: 0, color: PaletteColor(r: 0, g: 0, b: 0), opacity: 0),

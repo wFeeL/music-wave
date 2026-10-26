@@ -65,6 +65,9 @@ final class PreviewPlayer {
     @ObservationIgnored private var paletteFlow = PaletteFlow()
     @ObservationIgnored private var layerSprings = [LevelSpring](repeating: LevelSpring(), count: WaveLayer.allCases.count)
     @ObservationIgnored private var levelSpring = LevelSpring()
+    /// «Спектр» предпросмотра: свои пружины полос и призрак пика, как у острова
+    /// (`AppModel.shownSpectrum`).
+    @ObservationIgnored private var spectrum = ShownSpectrum()
 
     init(cache: PreviewTimelineCache = .shared, glowSchedule: (@MainActor (Double) -> BeatSchedule)? = nil) {
         self.cache = cache
@@ -109,13 +112,15 @@ final class PreviewPlayer {
 
     /// Кадр предпросмотра на `now` секунд. Первый кадр встает на `loopStart` с пружинами на его
     /// уровнях; дальше шаг не длиннее `AppModel.maxVisualStep`, на тот же шаг идет переливание со
-    /// скоростью `flowSpeed` («Скорость переливания», 0 без него). Без демо: тихий остров.
+    /// скоростью `flowSpeed` («Скорость переливания», 0 без него). При стиле `look` «Спектр» на тот
+    /// же шаг идут пружины полос и призрак пика (`ShownSpectrum`), другой стиль их сбрасывает.
+    /// Без демо: тихий остров.
     /// «Уменьшение движения»: ни свечения, ни «вздоха», ни мягкого пульса, ни переливания, волны
     /// вдвое медленнее. `softPulse`: «Мягкий пульс» из настроек, без него пульса нет. Акцент баса,
     /// как у острова, от большего из свечения и пульса.
     func visuals(
         now: Double, palette: [PaletteColor], flowSpeed: Double = 0, reduceMotion: Bool, softPulse: Bool = true,
-        flashLength: Double = 1
+        flashLength: Double = 1, look: WaveLook = .waves
     ) -> IslandVisuals {
         guard let timeline, now.isFinite else {
             return IslandVisuals(
@@ -131,6 +136,7 @@ final class PreviewPlayer {
         let moment = timeline.moment(at: loopStart + (now - start).truncatingRemainder(dividingBy: loop))
         let sampled = moment.frame
 
+        let levels: SpectrumLevels?
         if let lastTime {
             let dt = min(max(now - lastTime, 0), AppModel.maxVisualStep)
             for index in layerSprings.indices {
@@ -139,12 +145,15 @@ final class PreviewPlayer {
             levelSpring.step(toward: sampled.level, dt: dt)
             motion.advance(layers: layerSprings.map(\.value), dt: reduceMotion ? dt / 2 : dt)
             paletteFlow.advance(dt: dt, speed: reduceMotion ? 0 : flowSpeed)
+            levels = spectrum.step(look: look, bands: sampled.bands, dt: dt)
         } else {
             for index in layerSprings.indices {
                 layerSprings[index].reset(to: index < sampled.layers.count ? sampled.layers[index] : 0)
             }
             levelSpring.reset(to: sampled.level)
             motion = moment.motion
+            spectrum.show(bands: sampled.bands)
+            levels = spectrum.step(look: look, bands: sampled.bands, dt: 0)
         }
         lastTime = now
 
@@ -156,7 +165,7 @@ final class PreviewPlayer {
         return IslandVisuals(
             frame: frame, sampled: sampled, motion: motion, palette: palette,
             glow: glow, pulse: reduceMotion ? 0 : moment.pulse, ambient: ambient,
-            time: now, flowPhase: paletteFlow.phase
+            time: now, flowPhase: paletteFlow.phase, spectrum: levels
         )
     }
 }
@@ -237,6 +246,7 @@ struct IslandPreview: View {
         let softPulse = settings.softPulse
         let flowSpeed = settings.colorFlow
         let flashLength = settings.flashLength
+        let look = appearance.look
         let layout = Self.layout(appearance: appearance, wingLimit: wingLimit)
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         let size = Self.stripSize
@@ -262,7 +272,7 @@ struct IslandPreview: View {
                                 : player.visuals(
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,
                                     flowSpeed: flowSpeed, reduceMotion: reduceMotion, softPulse: softPulse,
-                                    flashLength: flashLength
+                                    flashLength: flashLength, look: look
                                 )
                             // Предпросмотр показывает свернутый остров без баннера.
                             let breath = IslandView.breathing(

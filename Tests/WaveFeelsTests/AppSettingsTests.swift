@@ -65,6 +65,7 @@ struct AppSettingsTests {
             #expect(settings.flashLength == 1)
             #expect(settings.colorFlow == 0)
             #expect(settings.colorByBand == false)
+            #expect(settings.spectrumPeaks == true)
             #expect(settings.softStop == true)
             #expect(settings.artworkGlow == true)
             #expect(settings.progressLine == false)
@@ -100,6 +101,7 @@ struct AppSettingsTests {
             written.look = .spectrum
             written.colorFlow = 0.4
             written.colorByBand = true
+            written.spectrumPeaks = false
             written.softStop = false
             written.artworkGlow = false
             written.progressLine = true
@@ -125,6 +127,7 @@ struct AppSettingsTests {
             #expect(read.look == .spectrum)
             #expect(read.colorFlow == 0.4)
             #expect(read.colorByBand == true)
+            #expect(read.spectrumPeaks == false)
             #expect(read.softStop == false)
             #expect(read.artworkGlow == false)
             #expect(read.progressLine == true)
@@ -160,6 +163,7 @@ struct AppSettingsTests {
             settings.look = .spectrum
             settings.colorFlow = 0.7
             settings.colorByBand = true
+            settings.spectrumPeaks = false
             settings.softStop = false
             settings.artworkGlow = false
             settings.progressLine = true
@@ -172,7 +176,7 @@ struct AppSettingsTests {
                 "wf.source", "wf.sensitivity", "wf.levelMode", "wf.followSystemVolume",
                 "wf.latencyMode", "wf.wingWidth", "wf.glowIntensity", "wf.beatPulse", "wf.softPulse",
                 "wf.hideDelay", "wf.hideInFullscreen", "wf.showTrackBanner", "wf.paused",
-                "wf.waveStyle", "wf.colorFlow", "wf.colorByBand", "wf.softStop", "wf.artworkGlow",
+                "wf.waveStyle", "wf.colorFlow", "wf.colorByBand", "wf.spectrumPeaks", "wf.softStop", "wf.artworkGlow",
                 "wf.progressLine", "wf.autoSource", "wf.trackSwipe", "wf.expandDelay",
                 "wf.followDisplayOptions",
             ] {
@@ -519,9 +523,11 @@ extension AppSettingsTests {
             written.look = .spectrum
             written.colorFlow = 0.25
             written.colorByBand = true
+            written.spectrumPeaks = false
 
             for key in [
                 "wf.colorMode", "wf.glowSize", "wf.glowSharpness", "wf.flashLength", "wf.lineCount", "wf.fill", "wf.lineThickness", "wf.waveAmplitude",
+                "wf.spectrumPeaks",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
             }
@@ -541,7 +547,7 @@ extension AppSettingsTests {
             #expect(read.appearance == WaveAppearance(
                 wingWidth: 180, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowSize: 2.5,
                 lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.75,
-                colorFlow: 0.25, colorByBand: true, look: .spectrum, glowSharpness: 0.7
+                colorFlow: 0.25, colorByBand: true, look: .spectrum, glowSharpness: 0.7, spectrumPeaks: false
             ))
 
             read.colorMode = .preset(.ocean)

@@ -6,7 +6,9 @@ import WaveCore
 /// Вкладка «Вид»: живой предпросмотр острова и все настройки вида волн. Изменения применяются
 /// сразу, и к острову, и к предпросмотру; значения проходят через `AppSettings`, который держит
 /// их в пределах и заменяет не конечные. Строки, которые выбранный стиль не рисует, скрыты
-/// (`WaveLook.usesLineCount`); сохраненные значения при этом не меняются.
+/// (`WaveLook.usesLineCount`, `WaveLook.usesSpectrumPeaks`); сохраненные значения при этом не
+/// меняются. «След пиков» у «Спектра» стоит на месте скрытого «Количества волн», поэтому вкладка
+/// не становится выше.
 struct AppearanceSettingsView: View {
     let model: AppModel
     /// Игрок предпросмотра; живет в `SettingsView`, а не создается на каждом пересчете вкладки.
@@ -210,7 +212,7 @@ struct AppearanceSettingsView: View {
 
     // MARK: - Волны
 
-    /// «Стиль»: «Волны», «Спектр».
+    /// «Стиль»: «Волны», «Спектр». Под ним у «Спектра» «След пиков» (призрак пика над линией).
     @ViewBuilder
     private var lookRow: some View {
         let settings = model.settings
@@ -220,6 +222,9 @@ struct AppearanceSettingsView: View {
             }
         }
         .pickerStyle(.segmented)
+        if settings.look.usesSpectrumPeaks {
+            Toggle("След пиков", isOn: Binding(get: { settings.spectrumPeaks }, set: { settings.spectrumPeaks = $0 }))
+        }
     }
 
     /// Строки, которые нужны выбранному стилю: у «Спектра» все, кроме количества.

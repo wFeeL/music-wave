@@ -109,3 +109,116 @@ public struct SpectrumMotion: Sendable {
         raw.isFinite ? min(max(raw, 0), 1) : 0
     }
 }
+
+/// Полосы «Спектра» одного кадра: показанные уровни после пружин (`SpectrumMotion.values`) и
+/// призрак пика над ними (`SpectrumMotion.peaks`), по 24 значения 0...1.
+public struct SpectrumLevels: Sendable, Equatable {
+    public var values: [Float]
+    public var peaks: [Float]
+
+    public init(values: [Float], peaks: [Float]) {
+        self.values = values
+        self.peaks = peaks
+    }
+}
+
+/// «Спектр» на кадрах острова и предпросмотра: `SpectrumMotion` идет, только пока стиль
+/// «Спектр». Другой стиль сразу ставит линию и призрак в ноль без движения: новый «Спектр»
+/// растет с нуля, а не с уровней, оставшихся с прошлого раза, и детектор простоя не видит старых
+/// пиков (`highest` при другом стиле 0).
+///
+/// Полосы и пики уходят в кадр в своих массивах, а не в массивах движения. Кадр живет в SwiftUI
+/// до следующего, и шаг, пишущий в массив, который кадр еще держит, копировал бы оба массива на
+/// каждом кадре. Здесь два набора по очереди: шаг пишет в набор позапрошлого кадра, который к
+/// этому времени уже никто не держит, поэтому запись идет на месте, без выделения памяти. Если
+/// набор еще держат, запись его копирует (как новый массив), значения кадров не путаются.
+public struct ShownSpectrum: Sendable {
+    /// Пружины полос и призрак пика.
+    public private(set) var motion = SpectrumMotion()
+    /// Движение идет: прошлый шаг был со стилем «Спектр» или состояние задано `show`.
+    private var active = false
+    /// Набор последнего кадра записан из `motion`: кадр без шага отдает его же.
+    private var published = false
+    /// Какой набор отдан последним.
+    private var usesSecond = false
+    private var first = ShownSpectrum.zeroLevels()
+    private var second = ShownSpectrum.zeroLevels()
+
+    public init() {}
+
+    /// Наибольший показанный уровень, линия или призрак: вход детектора простоя
+    /// (`RenderIdleDetector`). При другом стиле 0.
+    public var highest: Float {
+        active ? motion.highest : 0
+    }
+
+    /// Снимки: линия и призрак встают в состояние `motion` без шага, следующий `step` со стилем
+    /// «Спектр» отдает его.
+    public mutating func show(_ motion: SpectrumMotion) {
+        self.motion = motion
+        active = true
+        published = false
+    }
+
+    /// Предпросмотр на первом кадре: линия и призрак встают на полосы `bands` без движения
+    /// (`SpectrumMotion.reset(to:)`).
+    public mutating func show(bands: [Float]) {
+        motion.reset(to: bands)
+        active = true
+        published = false
+    }
+
+    /// Кадр. Стиль «Спектр»: пружины идут к полосам `bands` за `dt` секунд, кадр получает полосы и
+    /// пики. Не конечный или не положительный `dt` ничего не двигает и отдает набор прошлого
+    /// кадра (повторный кадр с тем же временем). Другой стиль: линия и призрак в нуле, `nil`.
+    public mutating func step(look: WaveLook, bands: [Float], dt: Double) -> SpectrumLevels? {
+        guard look == .spectrum else {
+            if active || published {
+                motion.reset()
+                active = false
+                published = false
+            }
+            return nil
+        }
+        active = true
+        if dt.isFinite, dt > 0 {
+            motion.step(bands: bands, dt: dt)
+        } else if published {
+            return usesSecond ? second : first
+        }
+        published = true
+        usesSecond.toggle()
+        if usesSecond {
+            Self.copy(motion, into: &second)
+            return second
+        }
+        Self.copy(motion, into: &first)
+        return first
+    }
+
+    private static func zeroLevels() -> SpectrumLevels {
+        SpectrumLevels(
+            values: [Float](repeating: 0, count: BandMapper.bandCount),
+            peaks: [Float](repeating: 0, count: BandMapper.bandCount)
+        )
+    }
+
+    private static func copy(_ motion: SpectrumMotion, into levels: inout SpectrumLevels) {
+        copy(motion.values, into: &levels.values)
+        copy(motion.peaks, into: &levels.peaks)
+    }
+
+    /// `source` в `target` на месте. Другая длина (не бывает) дает новый массив, тоже не общий с
+    /// `source`.
+    private static func copy(_ source: [Float], into target: inout [Float]) {
+        guard target.count == source.count else {
+            target = source.map { $0 }
+            return
+        }
+        target.withUnsafeMutableBufferPointer { output in
+            for index in output.indices {
+                output[index] = source[index]
+            }
+        }
+    }
+}

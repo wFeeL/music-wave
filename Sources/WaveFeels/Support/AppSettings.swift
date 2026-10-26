@@ -43,6 +43,7 @@ final class AppSettings {
         static let waveStyle = "wf.waveStyle"
         static let colorFlow = "wf.colorFlow"
         static let colorByBand = "wf.colorByBand"
+        static let spectrumPeaks = "wf.spectrumPeaks"
         static let softStop = "wf.softStop"
         static let artworkGlow = "wf.artworkGlow"
         static let progressLine = "wf.progressLine"
@@ -88,6 +89,7 @@ final class AppSettings {
         static let look = WaveAppearance.standard.look
         static let colorFlow = WaveAppearance.standard.colorFlow
         static let colorByBand = WaveAppearance.standard.colorByBand
+        static let spectrumPeaks = WaveAppearance.standard.spectrumPeaks
         static let softStop = true
         static let artworkGlow = true
         static let progressLine = false
@@ -124,6 +126,7 @@ final class AppSettings {
     @ObservationIgnored private var storedLook: WaveLook
     @ObservationIgnored private var storedColorFlow: Double
     @ObservationIgnored private var storedColorByBand: Bool
+    @ObservationIgnored private var storedSpectrumPeaks: Bool
     @ObservationIgnored private var storedSoftStop: Bool
     @ObservationIgnored private var storedArtworkGlow: Bool
     @ObservationIgnored private var storedProgressLine: Bool
@@ -207,6 +210,7 @@ final class AppSettings {
             fallback: Default.colorFlow
         )
         storedColorByBand = Self.readBool(defaults, Key.colorByBand) ?? Default.colorByBand
+        storedSpectrumPeaks = Self.readBool(defaults, Key.spectrumPeaks) ?? Default.spectrumPeaks
         storedSoftStop = Self.readBool(defaults, Key.softStop) ?? Default.softStop
         storedArtworkGlow = Self.readBool(defaults, Key.artworkGlow) ?? Default.artworkGlow
         storedProgressLine = Self.readBool(defaults, Key.progressLine) ?? Default.progressLine
@@ -522,7 +526,7 @@ final class AppSettings {
             wingWidth: wingWidth, colorMode: colorMode, glowSize: glowSize, lineCount: lineCount,
             fill: fill, thickness: lineThickness, amplitude: waveAmplitude,
             colorFlow: colorFlow, colorByBand: colorByBand, look: look,
-            glowSharpness: glowSharpness
+            glowSharpness: glowSharpness, spectrumPeaks: spectrumPeaks
         )
     }
 
@@ -681,6 +685,20 @@ final class AppSettings {
             guard newValue != storedColorByBand else { return }
             withMutation(keyPath: \.colorByBand) { storedColorByBand = newValue }
             defaults.set(newValue, forKey: Key.colorByBand)
+        }
+    }
+
+    /// «След пиков»: над линией «Спектра» медленно оседает призрак недавних пиков. По умолчанию
+    /// включен.
+    var spectrumPeaks: Bool {
+        get {
+            access(keyPath: \.spectrumPeaks)
+            return storedSpectrumPeaks
+        }
+        set {
+            guard newValue != storedSpectrumPeaks else { return }
+            withMutation(keyPath: \.spectrumPeaks) { storedSpectrumPeaks = newValue }
+            defaults.set(newValue, forKey: Key.spectrumPeaks)
         }
     }
 

@@ -39,11 +39,15 @@ nonisolated struct WaveSet: Sendable {
         let level: Float
         /// Есть ли у линии свечение: основная линия баса или середины с уровнем от `glowLevel`.
         let glows: Bool
+        /// Заливается ли линия при «Заливке» (`WaveLine.fills`): все, кроме призрака пика.
+        let fills: Bool
+        /// Множитель толщины самой линии (`WaveLine.widthScale`): у призрака пика 0.7.
+        let widthScale: CGFloat
         /// y в -1...1 (у спектра 0...1): в крыле от выреза к краю, в панели от левого края к
         /// правому. Срез общего массива набора, индексы не с нуля.
         let samples: ArraySlice<Float>
         /// Точки градиента источника и формы линии с прозрачностью основной линии: у основной
-        /// линии и ее эха один и тот же срез.
+        /// линии и ее эха (у спектра и призрака пика) один и тот же срез.
         let baseStops: ArraySlice<WavePaint.Stop>
         /// Номер набора `baseStops`: у основной линии и ее эха один, по нему холст строит градиент
         /// заливки один раз на набор.
@@ -52,6 +56,9 @@ nonisolated struct WaveSet: Sendable {
         let opacity: Float
         /// Градиент обводки линии и ее свечения: `stops` цветами `Color`.
         let gradient: Gradient
+        /// Тот же градиент со смешением цветов в перцептивном пространстве
+        /// (`Gradient.colorSpace(.perceptual)`), только у линий «Спектра»; холст тогда рисует его.
+        let perceptualGradient: AnyGradient?
 
         /// Точки градиента самой линии: `baseStops` с прозрачностью × `opacity`.
         var stops: [WavePaint.Stop] {
@@ -74,6 +81,9 @@ nonisolated struct WaveSet: Sendable {
     /// Они же плюс края смешения участков: у линии, раскрашенной по частотам (`paintsSections`).
     static let wingSectionLocations = WavePaint.sectionLocations(for: .wing)
     static let panelSectionLocations = WavePaint.sectionLocations(for: .panel)
+    /// У «Спектра» свои: шаг 1/16 плюс проявление и растворение (`WavePaint.spectrumLocations`).
+    static let wingSpectrumLocations = WavePaint.spectrumLocations(for: .wing)
+    static let panelSpectrumLocations = WavePaint.spectrumLocations(for: .panel)
     /// Ниже этого уровня у слоя нет свечения.
     static let glowLevel: Float = 0.05
 
@@ -87,12 +97,13 @@ nonisolated struct WaveSet: Sendable {
     }
 
     /// Огибающая линии: число точек по стилю и по тому, эхо ли это (`wingEchoPoints`). У линии
-    /// спектра огибающая задает только число точек (`wingPoints` или `panelPoints`).
+    /// спектра огибающая задает только число точек (`wingPoints` или `panelPoints`), призрак пика
+    /// в крыле идет на 32 точках, как эхо.
     static func envelope(for line: WaveLine, style: WaveStyle) -> WaveShape.Envelope {
         let index = line.shape.rawValue
         switch style {
         case .wing:
-            let echo = line.phaseOffset != 0 && line.shape != .bass
+            let echo = (line.phaseOffset != 0 && line.shape != .bass) || line.source == .spectrumPeak
             return echo ? wingEchoEnvelopes[index] : wingEnvelopes[index]
         case .panel:
             return panelEnvelopes[index]
@@ -100,13 +111,29 @@ nonisolated struct WaveSet: Sendable {
     }
 
     /// Красится ли линия участками баса, середины и верха (`WavePaint.sectionStops`): одна линия
-    /// общего уровня или спектра при «Цвете по частотам». Линия слоя при нем красится своим цветом
-    /// (`WavePaint.Options.colorByBand`).
+    /// общего уровня при «Цвете по частотам». Линия слоя при нем красится своим цветом
+    /// (`WavePaint.Options.colorByBand`), «Спектр» своими точками (`WavePaint.spectrumStops`).
     static func paintsSections(_ source: WaveLine.Source, colorByBand: Bool) -> Bool {
         guard colorByBand else { return false }
         switch source {
-        case .overall, .spectrum: return true
-        case .layer: return false
+        case .overall: return true
+        case .layer, .spectrum, .spectrumPeak: return false
+        }
+    }
+
+    /// Набор точек градиента, которым красится источник: призрак пика берет набор линии спектра
+    /// и отличается от нее только прозрачностью.
+    static func stopSource(_ source: WaveLine.Source) -> WaveLine.Source {
+        source == .spectrumPeak ? .spectrum : source
+    }
+
+    /// Половина ширины линии «Спектра», pt, по которой выбирается σ сглаживания полос
+    /// (`SpectrumShape.sigma(halfWidth:)`): в крыле «Ширина крыльев», в панели половина ширины ее
+    /// полосы волн `panelWidth`. Без `panelWidth` панель считается широкой (σ наименьшее).
+    static func spectrumHalfWidth(style: WaveStyle, appearance: WaveAppearance, panelWidth: Double?) -> Double {
+        switch style {
+        case .wing: appearance.wingWidth
+        case .panel: panelWidth.map { $0 / 2 } ?? .infinity
         }
     }
 
@@ -123,6 +150,9 @@ nonisolated struct WaveSet: Sendable {
     /// прозрачностью `fillTopOpacity × fill`, без прозрачности линии, поэтому у основной линии и
     /// ее эха один. Пустой без заливки.
     let fillGradients: [Gradient]
+    /// Те же градиенты заливки со смешением в перцептивном пространстве: у наборов «Спектра»
+    /// градиент, у остальных `nil`. Пустой без заливки.
+    let perceptualFillGradients: [AnyGradient?]
 
     /// Пустой набор: холст ничего не рисует.
     init(empty style: WaveStyle) {
@@ -132,6 +162,7 @@ nonisolated struct WaveSet: Sendable {
         fill = 0
         geometry = .standard
         fillGradients = []
+        perceptualFillGradients = []
     }
 
     /// Градиент из точек `stops`, прозрачность каждой точки через `opacity`.
@@ -141,19 +172,32 @@ nonisolated struct WaveSet: Sendable {
         })
     }
 
+    /// Градиент набора с источником `source` со смешением цветов в перцептивном пространстве: у
+    /// «Спектра» соседние точки далеких оттенков (кольцо палитры) смешиваются без серой середины.
+    /// У «Волн» `nil`, их вид не меняется.
+    static func perceptual(_ gradient: Gradient, source: WaveLine.Source) -> AnyGradient? {
+        stopSource(source) == .spectrum ? gradient.colorSpace(.perceptual) : nil
+    }
+
     /// По линии на каждую `appearance.lines(for: style.profile)`: размах от уровня источника
     /// (общий уровень у одной волны и спектра) × `amplitudeScale` и «Размаха», фаза формы со
-    /// сдвигом `phaseOffset`. Линия спектра идет через уровни полос `frame.bands` (`SpectrumShape`). Цвет идет
-    /// от уровня источника с переливанием `flowPhase`, «Цветом по частотам» и контрастом
-    /// (`WavePaint.Options`), прозрачность × `opacity`: эхо делит точки градиента со своей
-    /// основной линией и отличается от нее только прозрачностью. Заливка `fill`,
+    /// сдвигом `phaseOffset`. Цвет идет от уровня источника с переливанием `flowPhase`, «Цветом по
+    /// частотам» и контрастом (`WavePaint.Options`), прозрачность × `opacity`: эхо делит точки
+    /// градиента со своей основной линией и отличается от нее только прозрачностью. Заливка `fill`,
     /// геометрия `lookGeometry`.
+    ///
+    /// «Спектр» (`SpectrumShape`): линия идет через полосы после пружин `spectrum.values`, призрак
+    /// пика через `spectrum.peaks`; без `spectrum` обе через полосы кадра `frame.bands`. σ
+    /// сглаживания по ширине (`spectrumHalfWidth`, в панели по `panelWidth`), бегущая рябь с фазой
+    /// середины `motion.phase(.mid, profile:)` и «дыхание» от ее медленной громкости. Цвет из
+    /// `WavePaint.spectrumStops` с высотой самой линии в каждой точке, призрак берет тот же набор,
+    /// градиенты смешивают цвета в перцептивном пространстве (`perceptualGradient`).
     ///
     /// Раскладка `style` здесь совпадает с той, что нужна `lines(for:)`: у «Волн» и «Спектра»
     /// линии от раскладки не зависят.
     init(
         frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle,
-        appearance: WaveAppearance, flowPhase: Double = 0
+        appearance: WaveAppearance, flowPhase: Double = 0, spectrum: SpectrumLevels? = nil, panelWidth: Double? = nil
     ) {
         let profile = style.profile
         let colorByBand = appearance.colorByBand
@@ -168,22 +212,68 @@ nonisolated struct WaveSet: Sendable {
         )
         func sourceLevel(_ source: WaveLine.Source) -> Float {
             switch source {
-            case .overall, .spectrum: frame.level
+            case .overall, .spectrum, .spectrumPeak: frame.level
             case .layer(let layer): layer.rawValue < frame.layers.count ? frame.layers[layer.rawValue] : 0
             }
         }
 
-        // Наборы точек градиента: по одному на источник и форму, эхо берет набор основной линии.
+        // Точки линий: все в одном массиве, у каждой линии свой отрезок. Они нужны раньше цвета:
+        // «Спектр» берет подсветку по высоте своей линии.
+        let envelopes = lines.map { Self.envelope(for: $0, style: style) }
+        let levels = lines.map { sourceLevel($0.source) * $0.amplitudeScale }
+        var ranges: [Range<Int>] = []
+        var total = 0
+        for envelope in envelopes {
+            ranges.append(total..<(total + envelope.count))
+            total += envelope.count
+        }
+        let bands = spectrum?.values ?? frame.bands
+        let peaks = spectrum?.peaks ?? bands
+        let smoothing = SpectrumShape.sigma(
+            halfWidth: Self.spectrumHalfWidth(style: style, appearance: appearance, panelWidth: panelWidth)
+        )
+        let ripple = SpectrumShape.Ripple(
+            phase: motion.phase(.mid, profile: profile),
+            floor: SpectrumShape.Ripple.floor(slowLevel: motion.slowLevel(.mid))
+        )
+        var samples = [Float](repeating: 0, count: total)
+        samples.withUnsafeMutableBufferPointer { buffer in
+            for (index, line) in lines.enumerated() {
+                let output = UnsafeMutableBufferPointer(rebasing: buffer[ranges[index]])
+                switch line.source {
+                case .spectrum, .spectrumPeak:
+                    SpectrumShape.samples(
+                        bands: line.source == .spectrumPeak ? peaks : bands, count: output.count, profile: profile,
+                        gain: appearance.amplitude * Double(line.amplitudeScale), smoothing: smoothing, ripple: ripple,
+                        into: output
+                    )
+                case .overall, .layer:
+                    let phase = motion.phase(line.shape, profile: profile).shifted(by: line.phaseOffset)
+                    WaveShape.samples(
+                        amplitude: levels[index], phase: phase, envelope: envelopes[index], gain: appearance.amplitude,
+                        into: output
+                    )
+                }
+            }
+        }
+
+        // Наборы точек градиента: по одному на источник и форму, эхо берет набор основной линии,
+        // призрак пика набор линии спектра (`stopSource`).
         var keys: [(source: WaveLine.Source, shape: WaveLayer)] = []
         let stopSets = lines.map { line -> Int in
-            if let index = keys.firstIndex(where: { $0.source == line.source && $0.shape == line.shape }) {
+            let source = Self.stopSource(line.source)
+            if let index = keys.firstIndex(where: { $0.source == source && $0.shape == line.shape }) {
                 return index
             }
-            keys.append((line.source, line.shape))
+            keys.append((source, line.shape))
             return keys.count - 1
         }
-        // Положения точек набора: у линии, раскрашенной по частотам, еще края смешения участков.
+        // Положения точек набора: у линии, раскрашенной по частотам, еще края смешения участков,
+        // у «Спектра» свои.
         let keyLocations: [[Double]] = keys.map { key in
+            if key.source == .spectrum {
+                return style == .wing ? Self.wingSpectrumLocations : Self.panelSpectrumLocations
+            }
             let sections = Self.paintsSections(key.source, colorByBand: colorByBand)
             switch style {
             case .wing: return sections ? Self.wingSectionLocations : Self.wingLocations
@@ -196,50 +286,33 @@ nonisolated struct WaveSet: Sendable {
             stopRanges.append(stopTotal..<(stopTotal + locations.count))
             stopTotal += locations.count
         }
+        // Высоты для подсветки «Спектра»: точки его линии (первой с этим набором).
+        let spectrumRange = lines.firstIndex { Self.stopSource($0.source) == .spectrum }.map { ranges[$0] }
         let placeholder = WavePaint.Stop(location: 0, color: PaletteColor(r: 0, g: 0, b: 0), opacity: 0)
         var stops = [WavePaint.Stop](repeating: placeholder, count: stopTotal)
         stops.withUnsafeMutableBufferPointer { buffer in
-            for (index, key) in keys.enumerated() {
-                let output = UnsafeMutableBufferPointer(rebasing: buffer[stopRanges[index]])
-                let level = sourceLevel(key.source)
-                if Self.paintsSections(key.source, colorByBand: colorByBand) {
-                    WavePaint.sectionStops(
-                        palette: palette, level: level, time: time, locations: keyLocations[index], profile: profile,
-                        options: options, into: output
-                    )
-                } else {
-                    WavePaint.stops(
-                        palette: palette, layer: key.shape, level: level, time: time, locations: keyLocations[index],
-                        profile: profile, options: options, into: output
-                    )
-                }
-            }
-        }
-
-        let envelopes = lines.map { Self.envelope(for: $0, style: style) }
-        let levels = lines.map { sourceLevel($0.source) * $0.amplitudeScale }
-        var ranges: [Range<Int>] = []
-        var total = 0
-        for envelope in envelopes {
-            ranges.append(total..<(total + envelope.count))
-            total += envelope.count
-        }
-        var samples = [Float](repeating: 0, count: total)
-        samples.withUnsafeMutableBufferPointer { buffer in
-            for (index, line) in lines.enumerated() {
-                let output = UnsafeMutableBufferPointer(rebasing: buffer[ranges[index]])
-                switch line.source {
-                case .spectrum:
-                    SpectrumShape.samples(
-                        bands: frame.bands, count: output.count, profile: profile,
-                        gain: appearance.amplitude * Double(line.amplitudeScale), into: output
-                    )
-                case .overall, .layer:
-                    let phase = motion.phase(line.shape, profile: profile).shifted(by: line.phaseOffset)
-                    WaveShape.samples(
-                        amplitude: levels[index], phase: phase, envelope: envelopes[index], gain: appearance.amplitude,
-                        into: output
-                    )
+            samples.withUnsafeBufferPointer { drawn in
+                for (index, key) in keys.enumerated() {
+                    let output = UnsafeMutableBufferPointer(rebasing: buffer[stopRanges[index]])
+                    let level = sourceLevel(key.source)
+                    if key.source == .spectrum {
+                        let heights = spectrumRange.map { UnsafeBufferPointer(rebasing: drawn[$0]) }
+                            ?? UnsafeBufferPointer<Float>(start: nil, count: 0)
+                        WavePaint.spectrumStops(
+                            palette: palette, heights: heights, level: level, time: time, profile: profile,
+                            options: options, into: output
+                        )
+                    } else if Self.paintsSections(key.source, colorByBand: colorByBand) {
+                        WavePaint.sectionStops(
+                            palette: palette, level: level, time: time, locations: keyLocations[index],
+                            profile: profile, options: options, into: output
+                        )
+                    } else {
+                        WavePaint.stops(
+                            palette: palette, layer: key.shape, level: level, time: time,
+                            locations: keyLocations[index], profile: profile, options: options, into: output
+                        )
+                    }
                 }
             }
         }
@@ -249,24 +322,31 @@ nonisolated struct WaveSet: Sendable {
             let set = stopSets[index]
             let baseStops = stops[stopRanges[set]]
             let opacity = line.opacity
+            let gradient = Self.gradient(baseStops) { Double($0 * opacity) }
             return Layer(
                 shape: line.shape,
                 level: levels[index],
                 glows: line.glows && levels[index] >= Self.glowLevel,
+                fills: line.fills,
+                widthScale: CGFloat(line.widthScale),
                 samples: samples[ranges[index]],
                 baseStops: baseStops,
                 stopSet: set,
                 opacity: opacity,
-                gradient: Self.gradient(baseStops) { Double($0 * opacity) }
+                gradient: gradient,
+                perceptualGradient: Self.perceptual(gradient, source: line.source)
             )
         }
         if fillAmount > 0 {
             let top = min(Double(WavePaint.fillTopOpacity) * fillAmount, 1)
-            fillGradients = stopRanges.map { range in
+            let gradients = stopRanges.map { range in
                 Self.gradient(stops[range]) { _ in top }
             }
+            fillGradients = gradients
+            perceptualFillGradients = keys.indices.map { Self.perceptual(gradients[$0], source: keys[$0].source) }
         } else {
             fillGradients = []
+            perceptualFillGradients = []
         }
     }
 }
@@ -275,11 +355,13 @@ nonisolated struct WaveSet: Sendable {
 ///
 /// Путь сглажен квадратичными кривыми через середины соседних точек, линии с круглыми концами:
 /// в крыле 1.75 / 1.5 / 1.25 pt, в панели 2 / 1.75 / 1.5 pt (по форме: бас, середина, верх),
-/// × «Толщина линий» × множитель толщины стиля (`WaveSet.geometry.widthScale`). Базовая линия
+/// × «Толщина линий» × множитель толщины стиля (`WaveSet.geometry.widthScale`) × множитель
+/// самой линии (`WaveSet.Layer.widthScale`, у призрака пика «Спектра» 0.7). Базовая линия
 /// по `WaveSet.geometry.baseline`: от середины размах `(высота / 2 - поле) * y` вверх и вниз, от
 /// нижней (спектр) размах `(высота - 2 × поле) * y` вверх от `высота - поле`; поле 6 pt в крыле
-/// и 3 pt в панели. Цвет из `WavePaint`. Волны складываются в режиме `.plusLighter`, заливка под
-/// ними до базовой линии.
+/// и 3 pt в панели. Цвет из `WavePaint`, у «Спектра» градиент в перцептивном пространстве
+/// (`WaveSet.Layer.perceptualGradient`). Волны складываются в режиме `.plusLighter`, заливка под
+/// ними (кроме призрака пика, `WaveSet.Layer.fills`) до базовой линии.
 struct WaveCanvas: View {
     let waves: WaveSet
     let mirrored: Bool
@@ -363,22 +445,35 @@ nonisolated struct WaveDrawing: Sendable {
         let startPoint = CGPoint(x: start, y: baseline)
         let endPoint = CGPoint(x: end, y: baseline)
 
-        if pass == .lines, waves.fill > 0, !lines.isEmpty {
+        // Призрак пика «Спектра» не заливается.
+        let filled: [(layer: WaveSet.Layer, path: Path)] = pass == .lines && waves.fill > 0
+            ? lines.filter { $0.layer.fills }
+            : []
+        if !filled.isEmpty {
             // Цвет заливки не зависит от прозрачности линии: у основной линии и ее эха один
             // градиент набора точек градиента.
             let fillGradients = waves.fillGradients
-            drawFill(lines, in: context, size: size, start: start, end: end, middle: baseline, swing: swing) { layer in
+            let perceptualFills = waves.perceptualFillGradients
+            drawFill(filled, in: context, size: size, start: start, end: end, middle: baseline, swing: swing) { layer in
+                if layer.stopSet < perceptualFills.count, let perceptual = perceptualFills[layer.stopSet] {
+                    return .linearGradient(perceptual, startPoint: startPoint, endPoint: endPoint)
+                }
                 let gradient = layer.stopSet < fillGradients.count ? fillGradients[layer.stopSet] : Gradient(stops: [])
                 return .linearGradient(gradient, startPoint: startPoint, endPoint: endPoint)
             }
         }
 
         for line in lines {
-            let width = widths[line.layer.shape.rawValue] * waves.thickness * widthScale
-                * (pass == .glow ? Self.glowLineScale : 1)
+            let scale: CGFloat = waves.thickness * widthScale * line.layer.widthScale
+            let width = widths[line.layer.shape.rawValue] * scale * (pass == .glow ? Self.glowLineScale : 1)
+            let shading: GraphicsContext.Shading = if let perceptual = line.layer.perceptualGradient {
+                .linearGradient(perceptual, startPoint: startPoint, endPoint: endPoint)
+            } else {
+                .linearGradient(line.layer.gradient, startPoint: startPoint, endPoint: endPoint)
+            }
             context.stroke(
                 line.path,
-                with: .linearGradient(line.layer.gradient, startPoint: startPoint, endPoint: endPoint),
+                with: shading,
                 style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
             )
         }

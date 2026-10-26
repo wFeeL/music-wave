@@ -38,7 +38,8 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// 400 pt).
 ///
 /// Снимки 1.2 рисуются после окна настроек, чтобы снимки 1.1 и окно настроек получали ту же
-/// модель, что и раньше. Снимки 22 показывают стиль «Спектр» (у выреза и в раскрытой панели), 23 цвет по частотам и
+/// модель, что и раньше. Снимки 22 показывают стиль «Спектр» (у выреза с крыльями 64 и 200 pt и в
+/// раскрытой панели; пружины полос и призрак пика прогнаны по демо до момента снимка), 23 цвет по частотам и
 /// переливание с фазой 0.4, 24 полосу прогресса у выреза и на капсуле, 25 свечение обложки, 26 «Увеличить контраст» и «Уменьшить
 /// прозрачность» (свечения обложки нет). `05-expanded-stale-progress`: позиция 150 с при
 /// длительности 133 с, полосы прогресса в панели нет. В сценах 1.1 полоса прогресса, свечение
@@ -359,6 +360,13 @@ enum SnapshotRenderer {
                 appearance: look { $0.look = .spectrum }
             ),
             SnapshotScene(
+                name: "22-style-spectrum-wide", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look {
+                    $0.look = .spectrum
+                    $0.wingWidth = 200
+                }
+            ),
+            SnapshotScene(
                 name: "22-style-spectrum-expanded", state: .expanded, moment: loudBeat, palette: fromModel,
                 appearance: look { $0.look = .spectrum }
             ),
@@ -473,6 +481,7 @@ enum SnapshotRenderer {
         settings.look = appearance.look
         settings.colorFlow = appearance.colorFlow
         settings.colorByBand = appearance.colorByBand
+        settings.spectrumPeaks = appearance.spectrumPeaks
     }
 
     /// Функции 1.2 в значениях по умолчанию приложения: сцены их выключают, а окно настроек
@@ -505,7 +514,8 @@ enum SnapshotRenderer {
             nowPlayingAvailable: scene.nowPlaying,
             showsBanner: scene.banner,
             displayOptions: scene.displayOptions,
-            flowPhase: scene.flowPhase
+            flowPhase: scene.flowPhase,
+            spectrum: moment.spectrum
         )
         // Рамка панели по крылу и размеру свечения сцены, как у окна в работе.
         var sized = scene.pill ? pillLayout : notchLayout
@@ -747,10 +757,10 @@ nonisolated private struct DemoMoments: Sendable {
             duration: Double(audio.samples.count) / audio.sampleRate, mutedFrom: nil
         )
         let fading = DemoTimeline(samples: audio.samples, sampleRate: audio.sampleRate, duration: 8, mutedFrom: 6)
-        loudBeat = music.strongestBeat(in: 8.0...8.7)
-        loudCalm = music.calmest(in: 8.25...8.5)
-        groove = music.strongestBeat(in: 12.0...12.7)
-        silent = fading.last
+        loudBeat = music.withSpectrum(music.strongestBeat(in: 8.0...8.7))
+        loudCalm = music.withSpectrum(music.calmest(in: 8.25...8.5))
+        groove = music.withSpectrum(music.strongestBeat(in: 12.0...12.7))
+        silent = fading.withSpectrum(fading.last)
         preview = music
     }
 }
