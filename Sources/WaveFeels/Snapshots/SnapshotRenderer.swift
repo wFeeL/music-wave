@@ -403,7 +403,8 @@ enum SnapshotRenderer {
             pulse: moment.pulse,
             time: moment.time,
             nowPlayingAvailable: scene.nowPlaying,
-            showsBanner: scene.banner
+            showsBanner: scene.banner,
+            displayOptions: scene.displayOptions
         )
         // Рамка панели по крылу и радиусу свечения сцены, как у окна в работе.
         var sized = scene.pill ? pillLayout : notchLayout
@@ -580,13 +581,17 @@ private struct SnapshotScene {
     let artworkGlow: Bool
     /// Мягкая остановка на паузе.
     let softStop: Bool
+    /// Системные «Увеличить контраст» и «Уменьшить прозрачность» снимка: не те, что на машине,
+    /// где его снимают. По умолчанию обе выключены.
+    let displayOptions: DisplayOptions
 
     init(
         name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor]?,
         backdrop: SnapshotBackdropAppearance = .dark, pill: Bool = false,
         track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true,
         appearance: WaveAppearance = .standard, banner: Bool = false,
-        progressLine: Bool = false, artworkGlow: Bool = false, softStop: Bool = false
+        progressLine: Bool = false, artworkGlow: Bool = false, softStop: Bool = false,
+        displayOptions: DisplayOptions = .standard
     ) {
         self.name = name
         self.state = state
@@ -601,6 +606,7 @@ private struct SnapshotScene {
         self.progressLine = progressLine
         self.artworkGlow = artworkGlow
         self.softStop = softStop
+        self.displayOptions = displayOptions
     }
 }
 

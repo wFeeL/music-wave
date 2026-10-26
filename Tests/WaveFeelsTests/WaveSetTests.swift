@@ -7,9 +7,21 @@ import WaveCore
 @MainActor
 struct WaveSetTests {
     static let frame = WaveFrame(bands: [], layers: [0.5, 0.4, 0.3], beat: 0, level: 0.6, rawLevelDB: -20)
+    /// Кадр с уровнями 24 полос: от баса к верху спадают, с горбом на середине.
+    static let bandFrame = WaveFrame(
+        bands: (0..<24).map { band -> Float in
+            let x = Float(band) / 23
+            let hump: Float = 0.3 * (1 - abs(2 * x - 1))
+            let slope: Float = 0.8 - 0.6 * x
+            return min(max(slope + hump, 0), 1)
+        },
+        layers: [0.5, 0.4, 0.3], beat: 0, level: 0.6, rawLevelDB: -20
+    )
     static let styles: [WaveStyle] = [.wing, .panel]
 
-    static func waves(_ change: (inout WaveAppearance) -> Void, style: WaveStyle = .wing) -> WaveSet {
+    static func waves(
+        _ change: (inout WaveAppearance) -> Void, style: WaveStyle = .wing, frame: WaveFrame = WaveSetTests.frame
+    ) -> WaveSet {
         var appearance = WaveAppearance.standard
         change(&appearance)
         return WaveSet(
@@ -145,5 +157,228 @@ struct WaveSetTests {
         let empty = WaveSet(empty: .panel)
         #expect(empty.layers.isEmpty)
         #expect(empty.fill == 0)
+    }
+
+    // MARK: - Стили, цвет по частотам, опции экрана
+
+    /// Набор по умолчанию строится так же, как до стилей: три основные линии с точками и цветами
+    /// прежнего расчета, без заливки, с геометрией `.standard`.
+    @Test func defaultSetUnchanged() {
+        for style in Self.styles {
+            let waves = Self.waves({ _ in }, style: style)
+            #expect(waves.geometry == .standard)
+            #expect(waves.fill == 0)
+            #expect(waves.thickness == 1)
+            #expect(waves.fillGradients.isEmpty)
+            #expect(waves.layers.map(\.shape) == [.bass, .mid, .high])
+            let locations = style == .wing ? WaveSet.wingLocations : WaveSet.panelLocations
+            for layer in waves.layers {
+                let level = Self.frame.layers[layer.shape.rawValue]
+                #expect(layer.level == level)
+                #expect(Array(layer.baseStops) == WavePaint.stops(
+                    palette: PaletteExtractor.fallback, layer: layer.shape, level: level, time: 1,
+                    locations: locations, profile: style.profile
+                ))
+                #expect(Array(layer.samples) == WaveShape.samples(
+                    layer: layer.shape, amplitude: level, phase: WaveMotion().phase(layer.shape, profile: style.profile),
+                    count: layer.samples.count, profile: style.profile
+                ))
+            }
+        }
+        #expect(WaveSet(empty: .wing).geometry == .standard)
+    }
+
+    /// «Спектр»: одна линия формы середины через уровни полос (`SpectrumShape`), цвет от общего
+    /// уровня, со свечением, во всю ширину крыла или панели.
+    @Test func spectrumSetHasOneLine() {
+        for style in Self.styles {
+            let waves = Self.waves({ $0.look = .spectrum }, style: style, frame: Self.bandFrame)
+            #expect(waves.layers.count == 1)
+            let line = waves.layers[0]
+            #expect(line.shape == .mid)
+            #expect(line.level == Self.bandFrame.level)
+            #expect(line.glows)
+            let count = style == .wing ? WaveSet.wingPoints : WaveSet.panelPoints
+            var expected = [Float](repeating: -1, count: count)
+            expected.withUnsafeMutableBufferPointer {
+                SpectrumShape.samples(bands: Self.bandFrame.bands, count: count, profile: style.profile, gain: 1, into: $0)
+            }
+            #expect(Array(line.samples) == expected)
+            // Линия стоит на нижней базовой линии: y без знака.
+            #expect(line.samples.allSatisfy { $0 >= 0 })
+            // В тишине полос линия лежит на базовой линии.
+            let flat = Self.waves({ $0.look = .spectrum }, style: style)
+            #expect(flat.layers.count == 1)
+            #expect(flat.layers[0].samples.allSatisfy { $0 == 0 })
+        }
+    }
+
+    /// «Спектр» рисуется от нижней базовой линии с обычной толщиной, заливка из настроек.
+    @Test func spectrumSetGeometryIsBottom() {
+        for style in Self.styles {
+            let waves = Self.waves({
+                $0.look = .spectrum
+                $0.fill = 0.5
+            }, style: style)
+            #expect(waves.geometry.baseline == .bottom)
+            #expect(waves.geometry.widthScale == 1)
+            #expect(waves.fill == 0.5)
+            #expect(waves.fillGradients.count == 1)
+        }
+    }
+
+    /// «Пульс»: в крыле линий нет вовсе (ни заливки, ни градиентов), в панели одна стоячая линия
+    /// общего уровня с нулевой фазой, без свечения и заливки.
+    @Test func pulseWingSetIsEmpty() {
+        let wing = Self.waves({
+            $0.look = .pulse
+            $0.fill = 0.5
+        }, style: .wing)
+        #expect(wing.layers.isEmpty)
+        #expect(wing.fill == 0)
+        #expect(wing.fillGradients.isEmpty)
+        #expect(wing.geometry == .standard)
+
+        var motion = WaveMotion()
+        motion.advance(layers: [0.5, 0.4, 0.3], dt: 0.5)
+        var appearance = WaveAppearance.standard
+        appearance.look = .pulse
+        let panel = WaveSet(
+            frame: Self.frame, palette: PaletteExtractor.fallback, motion: motion, time: 1, style: .panel,
+            appearance: appearance
+        )
+        #expect(panel.layers.count == 1)
+        let line = panel.layers[0]
+        #expect(line.shape == .mid)
+        #expect(line.level == Self.frame.level)
+        #expect(!line.glows)
+        #expect(panel.fill == 0)
+        #expect(Array(line.samples) == WaveShape.samples(
+            layer: .mid, amplitude: Self.frame.level, phase: WavePhase(carrier: 0, harmonic: 0),
+            count: WaveSet.panelPoints, profile: .panel
+        ))
+    }
+
+    /// «Пульс» не строит наборы свернутого острова: ни крыльев у выреза, ни линии капсулы, ни волн
+    /// баннера. Набор панели только у раскрытой панели. Остальные стили решают как раньше.
+    @Test func pulseBuildsNoCollapsedSets() {
+        for collapsedStyle in Self.styles {
+            for panelLayer in [false, true] {
+                let sets = IslandWavesView.neededSets(
+                    look: .pulse, wings: true, panelLayer: panelLayer, bannerLayer: true, collapsedStyle: collapsedStyle
+                )
+                #expect(sets.wing == false)
+                #expect(sets.panel == panelLayer)
+            }
+        }
+        for look in [WaveLook.waves, .spectrum, .minimal] {
+            let notch = IslandWavesView.neededSets(
+                look: look, wings: true, panelLayer: false, bannerLayer: false, collapsedStyle: .wing
+            )
+            #expect(notch.wing && !notch.panel)
+            let pill = IslandWavesView.neededSets(
+                look: look, wings: true, panelLayer: false, bannerLayer: false, collapsedStyle: .panel
+            )
+            #expect(!pill.wing && pill.panel)
+            let banner = IslandWavesView.neededSets(
+                look: look, wings: false, panelLayer: false, bannerLayer: true, collapsedStyle: .panel
+            )
+            #expect(banner.wing && !banner.panel)
+            let expanded = IslandWavesView.neededSets(
+                look: look, wings: false, panelLayer: true, bannerLayer: false, collapsedStyle: .wing
+            )
+            #expect(!expanded.wing && expanded.panel)
+        }
+    }
+
+    /// «Минимал»: одна тонкая линия общего уровня, без заливки при любой «Заливке» в настройках.
+    @Test func minimalHasNoFill() {
+        for style in Self.styles {
+            let waves = Self.waves({
+                $0.look = .minimal
+                $0.fill = 1
+                $0.lineCount = 6
+            }, style: style)
+            #expect(waves.fill == 0)
+            #expect(waves.fillGradients.isEmpty)
+            #expect(waves.layers.count == 1)
+            #expect(waves.layers.first?.shape == .mid)
+            #expect(waves.layers.first?.level == Self.frame.level)
+            #expect(waves.geometry == WaveLookGeometry(baseline: .center, widthScale: WaveLook.minimalWidthScale))
+        }
+    }
+
+    /// Цвет по частотам: одна линия красится участками (`sectionStops`) на точках с краями
+    /// смешения, линии слоев своим цветом на обычных точках.
+    @Test func colorByBandPaintsOneLineBySections() {
+        for style in Self.styles {
+            let sectionLocations = style == .wing ? WaveSet.wingSectionLocations : WaveSet.panelSectionLocations
+            let locations = style == .wing ? WaveSet.wingLocations : WaveSet.panelLocations
+            let options = WavePaint.Options(colorByBand: true)
+            for look in [WaveLook.waves, .spectrum, .minimal] {
+                let waves = Self.waves({
+                    $0.look = look
+                    $0.lineCount = 1
+                    $0.colorByBand = true
+                }, style: style)
+                #expect(waves.layers.count == 1)
+                var expected = [WavePaint.Stop](
+                    repeating: WavePaint.Stop(location: 0, color: PaletteColor(r: 0, g: 0, b: 0), opacity: 0),
+                    count: sectionLocations.count
+                )
+                expected.withUnsafeMutableBufferPointer {
+                    WavePaint.sectionStops(
+                        palette: PaletteExtractor.fallback, level: Self.frame.level, time: 1, locations: sectionLocations,
+                        profile: style.profile, options: options, into: $0
+                    )
+                }
+                #expect(Array(waves.layers[0].baseStops) == expected)
+            }
+            let layered = Self.waves({ $0.colorByBand = true }, style: style)
+            for layer in layered.layers {
+                #expect(Array(layer.baseStops) == WavePaint.stops(
+                    palette: PaletteExtractor.fallback, layer: layer.shape, level: Self.frame.layers[layer.shape.rawValue],
+                    time: 1, locations: locations, profile: style.profile, options: options
+                ))
+            }
+        }
+    }
+
+    /// Опции экрана доходят до рисования: «Увеличить контраст» дает толщину × 1.4 и контрастные
+    /// цвета, переливание идет фазой в цвета.
+    @Test func contrastAndFlowReachPaint() {
+        let contrast = WaveAppearance.standard.adapted(to: DisplayOptions(increaseContrast: true))
+        let waves = WaveSet(
+            frame: Self.frame, palette: PaletteExtractor.fallback, motion: WaveMotion(), time: 1, style: .wing,
+            appearance: contrast, flowPhase: 0.3
+        )
+        #expect(waves.geometry.widthScale == WaveAppearance.contrastWidthScale)
+        for layer in waves.layers {
+            #expect(Array(layer.baseStops) == WavePaint.stops(
+                palette: PaletteExtractor.fallback, layer: layer.shape, level: Self.frame.layers[layer.shape.rawValue],
+                time: 1, locations: WaveSet.wingLocations, profile: .wing,
+                options: WavePaint.Options(highContrast: true, flowPhase: 0.3)
+            ))
+        }
+    }
+
+    /// «Пульс» дышит без «Вздоха на битах» и светится громкостью, остальные стили как раньше.
+    @Test func pulseBreathesWithoutBeatPulse() {
+        let visuals = IslandVisuals(
+            frame: Self.frame, sampled: Self.frame, motion: WaveMotion(), palette: PaletteExtractor.fallback,
+            glow: 0, pulse: 0.5, ambient: 0, time: 1
+        )
+        let level = Self.frame.level
+        let pulse = IslandView.breathing(look: .pulse, visuals: visuals, canBreathe: true, beatPulse: false)
+        let breath = PulseLook.breath(pulse: 0.5, ambient: 0, level: level)
+        #expect(pulse.scale == 1 + CGFloat(PulseLook.breathDepth) * CGFloat(breath))
+        #expect(pulse.glow == PulseLook.glow(glow: 0, ambient: 0, level: level))
+        #expect(pulse.glow > 0)
+        #expect(IslandView.breathing(look: .pulse, visuals: visuals, canBreathe: false, beatPulse: true).scale == 1)
+
+        let waves = IslandView.breathing(look: .waves, visuals: visuals, canBreathe: true, beatPulse: true)
+        #expect(waves.scale == 1 + IslandView.breathDepth * 0.5)
+        #expect(waves.glow == 0)
+        #expect(IslandView.breathing(look: .waves, visuals: visuals, canBreathe: true, beatPulse: false).scale == 1)
     }
 }

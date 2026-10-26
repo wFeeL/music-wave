@@ -101,6 +101,10 @@ final class AppModel {
     private(set) var screensAsleep = false
     /// Режим энергосбережения: остров рисуется не чаще 30 кадров в секунду.
     var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// Системные «Увеличить контраст» и «Уменьшить прозрачность», под которые остров и
+    /// предпросмотр подстраивают вид (`WaveAppearance.adapted(to:)`, только для рисования, в
+    /// настройки не пишется). Снимки задают их в `showPreview`, чтобы не зависеть от машины.
+    private(set) var displayOptions: DisplayOptions = .standard
     /// Фазы волн. Сдвигаются на каждом кадре отрисовки, поэтому не наблюдаются.
     @ObservationIgnored var motion = WaveMotion()
     /// Период кадра экрана острова, с (`1 / NSScreen.maximumFramesPerSecond`). Ставит
@@ -1431,7 +1435,8 @@ final class AppModel {
     /// (`previewing`). Остров считается давно пришедшим в `state`. `showsBanner`: баннер нового
     /// трека с `track`, давно открытый, текст виден.
     /// Обложка трека разбирается здесь же, синхронно, тем же путем, что в работе; палитра
-    /// берется из нее же или задается явно (`palette`).
+    /// берется из нее же или задается явно (`palette`). `displayOptions`: системные опции экрана
+    /// снимка, а не машины, где его снимают.
     func showPreview(
         state: IslandState,
         track: NowPlayingInfo?,
@@ -1442,9 +1447,11 @@ final class AppModel {
         pulse: Float,
         time: Double,
         nowPlayingAvailable: Bool = true,
-        showsBanner: Bool = false
+        showsBanner: Bool = false,
+        displayOptions: DisplayOptions = .standard
     ) {
         islandState = state
+        self.displayOptions = displayOptions
         islandStateChangedAt = -Double.infinity
         lastTrack = track
         previewNowPlaying = nowPlayingAvailable

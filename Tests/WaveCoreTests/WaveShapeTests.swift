@@ -853,6 +853,55 @@ struct WaveShapeTests {
         #expect(colorDistance(near[1].color, line(.mid, probe, .wing)[1].color) < 1e-5)
     }
 
+    /// Точки градиента линии с цветом по частотам: обычные точки профиля плюс края смешения
+    /// `bandEdges ± bandBlend / 2` (в панели симметрично от середины). На этих краях цвет участка
+    /// уже чистый, поэтому смешение рисуется шириной 0.06, а не шагом сетки 1/8.
+    @Test func sectionLocationsDrawTheBandBlend() throws {
+        let half = WavePaint.bandBlend / 2
+        let edges = [
+            WavePaint.bandEdges.low - half, WavePaint.bandEdges.low + half,
+            WavePaint.bandEdges.high - half, WavePaint.bandEdges.high + half,
+        ]
+        let wing = WavePaint.sectionLocations(for: .wing)
+        let wingBase = WavePaint.locations(for: .wing)
+        #expect(wing.count == wingBase.count + 4)
+        #expect(Set(wingBase).isSubset(of: Set(wing)))
+        #expect(zip(wing, wing.dropFirst()).allSatisfy { $0 < $1 })
+        for edge in edges {
+            #expect(wing.contains(edge), "\(edge)")
+        }
+
+        let panel = WavePaint.sectionLocations(for: .panel)
+        let panelBase = WavePaint.locations(for: .panel)
+        #expect(panel.count == panelBase.count + 8)
+        #expect(Set(panelBase).isSubset(of: Set(panel)))
+        #expect(zip(panel, panel.dropFirst()).allSatisfy { $0 < $1 })
+        for (a, b) in zip(panel, panel.reversed()) {
+            #expect(abs(a + b - 1) < 1e-12)
+        }
+        for edge in edges {
+            #expect(panel.contains { abs($0 - (0.5 + edge / 2)) < 1e-12 }, "\(edge)")
+            #expect(panel.contains { abs($0 - (0.5 - edge / 2)) < 1e-12 }, "\(edge)")
+        }
+
+        // На краях смешения стоят чистые цвета соседних участков.
+        let options = WavePaint.Options(colorByBand: true)
+        let sections = sectionStops(
+            palette: Self.bandPalette, level: 0.9, time: 2.2, locations: wing, profile: .wing, options: options
+        )
+        func pure(_ layer: WaveLayer, at location: Double) -> RGBColor {
+            WavePaint.stops(
+                palette: Self.bandPalette, layer: layer, level: 0.9, time: 2.2, locations: [location],
+                profile: .wing, options: options
+            )[0].color
+        }
+        let layers: [WaveLayer] = [.bass, .mid, .mid, .high]
+        for (edge, layer) in zip(edges, layers) {
+            let index = try #require(wing.firstIndex(of: edge))
+            #expect(colorDistance(sections[index].color, pure(layer, at: edge)) < 1e-5, "\(edge)")
+        }
+    }
+
     @Test func highContrastRaisesOpacity() {
         #expect(WavePaint.contrastRestOpacity == 0.12)
         #expect(WavePaint.contrastFullOpacity == 0.95)

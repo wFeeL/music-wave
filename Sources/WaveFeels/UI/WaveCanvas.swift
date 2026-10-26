@@ -28,7 +28,8 @@ enum WavePass: Sendable {
 /// (два крыла, линии и свечение). Точки всех линий лежат в одном массиве, точки градиента всех
 /// наборов в другом, линии держат свои срезы: на кадр два выделения памяти, а не по паре на линию.
 /// Градиенты обводки и заливки (`Gradient` из цветов `Color`) тоже строятся здесь один раз, холст
-/// только ставит их между своими краями.
+/// только ставит их между своими краями. Стиль (`WaveLook`) доходит до холста только через
+/// линии, заливку и `geometry`.
 nonisolated struct WaveSet: Sendable {
     /// Одна линия (`WaveLine`).
     struct Layer: Sendable {
@@ -38,8 +39,8 @@ nonisolated struct WaveSet: Sendable {
         let level: Float
         /// Есть ли у линии свечение: основная линия баса или середины с уровнем от `glowLevel`.
         let glows: Bool
-        /// y в -1...1: в крыле от выреза к краю, в панели от левого края к правому. Срез общего
-        /// массива набора, индексы не с нуля.
+        /// y в -1...1 (у спектра 0...1): в крыле от выреза к краю, в панели от левого края к
+        /// правому. Срез общего массива набора, индексы не с нуля.
         let samples: ArraySlice<Float>
         /// Точки градиента источника и формы линии с прозрачностью основной линии: у основной
         /// линии и ее эха один и тот же срез.
@@ -70,6 +71,9 @@ nonisolated struct WaveSet: Sendable {
     /// Положения точек градиента: частые на проявлении у выреза и растворении у края.
     static let wingLocations = WavePaint.locations(for: .wing)
     static let panelLocations = WavePaint.locations(for: .panel)
+    /// Они же плюс края смешения участков: у линии, раскрашенной по частотам (`paintsSections`).
+    static let wingSectionLocations = WavePaint.sectionLocations(for: .wing)
+    static let panelSectionLocations = WavePaint.sectionLocations(for: .panel)
     /// Ниже этого уровня у слоя нет свечения.
     static let glowLevel: Float = 0.05
 
@@ -82,7 +86,8 @@ nonisolated struct WaveSet: Sendable {
         WaveLayer.allCases.map { WaveShape.Envelope(layer: $0, count: count, profile: profile) }
     }
 
-    /// Огибающая линии: число точек по стилю и по тому, эхо ли это (`wingEchoPoints`).
+    /// Огибающая линии: число точек по стилю и по тому, эхо ли это (`wingEchoPoints`). У линии
+    /// спектра огибающая задает только число точек (`wingPoints` или `panelPoints`).
     static func envelope(for line: WaveLine, style: WaveStyle) -> WaveShape.Envelope {
         let index = line.shape.rawValue
         switch style {
@@ -94,12 +99,26 @@ nonisolated struct WaveSet: Sendable {
         }
     }
 
+    /// Красится ли линия участками баса, середины и верха (`WavePaint.sectionStops`): одна линия
+    /// общего уровня или спектра при «Цвете по частотам». Линия слоя при нем красится своим цветом
+    /// (`WavePaint.Options.colorByBand`).
+    static func paintsSections(_ source: WaveLine.Source, colorByBand: Bool) -> Bool {
+        guard colorByBand else { return false }
+        switch source {
+        case .overall, .spectrum: return true
+        case .layer: return false
+        }
+    }
+
     let style: WaveStyle
     let layers: [Layer]
     /// «Толщина линий», множитель.
     let thickness: CGFloat
-    /// «Заливка» 0...1; 0 без заливки.
+    /// Заливка стиля 0...1 (`WaveAppearance.effectiveFill`); 0 без заливки.
     let fill: Double
+    /// Базовая линия (она же ось заливки) и множитель толщины линий стиля
+    /// (`WaveAppearance.lookGeometry`). Холст берет их только отсюда.
+    let geometry: WaveLookGeometry
     /// Градиенты заливки по номеру набора точек градиента (`Layer.stopSet`): цвет набора с
     /// прозрачностью `fillTopOpacity × fill`, без прозрачности линии, поэтому у основной линии и
     /// ее эха один. Пустой без заливки.
@@ -111,6 +130,7 @@ nonisolated struct WaveSet: Sendable {
         layers = []
         thickness = 1
         fill = 0
+        geometry = .standard
         fillGradients = []
     }
 
@@ -121,22 +141,36 @@ nonisolated struct WaveSet: Sendable {
         })
     }
 
-    /// По линии на каждую `appearance.lines`: размах от уровня источника (общий уровень у
-    /// одной волны) × `amplitudeScale` и «Размаха», фаза формы со сдвигом `phaseOffset`. Цвет
-    /// идет от уровня источника, прозрачность × `opacity`: эхо делит точки градиента со своей
-    /// основной линией и отличается от нее только прозрачностью.
+    /// По линии на каждую `appearance.lines(for: style.profile)`: размах от уровня источника
+    /// (общий уровень у одной волны, «Минимала», стоячей линии «Пульса» и спектра) ×
+    /// `amplitudeScale` и «Размаха», фаза формы со сдвигом `phaseOffset`, у стоячей линии фаза
+    /// нулевая. Линия спектра идет через уровни полос `frame.bands` (`SpectrumShape`). Цвет идет
+    /// от уровня источника с переливанием `flowPhase`, «Цветом по частотам» и контрастом
+    /// (`WavePaint.Options`), прозрачность × `opacity`: эхо делит точки градиента со своей
+    /// основной линией и отличается от нее только прозрачностью. Заливка `effectiveFill`,
+    /// геометрия `lookGeometry`.
+    ///
+    /// Раскладка `style` здесь совпадает с той, что нужна `lines(for:)`: у «Волн», «Спектра» и
+    /// «Минимала» линии от раскладки не зависят, а «Пульс» набора свернутой капсулы не получает
+    /// (`IslandWavesView.neededSets`), поэтому набор `.panel` в «Пульсе» только у раскрытой панели.
     init(
         frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle,
-        appearance: WaveAppearance
+        appearance: WaveAppearance, flowPhase: Double = 0
     ) {
-        let locations = style == .wing ? Self.wingLocations : Self.panelLocations
+        let profile = style.profile
+        let colorByBand = appearance.colorByBand
+        let fillAmount = appearance.effectiveFill
         self.style = style
         thickness = CGFloat(appearance.thickness)
-        fill = appearance.fill
-        let lines = appearance.lines
+        fill = fillAmount
+        geometry = appearance.lookGeometry
+        let lines = appearance.lines(for: profile)
+        let options = WavePaint.Options(
+            colorByBand: colorByBand, highContrast: appearance.highContrast, flowPhase: flowPhase
+        )
         func sourceLevel(_ source: WaveLine.Source) -> Float {
             switch source {
-            case .overall: frame.level
+            case .overall, .spectrum: frame.level
             case .layer(let layer): layer.rawValue < frame.layers.count ? frame.layers[layer.rawValue] : 0
             }
         }
@@ -150,16 +184,37 @@ nonisolated struct WaveSet: Sendable {
             keys.append((line.source, line.shape))
             return keys.count - 1
         }
-        let stopCount = locations.count
+        // Положения точек набора: у линии, раскрашенной по частотам, еще края смешения участков.
+        let keyLocations: [[Double]] = keys.map { key in
+            let sections = Self.paintsSections(key.source, colorByBand: colorByBand)
+            switch style {
+            case .wing: return sections ? Self.wingSectionLocations : Self.wingLocations
+            case .panel: return sections ? Self.panelSectionLocations : Self.panelLocations
+            }
+        }
+        var stopRanges: [Range<Int>] = []
+        var stopTotal = 0
+        for locations in keyLocations {
+            stopRanges.append(stopTotal..<(stopTotal + locations.count))
+            stopTotal += locations.count
+        }
         let placeholder = WavePaint.Stop(location: 0, color: PaletteColor(r: 0, g: 0, b: 0), opacity: 0)
-        var stops = [WavePaint.Stop](repeating: placeholder, count: keys.count * stopCount)
+        var stops = [WavePaint.Stop](repeating: placeholder, count: stopTotal)
         stops.withUnsafeMutableBufferPointer { buffer in
             for (index, key) in keys.enumerated() {
-                WavePaint.stops(
-                    palette: palette, layer: key.shape, level: sourceLevel(key.source), time: time, locations: locations,
-                    profile: style.profile,
-                    into: UnsafeMutableBufferPointer(rebasing: buffer[(index * stopCount)..<((index + 1) * stopCount)])
-                )
+                let output = UnsafeMutableBufferPointer(rebasing: buffer[stopRanges[index]])
+                let level = sourceLevel(key.source)
+                if Self.paintsSections(key.source, colorByBand: colorByBand) {
+                    WavePaint.sectionStops(
+                        palette: palette, level: level, time: time, locations: keyLocations[index], profile: profile,
+                        options: options, into: output
+                    )
+                } else {
+                    WavePaint.stops(
+                        palette: palette, layer: key.shape, level: level, time: time, locations: keyLocations[index],
+                        profile: profile, options: options, into: output
+                    )
+                }
             }
         }
 
@@ -174,18 +229,29 @@ nonisolated struct WaveSet: Sendable {
         var samples = [Float](repeating: 0, count: total)
         samples.withUnsafeMutableBufferPointer { buffer in
             for (index, line) in lines.enumerated() {
-                let phase = motion.phase(line.shape, profile: style.profile).shifted(by: line.phaseOffset)
-                WaveShape.samples(
-                    amplitude: levels[index], phase: phase, envelope: envelopes[index], gain: appearance.amplitude,
-                    into: UnsafeMutableBufferPointer(rebasing: buffer[ranges[index]])
-                )
+                let output = UnsafeMutableBufferPointer(rebasing: buffer[ranges[index]])
+                switch line.source {
+                case .spectrum:
+                    SpectrumShape.samples(
+                        bands: frame.bands, count: output.count, profile: profile,
+                        gain: appearance.amplitude * Double(line.amplitudeScale), into: output
+                    )
+                case .overall, .layer:
+                    let phase = line.standing
+                        ? WavePhase(carrier: 0, harmonic: 0)
+                        : motion.phase(line.shape, profile: profile).shifted(by: line.phaseOffset)
+                    WaveShape.samples(
+                        amplitude: levels[index], phase: phase, envelope: envelopes[index], gain: appearance.amplitude,
+                        into: output
+                    )
+                }
             }
         }
 
         layers = lines.indices.map { index in
             let line = lines[index]
             let set = stopSets[index]
-            let baseStops = stops[(set * stopCount)..<((set + 1) * stopCount)]
+            let baseStops = stops[stopRanges[set]]
             let opacity = line.opacity
             return Layer(
                 shape: line.shape,
@@ -198,10 +264,10 @@ nonisolated struct WaveSet: Sendable {
                 gradient: Self.gradient(baseStops) { Double($0 * opacity) }
             )
         }
-        if appearance.fill > 0 {
-            let top = min(Double(WavePaint.fillTopOpacity) * appearance.fill, 1)
-            fillGradients = keys.indices.map { set in
-                Self.gradient(stops[(set * stopCount)..<((set + 1) * stopCount)]) { _ in top }
+        if fillAmount > 0 {
+            let top = min(Double(WavePaint.fillTopOpacity) * fillAmount, 1)
+            fillGradients = stopRanges.map { range in
+                Self.gradient(stops[range]) { _ in top }
             }
         } else {
             fillGradients = []
@@ -213,8 +279,11 @@ nonisolated struct WaveSet: Sendable {
 ///
 /// Путь сглажен квадратичными кривыми через середины соседних точек, линии с круглыми концами:
 /// в крыле 1.75 / 1.5 / 1.25 pt, в панели 2 / 1.75 / 1.5 pt (по форме: бас, середина, верх),
-/// × «Толщина линий». Размах `(высота / 2 - поле) * y`, поле 6 pt в крыле и 3 pt в панели.
-/// Цвет из `WavePaint`. Волны складываются в режиме `.plusLighter`, заливка под ними.
+/// × «Толщина линий» × множитель толщины стиля (`WaveSet.geometry.widthScale`). Базовая линия
+/// по `WaveSet.geometry.baseline`: от середины размах `(высота / 2 - поле) * y` вверх и вниз, от
+/// нижней (спектр) размах `(высота - 2 × поле) * y` вверх от `высота - поле`; поле 6 pt в крыле
+/// и 3 pt в панели. Цвет из `WavePaint`. Волны складываются в режиме `.plusLighter`, заливка под
+/// ними до базовой линии.
 struct WaveCanvas: View {
     let waves: WaveSet
     let mirrored: Bool
@@ -264,9 +333,20 @@ nonisolated struct WaveDrawing: Sendable {
         guard size.width > 1, size.height > 1 else { return }
         context.blendMode = .plusLighter
         let isWing = waves.style == .wing
-        let middle = size.height / 2
-        let swing = max(size.height / 2 - (isWing ? Self.wingEdgeMargin : Self.panelEdgeMargin), 0)
+        let margin = isWing ? Self.wingEdgeMargin : Self.panelEdgeMargin
+        // Базовая линия стиля, она же ось заливки, и размах от нее.
+        let baseline: CGFloat
+        let swing: CGFloat
+        switch waves.geometry.baseline {
+        case .center:
+            baseline = size.height / 2
+            swing = max(size.height / 2 - margin, 0)
+        case .bottom:
+            baseline = size.height - margin
+            swing = max(size.height - 2 * margin, 0)
+        }
         let widths = isWing ? Self.wingLineWidths : Self.panelLineWidths
+        let widthScale = CGFloat(waves.geometry.widthScale)
         // Крыло идет от выреза: слева направо или зеркально. Панель всегда слева направо.
         let start: CGFloat = isWing && mirrored ? size.width : 0
         let end: CGFloat = isWing && mirrored ? 0 : size.width
@@ -279,26 +359,27 @@ nonisolated struct WaveDrawing: Sendable {
             guard count > 1, pass == .lines || layer.glows else { return nil }
             let xs = columns.positions(count: count)
             let points = zip(xs, layer.samples).map { x, y in
-                CGPoint(x: x, y: middle - swing * CGFloat(y))
+                CGPoint(x: x, y: baseline - swing * CGFloat(y))
             }
             return (layer: layer, path: Self.smoothPath(through: points))
         }
         // Градиенты готовы в наборе (общие для крыльев и проходов), холст задает только края.
-        let startPoint = CGPoint(x: start, y: middle)
-        let endPoint = CGPoint(x: end, y: middle)
+        let startPoint = CGPoint(x: start, y: baseline)
+        let endPoint = CGPoint(x: end, y: baseline)
 
         if pass == .lines, waves.fill > 0, !lines.isEmpty {
             // Цвет заливки не зависит от прозрачности линии: у основной линии и ее эха один
             // градиент набора точек градиента.
             let fillGradients = waves.fillGradients
-            drawFill(lines, in: context, size: size, start: start, end: end, middle: middle, swing: swing) { layer in
+            drawFill(lines, in: context, size: size, start: start, end: end, middle: baseline, swing: swing) { layer in
                 let gradient = layer.stopSet < fillGradients.count ? fillGradients[layer.stopSet] : Gradient(stops: [])
                 return .linearGradient(gradient, startPoint: startPoint, endPoint: endPoint)
             }
         }
 
         for line in lines {
-            let width = widths[line.layer.shape.rawValue] * waves.thickness * (pass == .glow ? Self.glowLineScale : 1)
+            let width = widths[line.layer.shape.rawValue] * waves.thickness * widthScale
+                * (pass == .glow ? Self.glowLineScale : 1)
             context.stroke(
                 line.path,
                 with: .linearGradient(line.layer.gradient, startPoint: startPoint, endPoint: endPoint),
@@ -330,7 +411,8 @@ nonisolated struct WaveDrawing: Sendable {
         }
     }
 
-    /// Заливка между каждой линией и осью. Цвет по горизонтали тот же, что у линии, прозрачность
+    /// Заливка между каждой линией и осью `middle` (базовая линия стиля: середина или, у спектра,
+    /// нижняя, тогда нижняя половина пустая). Цвет по горизонтали тот же, что у линии, прозрачность
     /// у линии `fillTopOpacity × fill` без учета прозрачности самой линии (`colors`): к краям
     /// крыла и в тишине заливка сходит на нет вместе с размахом. По вертикали одна маска
     /// на холст (`clipToLayer`, единственный слой вне экрана, и только при заливке): у каждой

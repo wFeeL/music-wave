@@ -397,6 +397,19 @@ public enum WavePaint {
         }
     }
 
+    /// Положения точек градиента линии с цветом по частотам (`sectionStops`): `locations(for:)`
+    /// плюс края смешения участков `bandEdges ± bandBlend / 2` (в панели симметрично от середины).
+    /// Без них линейная интерполяция между точками шага 1/8 растягивает смешение 0.06 на весь шаг.
+    public static func sectionLocations(for profile: WaveProfile) -> [Double] {
+        let half = bandBlend / 2
+        let edges = [bandEdges.low - half, bandEdges.low + half, bandEdges.high - half, bandEdges.high + half]
+        let added: [Double] = switch profile {
+        case .wing: edges
+        case .panel: edges.flatMap { [0.5 - $0 / 2, 0.5 + $0 / 2] }
+        }
+        return Array(Set(locations(for: profile) + added)).sorted()
+    }
+
     /// `count` точек градиента с шагом `1 / (count - 1)`; меньше двух точек дают пустой массив.
     public static func stops(
         palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, count: Int, profile: WaveProfile = .wing,
@@ -466,7 +479,7 @@ public enum WavePaint {
     /// своего слоя (как `stops(..., options:)` с `colorByBand`), соседние смешиваются в OKLab на
     /// ширине `bandBlend`. В крыле бас у выреза, в панели в середине и симметрично к краям.
     /// Прозрачность как у линии середины. `options.colorByBand` здесь не читается: цвет по
-    /// частотам включен всегда.
+    /// частотам включен всегда. Смешение видно шириной `bandBlend` на точках `sectionLocations(for:)`.
     /// - Precondition: `output.count == locations.count`.
     public static func sectionStops(
         palette: [RGBColor], level: Float, time: Double, locations: [Double], profile: WaveProfile,

@@ -40,6 +40,11 @@ import WaveCore
 /// Открывается пружиной 0.42 / 0.82, закрывается 0.45 / 1.0. Наведение на баннер раскрывает
 /// полную панель (`NotchWindowController`), ее пружина главнее.
 ///
+/// Стиль «Пульс»: у свернутого острова волн нет, остров дышит и светится в такт и с громкостью
+/// (`breathing`, `PulseLook`), у выреза и на капсуле одинаково. Вид волн подстраивается под
+/// системные «Увеличить контраст» и «Уменьшить прозрачность» (`AppModel.displayOptions`,
+/// `WaveAppearance.adapted(to:)`), только для рисования.
+///
 /// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее, содержимое
 /// панели появляется и уходит одной прозрачностью. Баннер не перетекает из свернутого острова:
 /// тела, волны и содержимое меняются одной прозрачностью за 0.2 с, а уходящее тело гаснет
@@ -70,6 +75,25 @@ struct IslandView: View {
     }
     /// «Вздох»: насколько остров увеличивается на полном ударе.
     static let breathDepth: CGFloat = 0.03
+
+    /// Масштаб «вздоха» и свечение под островом на кадре по стилю. `canBreathe`: остров может
+    /// дышать (свернут, без баннера, без «Уменьшения движения»). «Пульс»: остров дышит всегда, когда
+    /// может, без оглядки на «Вздох на битах», масштабом `1 + PulseLook.breathDepth ×
+    /// PulseLook.breath`, свечение `PulseLook.glow` (удары, мягкий пульс и громкость). Остальные
+    /// стили как раньше: «вздох» `1 + breathDepth × pulse` только с `beatPulse`, свечение доли.
+    static func breathing(
+        look: WaveLook, visuals: IslandVisuals, canBreathe: Bool, beatPulse: Bool
+    ) -> (scale: CGFloat, glow: Float) {
+        switch look {
+        case .pulse:
+            let level = visuals.frame.level
+            let breath = PulseLook.breath(pulse: visuals.pulse, ambient: visuals.ambient, level: level)
+            let glow = PulseLook.glow(glow: visuals.glow, ambient: visuals.ambient, level: level)
+            return (canBreathe ? 1 + CGFloat(PulseLook.breathDepth) * CGFloat(breath) : 1, glow)
+        case .waves, .spectrum, .minimal:
+            return (canBreathe && beatPulse ? 1 + breathDepth * CGFloat(visuals.pulse) : 1, visuals.glow)
+        }
+    }
     /// Содержимое панели: появляется чуть позже формы, слегка вырастая от верха, исчезает быстро.
     static var panelContentTransition: AnyTransition {
         .asymmetric(
@@ -213,15 +237,22 @@ struct IslandView: View {
         let visuals = model.islandVisuals(now: now, timelineTime: timelineTime, reduceMotion: reduceMotion)
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.
         let glow = reduceMotion ? 0 : model.settings.glowIntensity
-        // В режиме энергосбережения вид облегчен: без эха и без свечения линий. Настройки и
-        // предпросмотр во вкладке «Вид» остаются как есть.
-        let appearance = model.lowPower ? model.settings.appearance.lightened() : model.settings.appearance
+        // Вид под системные «Увеличить контраст» и «Уменьшить прозрачность» (только для рисования,
+        // в настройки не пишется), в режиме энергосбережения еще и облегчен: без эха и без свечения
+        // линий. Настройки остаются как есть.
+        let adapted = model.settings.appearance.adapted(to: model.displayOptions)
+        let appearance = model.lowPower ? adapted.lightened() : adapted
         let bannerVisible = model.bannerVisible
         // Баннер открылся или закрылся меньше `overlap` назад: живы и крылья, и волны баннера.
         // Волны баннера только у свернутого острова: у раскрытой панели они не видны.
         let bannerMoving = now - model.bannerVisibleChangedAt < IslandTransition.overlap
-        let breathes = state == .collapsed && !bannerVisible && model.settings.beatPulse && !reduceMotion
-        let scale = breathes ? 1 + Self.breathDepth * CGFloat(visuals.pulse) : 1
+        // У выреза и у капсулы на внешнем экране одинаково.
+        let breath = Self.breathing(
+            look: appearance.look, visuals: visuals,
+            canBreathe: state == .collapsed && !bannerVisible && !reduceMotion,
+            beatPulse: model.settings.beatPulse
+        )
+        let scale = breath.scale
         let anchor = geometry.anchor
         let layers = IslandTransition.waveLayers(state: state, sinceStateChange: now - model.islandStateChangedAt)
         // На паузе волны панели сначала затихают в линию, затем полоса гаснет.
@@ -229,10 +260,10 @@ struct IslandView: View {
 
         return ZStack(alignment: .topLeading) {
             if BeatGlowView.isVisible(
-                glow: BeatGlowView.brightness(glow: visuals.glow, ambient: visuals.ambient), intensity: glow
+                glow: BeatGlowView.brightness(glow: breath.glow, ambient: visuals.ambient), intensity: glow
             ) {
                 BeatGlowView(
-                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, ambient: visuals.ambient,
+                    geometry: geometry, state: state, scale: scale, glow: breath.glow, ambient: visuals.ambient,
                     intensity: glow, radius: appearance.glowRadius,
                     color: visuals.palette.first ?? PaletteExtractor.fallback[0], banner: bannerVisible
                 )

@@ -165,8 +165,10 @@ extension PreviewPlayer {
 }
 
 /// Свернутый остров на фоне строки меню, как на снимках (`SnapshotBackdrop`): условный вырез
-/// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн, яркость
-/// свечения, «вздох» и мягкий пульс из настроек, крыло не шире, чем позволит экран острова
+/// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн (под
+/// системные опции экрана модели, `AppModel.displayOptions`, как на острове), яркость свечения,
+/// «вздох» и мягкий пульс из настроек, в «Пульсе» дыхание и свечение как на острове
+/// (`IslandView.breathing`), крыло не шире, чем позволит экран острова
 /// (`wingLimit`). Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с
 /// частотой экрана острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
 /// (`PreviewPlayer.isActive`, у калибровки окно настроек не видно), `TimelineView` стоит.
@@ -205,13 +207,15 @@ struct IslandPreview: View {
     var body: some View {
         // Настройки читаются здесь, а не на каждом кадре: тело пересчитывается при их смене.
         let settings = model.settings
-        let appearance = settings.appearance
+        // Только для рисования, как на острове: в настройки не пишется.
+        let appearance = settings.appearance.adapted(to: model.displayOptions)
         let palette = appearance.palette(artwork: model.palette)
         let calibrating = player.isCalibrating
         let glow = calibrating
             ? max(settings.glowIntensity, AppSettings.Default.glowIntensity)
             : reduceMotion ? 0 : settings.glowIntensity
-        let breathes = settings.beatPulse && !reduceMotion && !calibrating
+        let canBreathe = !reduceMotion && !calibrating
+        let beatPulse = settings.beatPulse
         let softPulse = settings.softPulse
         let layout = Self.layout(appearance: appearance, wingLimit: wingLimit)
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
@@ -239,9 +243,12 @@ struct IslandPreview: View {
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,
                                     reduceMotion: reduceMotion, softPulse: softPulse
                                 )
+                            let breath = IslandView.breathing(
+                                look: appearance.look, visuals: visuals, canBreathe: canBreathe, beatPulse: beatPulse
+                            )
                             PreviewScene(
                                 visuals: visuals, geometry: geometry, glow: glow, appearance: appearance,
-                                scale: breathes ? 1 + IslandView.breathDepth * CGFloat(visuals.pulse) : 1
+                                scale: breath.scale, beatGlow: breath.glow
                             )
                         }
                     }
@@ -260,22 +267,24 @@ struct IslandPreview: View {
 }
 
 /// Свернутый остров на один кадр: свечение под ним, тело и волны крыльев, как в `IslandView`.
+/// `scale` и `beatGlow`: «вздох» и свечение под островом кадра (`IslandView.breathing`).
 private struct PreviewScene: View {
     let visuals: IslandVisuals
     let geometry: IslandGeometry
     let glow: Double
     let appearance: WaveAppearance
     let scale: CGFloat
+    let beatGlow: Float
 
     var body: some View {
         let state = IslandState.collapsed
         let anchor = geometry.anchor
         ZStack(alignment: .topLeading) {
             if BeatGlowView.isVisible(
-                glow: BeatGlowView.brightness(glow: visuals.glow, ambient: visuals.ambient), intensity: glow
+                glow: BeatGlowView.brightness(glow: beatGlow, ambient: visuals.ambient), intensity: glow
             ) {
                 BeatGlowView(
-                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, ambient: visuals.ambient,
+                    geometry: geometry, state: state, scale: scale, glow: beatGlow, ambient: visuals.ambient,
                     intensity: glow, radius: appearance.glowRadius,
                     color: visuals.palette.first ?? PaletteExtractor.fallback[0]
                 )
