@@ -202,4 +202,84 @@ struct PaletteTests {
         #expect(fade.palette(target: Self.cold, now: .nan) == Self.cold)
         #expect(fade.palette(target: Self.cold, now: 11) == Self.cold)
     }
+
+    // MARK: - PaletteFlow
+
+    private func labDistance(_ a: [OKLab], _ b: [OKLab]) -> Float {
+        zip(a, b).map { $0.distance(to: $1) }.max() ?? .infinity
+    }
+
+    @Test func flowPhaseZeroIsIdentity() {
+        let labs = Self.cold.map(\.oklab)
+        #expect(PaletteFlow.apply(labs, phase: 0) == labs)
+        #expect(PaletteFlow.apply(Self.cold, phase: 0) == Self.cold)
+        // Меньше двух цветов течь нечему.
+        let one = [RGBColor(hex: 0x22D3EE)]
+        #expect(PaletteFlow.apply(one, phase: 0.4) == one)
+        #expect(PaletteFlow.apply([OKLab](), phase: 0.4).isEmpty)
+        #expect(PaletteFlow.apply(labs, phase: .nan) == labs)
+    }
+
+    @Test func flowThirdTurnRotatesLayers() {
+        let labs = Self.cold.map(\.oklab)
+        let turned = PaletteFlow.apply(labs, phase: 1.0 / 3)
+        #expect(labDistance(turned, [labs[1], labs[2], labs[0]]) < 1e-4)
+        let twice = PaletteFlow.apply(labs, phase: 2.0 / 3)
+        #expect(labDistance(twice, [labs[2], labs[0], labs[1]]) < 1e-4)
+        let rgb = PaletteFlow.apply(Self.cold, phase: 1.0 / 3).map(\.oklab)
+        #expect(labDistance(rgb, [labs[1], labs[2], labs[0]]) < 1e-4)
+        // Посередине между цветами смесь в OKLab.
+        let half = PaletteFlow.apply(labs, phase: 0.5 / 3)
+        let expected = OKLab(l: (labs[0].l + labs[1].l) / 2, a: (labs[0].a + labs[1].a) / 2, b: (labs[0].b + labs[1].b) / 2)
+        #expect(half[0].distance(to: expected) < 1e-4)
+    }
+
+    @Test func flowFullTurnReturns() {
+        let labs = Self.cold.map(\.oklab)
+        #expect(labDistance(PaletteFlow.apply(labs, phase: 1), labs) < 1e-6)
+        #expect(labDistance(PaletteFlow.apply(labs, phase: 1 - 1e-9), labs) < 1e-4)
+        #expect(labDistance(PaletteFlow.apply(labs, phase: 2.25), PaletteFlow.apply(labs, phase: 0.25)) < 1e-4)
+        var flow = PaletteFlow()
+        // Полный оборот за период: через 8 с на полной скорости фаза снова 0.
+        for _ in 0..<800 { flow.advance(dt: 0.01, speed: 1) }
+        #expect(min(flow.phase, 1 - flow.phase) < 1e-6)
+    }
+
+    @Test func flowPeriodRange() {
+        #expect(PaletteFlow.slowestPeriod == 20)
+        #expect(PaletteFlow.fastestPeriod == 8)
+        #expect(PaletteFlow.period(speed: 1) == 8)
+        #expect(PaletteFlow.period(speed: 0) == nil)
+        #expect(abs(PaletteFlow.period(speed: 1e-6)! - 20) < 1e-3)
+        #expect(PaletteFlow.period(speed: 0.5) == 14)
+        #expect(PaletteFlow.period(speed: 3) == 8)
+        #expect(PaletteFlow.period(speed: -1) == nil)
+        #expect(PaletteFlow.period(speed: .nan) == nil)
+    }
+
+    @Test func flowSpeedZeroFreezesPhase() {
+        var flow = PaletteFlow(phase: 0.3)
+        flow.advance(dt: 5, speed: 0)
+        #expect(flow.phase == 0.3)
+        flow.advance(dt: 1, speed: 0.5)
+        #expect(abs(flow.phase - (0.3 + 1.0 / 14)) < 1e-12)
+    }
+
+    @Test func flowIgnoresBadInput() {
+        var flow = PaletteFlow(phase: 0.6)
+        flow.advance(dt: .nan, speed: 1)
+        flow.advance(dt: -1, speed: 1)
+        flow.advance(dt: .infinity, speed: 1)
+        flow.advance(dt: 1, speed: .nan)
+        flow.advance(dt: 1, speed: -0.5)
+        #expect(flow.phase == 0.6)
+        #expect(PaletteFlow(phase: .nan).phase == 0)
+    }
+
+    @Test func flowInitWrapsPhase() {
+        #expect(PaletteFlow(phase: 1.25).phase == 0.25)
+        #expect(PaletteFlow(phase: -0.25).phase == 0.75)
+        #expect(PaletteFlow(phase: 1).phase == 0)
+        #expect(PaletteFlow().phase == 0)
+    }
 }

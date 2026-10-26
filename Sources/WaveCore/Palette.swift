@@ -333,3 +333,82 @@ public struct PaletteFade: Sendable {
         return mixPalettes(from, to, t: Float(t * t * (3 - 2 * t)))
     }
 }
+
+/// Переливание: цвета палитры медленно плывут по кругу, слой за слоем. Скорость задает настройка
+/// «Скорость переливания» 0...1, в такт оно не ускоряется (такт несет свечение). При скорости 0
+/// фаза стоит. Фаза это доля полного оборота 0..<1: за оборот каждый слой проходит все цвета
+/// палитры и возвращается к своему.
+public struct PaletteFlow: Sendable {
+    /// Период полного оборота на самой малой и на самой большой скорости, с.
+    public static let slowestPeriod = 20.0
+    public static let fastestPeriod = 8.0
+
+    /// Фаза, 0..<1.
+    public private(set) var phase: Double
+
+    /// Фаза приводится в 0..<1, не конечная дает 0. Снимки задают ее, чтобы кадр был повторяем.
+    public init(phase: Double = 0) {
+        self.phase = Self.wrapped(phase)
+    }
+
+    /// Период оборота, с: линейно от `slowestPeriod` при скорости около 0 до `fastestPeriod`
+    /// при 1. Скорость выше 1 считается 1. Скорость 0, отрицательная или не конечная дает `nil`:
+    /// переливания нет.
+    public static func period(speed: Double) -> Double? {
+        guard speed.isFinite, speed > 0 else { return nil }
+        let speed = min(speed, 1)
+        return slowestPeriod + (fastestPeriod - slowestPeriod) * speed
+    }
+
+    /// Сдвигает фазу на `dt` секунд. Не конечное или не положительное `dt` и скорость без
+    /// переливания (`period(speed:) == nil`) фазу не меняют.
+    public mutating func advance(dt: Double, speed: Double) {
+        guard dt.isFinite, dt > 0, let period = Self.period(speed: speed) else { return }
+        phase = Self.wrapped(phase + dt / period)
+    }
+
+    /// Цвета слоев на фазе `phase`: цвет слоя i смешивается в OKLab между `colors[(i + k) % n]` и
+    /// следующим, где `k = floor(phase × n)`, а доля смешения дробная часть `phase × n`. Фаза
+    /// приводится в 0..<1. При фазе 0 или меньше двух цветов вход возвращается как есть.
+    public static func apply(_ colors: [OKLab], phase: Double) -> [OKLab] {
+        let n = colors.count
+        let phase = wrapped(phase)
+        guard phase > 0, n >= 2 else { return colors }
+        let (k, t) = step(phase: phase, count: n)
+        return (0..<n).map { i in
+            let from = colors[(i + k) % n]
+            let to = colors[(i + k + 1) % n]
+            return OKLab(
+                l: from.l + (to.l - from.l) * t,
+                a: from.a + (to.a - from.a) * t,
+                b: from.b + (to.b - from.b) * t)
+        }
+    }
+
+    /// То же для палитры в sRGB: свечение под островом, свечение обложки и полоса прогресса, где
+    /// нет `WavePaint.distinct`. Смешение в OKLab через `mixPalettes`; на целом шаге цвета
+    /// палитры берутся как есть.
+    public static func apply(_ palette: [RGBColor], phase: Double) -> [RGBColor] {
+        let n = palette.count
+        let phase = wrapped(phase)
+        guard phase > 0, n >= 2 else { return palette }
+        let (k, t) = step(phase: phase, count: n)
+        let from = (0..<n).map { palette[($0 + k) % n] }
+        let to = (0..<n).map { palette[($0 + k + 1) % n] }
+        return mixPalettes(from, to, t: t)
+    }
+
+    /// Номер шага `k = floor(phase × n)` и доля смешения внутри шага.
+    private static func step(phase: Double, count: Int) -> (k: Int, t: Float) {
+        let scaled = phase * Double(count)
+        let k = min(Int(scaled.rounded(.down)), count - 1)
+        return (k, Float(scaled - Double(k)))
+    }
+
+    /// `value` в 0..<1, в том числе для отрицательных; не конечное значение дает 0.
+    private static func wrapped(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        let result = value - value.rounded(.down)
+        return result < 1 ? result : 0
+    }
+}

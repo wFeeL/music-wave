@@ -288,7 +288,30 @@ public struct BeatPulse: Sendable {
 /// светлота не выше `maxLightness`, чтобы теплые палитры не выгорали в белый. В тишине
 /// линия тусклая, но сохраняет оттенок обложки. В крыле линия ярко выходит из выреза, в панели
 /// идет через середину без провала, к внешнему краю растворяется.
+///
+/// `Options` добавляют переливание (цвета слоев плывут по кругу, `PaletteFlow`), цвет по
+/// частотам (каждая линия своим цветом) и повышенный контраст. `Options.standard` дает тот же
+/// результат бит в бит, что и вызов без них.
 public enum WavePaint {
+    /// Как красить линии.
+    public struct Options: Sendable, Equatable {
+        /// «Цвет по частотам»: линия слоя одним своим цветом, «следующий» цвет градиента это он
+        /// же, поднятый по светлоте на `bandLightnessLift`.
+        public var colorByBand = false
+        /// Системное «Увеличить контраст»: прозрачность `contrastRestOpacity`...`contrastFullOpacity`.
+        public var highContrast = false
+        /// Фаза переливания 0..<1 (`PaletteFlow.phase`), 0 без переливания.
+        public var flowPhase = 0.0
+
+        public static let standard = Options()
+
+        public init(colorByBand: Bool = false, highContrast: Bool = false, flowPhase: Double = 0) {
+            self.colorByBand = colorByBand
+            self.highContrast = highContrast
+            self.flowPhase = flowPhase
+        }
+    }
+
     public struct Stop: Sendable, Equatable {
         /// 0...1 вдоль градиента: в крыле от выреза к краю, в панели от левого края к правому.
         public var location: Double
@@ -307,6 +330,9 @@ public enum WavePaint {
     /// Прозрачность линии в тишине и на полном уровне.
     public static let restOpacity: Float = 0.06
     public static let fullOpacity: Float = 0.75
+    /// То же при «Увеличить контраст».
+    public static let contrastRestOpacity: Float = 0.12
+    public static let contrastFullOpacity: Float = 0.95
     /// Бас чуть прозрачнее остальных.
     public static let layerOpacity: [Float] = [0.8, 1, 1]
     /// Заливка под линией: у самой линии прозрачность `fillTopOpacity × fill` («Заливка» 0...1),
@@ -321,6 +347,10 @@ public enum WavePaint {
     /// Сдвиг светлоты OKLab по слоям и ее потолок.
     static let layerLightness: [Float] = [-0.06, 0, 0.06]
     public static let maxLightness: Float = 0.88
+    /// «Цвет по частотам»: насколько светлее свой цвет линии в другой точке ее градиента.
+    static let bandLightnessLift: Float = 0.08
+    /// Ширина смешения соседних участков на линии с цветом по частотам, доля ширины.
+    static let bandBlend = 0.06
     /// Цвета палитры ближе этого расстояния в OKLab разводятся поворотом оттенка на `separationTurn`.
     static let minimumSeparation: Float = 0.08
     static let separationTurn: Float = 25
@@ -356,48 +386,157 @@ public enum WavePaint {
 
     /// `count` точек градиента с шагом `1 / (count - 1)`; меньше двух точек дают пустой массив.
     public static func stops(
-        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, count: Int, profile: WaveProfile = .wing
+        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, count: Int, profile: WaveProfile = .wing,
+        options: Options = .standard
     ) -> [Stop] {
         guard count >= 2 else { return [] }
         let locations = (0..<count).map { Double($0) / Double(count - 1) }
-        return stops(palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile)
+        return stops(
+            palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile, options: options
+        )
     }
 
     /// Точки градиента в заданных положениях 0...1 (по возрастанию).
     public static func stops(
-        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, locations: [Double], profile: WaveProfile
+        palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, locations: [Double], profile: WaveProfile,
+        options: Options = .standard
     ) -> [Stop] {
         let placeholder = Stop(location: 0, color: RGBColor(r: 0, g: 0, b: 0), opacity: 0)
         var output = [Stop](repeating: placeholder, count: locations.count)
         output.withUnsafeMutableBufferPointer {
-            stops(palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile, into: $0)
+            stops(
+                palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile,
+                options: options, into: $0
+            )
         }
         return output
     }
 
-    /// То же, что `stops(palette:layer:level:time:locations:profile:)`, но в готовый буфер:
+    /// То же, что `stops(palette:layer:level:time:locations:profile:options:)`, но в готовый буфер:
     /// точки нескольких линий ложатся в один массив без выделения памяти на каждую линию.
     /// Значения бит в бит те же.
     /// - Precondition: `output.count == locations.count`.
     public static func stops(
         palette: [RGBColor], layer: WaveLayer, level: Float, time: Double, locations: [Double], profile: WaveProfile,
-        into output: UnsafeMutableBufferPointer<Stop>
+        options: Options = .standard, into output: UnsafeMutableBufferPointer<Stop>
     ) {
         precondition(output.count == locations.count, "output.count must equal locations.count")
-        let colors = distinct(palette.isEmpty ? PaletteExtractor.fallback : palette)
+        let colors = flowingColors(palette, phase: options.flowPhase)
         let index = layer.rawValue
-        let own = colors[index % colors.count]
-        let next = colors[(index + 1) % colors.count]
-        let lightnessShift = layerLightness[index]
-
-        let level = level.isFinite ? min(max(level, 0), 1) : 0
-        let chroma = restChroma + (1 - restChroma) * smoothstep(chromaRange.from, chromaRange.to, level)
-        let opacity = (restOpacity + (fullOpacity - restOpacity) * smoothstep(0, opacityKnee, level)) * layerOpacity[index]
-        let shift = time.isFinite ? (flowSpeed * time).truncatingRemainder(dividingBy: 1) : 0
+        let tint = LayerTint(colors: colors, layer: layer, colorByBand: options.colorByBand)
+        let paint = LevelPaint(level: level, options: options)
+        let opacity = paint.opacity * layerOpacity[index]
+        let shift = flowShift(time: time)
 
         for (index, raw) in locations.enumerated() {
-            let location = raw.isFinite ? min(max(raw, 0), 1) : 0
-            let u: Double
+            let point = LinePoint(raw, profile: profile)
+            let weight = flowWeight(u: point.u, shift: shift)
+            let lab = tint.color(weight: weight, chroma: paint.chroma)
+            output[index] = Stop(location: point.location, color: RGBColor(oklab: lab), opacity: opacity * point.fade)
+        }
+    }
+
+    /// Границы баса и середины, середины и верха на линии с цветом по частотам: доли
+    /// логарифмической оси частот `WaveLayer.bass.frequencyRange.lowerBound`...
+    /// `WaveLayer.high.frequencyRange.upperBound` (40 Гц...16 кГц), около 0.306 и 0.769.
+    static let bandEdges: (low: Double, high: Double) = {
+        let bottom = log(WaveLayer.bass.frequencyRange.lowerBound)
+        let span = log(WaveLayer.high.frequencyRange.upperBound) - bottom
+        return (
+            (log(WaveLayer.bass.frequencyRange.upperBound) - bottom) / span,
+            (log(WaveLayer.mid.frequencyRange.upperBound) - bottom) / span
+        )
+    }()
+
+    /// Точки градиента одной линии с цветом по частотам (одна волна и спектр при `colorByBand`):
+    /// вдоль x участки баса, середины и верха по `bandEdges`, каждый с цветом и светлотой линии
+    /// своего слоя (как `stops(..., options:)` с `colorByBand`), соседние смешиваются в OKLab на
+    /// ширине `bandBlend`. В крыле бас у выреза, в панели в середине и симметрично к краям.
+    /// Прозрачность как у линии середины. `options.colorByBand` здесь не читается: цвет по
+    /// частотам включен всегда.
+    /// - Precondition: `output.count == locations.count`.
+    public static func sectionStops(
+        palette: [RGBColor], level: Float, time: Double, locations: [Double], profile: WaveProfile,
+        options: Options = .standard, into output: UnsafeMutableBufferPointer<Stop>
+    ) {
+        precondition(output.count == locations.count, "output.count must equal locations.count")
+        let colors = flowingColors(palette, phase: options.flowPhase)
+        let tints = WaveLayer.allCases.map { LayerTint(colors: colors, layer: $0, colorByBand: true) }
+        let paint = LevelPaint(level: level, options: options)
+        let opacity = paint.opacity * layerOpacity[WaveLayer.mid.rawValue]
+        let shift = flowShift(time: time)
+        let half = bandBlend / 2
+
+        for (index, raw) in locations.enumerated() {
+            let point = LinePoint(raw, profile: profile)
+            let weight = flowWeight(u: point.u, shift: shift)
+            let toMid = Float(smoothstep(bandEdges.low - half, bandEdges.low + half, point.u))
+            let toHigh = Float(smoothstep(bandEdges.high - half, bandEdges.high + half, point.u))
+            let bass = tints[0].color(weight: weight, chroma: paint.chroma)
+            let mid = tints[1].color(weight: weight, chroma: paint.chroma)
+            let high = tints[2].color(weight: weight, chroma: paint.chroma)
+            let lower = toMid <= 0 ? bass : toMid >= 1 ? mid : mix(bass, mid, toMid)
+            let lab = toHigh <= 0 ? lower : toHigh >= 1 ? high : mix(lower, high, toHigh)
+            output[index] = Stop(location: point.location, color: RGBColor(oklab: lab), opacity: opacity * point.fade)
+        }
+    }
+
+    /// Цвета слоев: палитра (пустая заменяется `PaletteExtractor.fallback`) после `distinct` и
+    /// течения `PaletteFlow` на фазе `phase`. Течение идет после `distinct`: решение о повороте
+    /// оттенка зависит только от палитры и не включается и не выключается от кадра к кадру, как
+    /// было бы, если бы смешанные цвета пересекали порог `minimumSeparation`.
+    static func flowingColors(_ palette: [RGBColor], phase: Double) -> [OKLab] {
+        PaletteFlow.apply(distinct(palette.isEmpty ? PaletteExtractor.fallback : palette), phase: phase)
+    }
+
+    /// Свой и «следующий» цвет линии слоя и ее сдвиг светлоты.
+    private struct LayerTint {
+        let own: OKLab
+        let next: OKLab
+        let lightnessShift: Float
+
+        init(colors: [OKLab], layer: WaveLayer, colorByBand: Bool) {
+            let index = layer.rawValue
+            own = colors[index % colors.count]
+            next = colorByBand
+                ? OKLab(l: min(own.l + bandLightnessLift, maxLightness), a: own.a, b: own.b)
+                : colors[(index + 1) % colors.count]
+            lightnessShift = layerLightness[index]
+        }
+
+        /// Цвет в точке, где доля «следующего» цвета `weight`.
+        func color(weight: Float, chroma: Float) -> OKLab {
+            OKLab(
+                l: min(own.l + (next.l - own.l) * weight + lightnessShift, maxLightness),
+                a: (own.a + (next.a - own.a) * weight) * chroma,
+                b: (own.b + (next.b - own.b) * weight) * chroma
+            )
+        }
+    }
+
+    /// Насыщенность (доля от цвета палитры) и прозрачность линии без множителя слоя на уровне `level`.
+    private struct LevelPaint {
+        let chroma: Float
+        let opacity: Float
+
+        init(level: Float, options: Options) {
+            let level = level.isFinite ? min(max(level, 0), 1) : 0
+            let rest = options.highContrast ? contrastRestOpacity : restOpacity
+            let full = options.highContrast ? contrastFullOpacity : fullOpacity
+            chroma = restChroma + (1 - restChroma) * smoothstep(chromaRange.from, chromaRange.to, level)
+            opacity = rest + (full - rest) * smoothstep(0, opacityKnee, level)
+        }
+    }
+
+    /// Точка градиента: положение, расстояние `u` от выреза (или от середины панели) и множитель
+    /// прозрачности от проявления у выреза и растворения у края.
+    private struct LinePoint {
+        let location: Double
+        let u: Double
+        let fade: Float
+
+        init(_ raw: Double, profile: WaveProfile) {
+            location = raw.isFinite ? min(max(raw, 0), 1) : 0
             let fadeIn: Double
             switch profile {
             case .wing:
@@ -407,15 +546,22 @@ public enum WavePaint {
                 u = abs(2 * location - 1)
                 fadeIn = 1
             }
-            let weight = Float(0.5 - 0.5 * cos(2 * Double.pi * (u - shift)))
-            let lab = OKLab(
-                l: min(own.l + (next.l - own.l) * weight + lightnessShift, maxLightness),
-                a: (own.a + (next.a - own.a) * weight) * chroma,
-                b: (own.b + (next.b - own.b) * weight) * chroma
-            )
-            let fadeOut = smoothstep(1, fadeOutStart, u)
-            output[index] = Stop(location: location, color: RGBColor(oklab: lab), opacity: opacity * Float(fadeIn * fadeOut))
+            fade = Float(fadeIn * smoothstep(1, fadeOutStart, u))
         }
+    }
+
+    /// Сдвиг течения градиента вдоль линии на момент `time`, доля ширины.
+    private static func flowShift(time: Double) -> Double {
+        time.isFinite ? (flowSpeed * time).truncatingRemainder(dividingBy: 1) : 0
+    }
+
+    /// Доля «следующего» цвета в точке `u` при сдвиге течения `shift`.
+    private static func flowWeight(u: Double, shift: Double) -> Float {
+        Float(0.5 - 0.5 * cos(2 * Double.pi * (u - shift)))
+    }
+
+    private static func mix(_ x: OKLab, _ y: OKLab, _ t: Float) -> OKLab {
+        OKLab(l: x.l + (y.l - x.l) * t, a: x.a + (y.a - x.a) * t, b: x.b + (y.b - x.b) * t)
     }
 
     /// Палитра в OKLab, где каждый цвет, слишком близкий к одному из предыдущих, повернут по

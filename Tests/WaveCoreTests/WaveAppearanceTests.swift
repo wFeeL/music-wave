@@ -42,6 +42,10 @@ struct WaveAppearanceTests {
                 lineCount: 6, fill: 0.7, thickness: 1.5, amplitude: 0.5
             ),
             WaveAppearance(wingWidth: 40, colorMode: .preset(.neon), glowRadius: 0.5, lineCount: 1, fill: 1, thickness: 2, amplitude: 2),
+            WaveAppearance(
+                wingWidth: 90, colorMode: .preset(.rainbow), glowRadius: 1.5, lineCount: 1, fill: 0.2, thickness: 1,
+                amplitude: 1.2, colorFlow: 0.35, colorByBand: true
+            ),
         ]
         for appearance in samples {
             let data = try JSONEncoder().encode(appearance)
@@ -52,6 +56,47 @@ struct WaveAppearanceTests {
         let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
         #expect(decoded.wingWidth == 200 && decoded.lineCount == 4)
         #expect(decoded.colorMode == .artwork && decoded.glowRadius == 1 && decoded.fill == 0)
+    }
+
+    /// Настройки 1.1 без новых полей дают прежний вид: без переливания и без цвета по частотам.
+    @Test func appearanceDecodesWithoutNewFields() throws {
+        let json = #"{"wingWidth": 120, "colorMode": {"preset": {"_0": "neon"}}, "glowRadius": 2, "lineCount": 5, "#
+            + #""fill": 0.4, "thickness": 1.5, "amplitude": 0.8}"#
+        let stored = Data(json.utf8)
+        let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
+        #expect(decoded == WaveAppearance(
+            wingWidth: 120, colorMode: .preset(.neon), glowRadius: 2, lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.8
+        ))
+        #expect(decoded.colorFlow == 0)
+        #expect(decoded.colorByBand == false)
+        #expect(WaveAppearance.standard.colorFlow == 0 && !WaveAppearance.standard.colorByBand)
+        // Поле не того типа берется по умолчанию.
+        let broken = Data(#"{"colorFlow": "fast", "colorByBand": 1}"#.utf8)
+        let fallback = try JSONDecoder().decode(WaveAppearance.self, from: broken)
+        #expect(fallback.colorFlow == 0 && !fallback.colorByBand)
+    }
+
+    @Test func clampsColorFlow() throws {
+        #expect(WaveAppearance.Limits.colorFlow == 0...1)
+        func flow(_ value: Double) -> Double {
+            WaveAppearance(
+                wingWidth: 64, colorMode: .artwork, glowRadius: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1,
+                colorFlow: value
+            ).colorFlow
+        }
+        #expect(flow(0.4) == 0.4)
+        #expect(flow(2) == 1)
+        #expect(flow(-1) == 0)
+        #expect(flow(.nan) == 0)
+        #expect(flow(.infinity) == 0)
+        var edited = WaveAppearance.standard
+        edited.colorFlow = 7
+        #expect(edited.colorFlow == 1)
+        edited.colorFlow = .nan
+        #expect(edited.colorFlow == 0)
+        let stored = Data(#"{"colorFlow": 3, "colorByBand": true}"#.utf8)
+        let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
+        #expect(decoded.colorFlow == 1 && decoded.colorByBand)
     }
 
     /// Неизвестная готовая палитра дает «Из обложки», остальные поля сохраняются.

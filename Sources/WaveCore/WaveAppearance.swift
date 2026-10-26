@@ -137,6 +137,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         public static let thickness: ClosedRange<Double> = 0.5...2
         /// «Размах», множитель (`WaveShape.samples(gain:)`).
         public static let amplitude: ClosedRange<Double> = 0.5...2
+        /// «Скорость переливания» (`PaletteFlow.advance(dt:speed:)`), 0 выключает.
+        public static let colorFlow: ClosedRange<Double> = 0...1
     }
 
     private enum Defaults {
@@ -146,6 +148,7 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         static let fill = 0.0
         static let thickness = 1.0
         static let amplitude = 1.0
+        static let colorFlow = 0.0
     }
 
     public static let standard = WaveAppearance(
@@ -173,13 +176,20 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     public var amplitude: Double {
         didSet { amplitude = Self.clamped(amplitude, Limits.amplitude, Defaults.amplitude) }
     }
+    /// «Скорость переливания»: по умолчанию 0, вид после обновления сам не меняется.
+    public var colorFlow: Double {
+        didSet { colorFlow = Self.clamped(colorFlow, Limits.colorFlow, Defaults.colorFlow) }
+    }
+    /// «Цвет по частотам»: бас, середина и верх каждый своим цветом палитры. По умолчанию выключен.
+    public var colorByBand: Bool
     /// Рисуется ли свечение линий (размытая копия под ними). Не настройка и не сохраняется:
     /// выключает его только `lightened()`.
     public private(set) var glowPass = true
 
     public init(
         wingWidth: Double, colorMode: WaveColorMode, glowRadius: Double,
-        lineCount: Int, fill: Double, thickness: Double, amplitude: Double
+        lineCount: Int, fill: Double, thickness: Double, amplitude: Double,
+        colorFlow: Double = 0, colorByBand: Bool = false
     ) {
         self.wingWidth = Self.clamped(wingWidth, Limits.wingWidth, Defaults.wingWidth)
         self.colorMode = colorMode
@@ -188,10 +198,12 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         self.fill = Self.clamped(fill, Limits.fill, Defaults.fill)
         self.thickness = Self.clamped(thickness, Limits.thickness, Defaults.thickness)
         self.amplitude = Self.clamped(amplitude, Limits.amplitude, Defaults.amplitude)
+        self.colorFlow = Self.clamped(colorFlow, Limits.colorFlow, Defaults.colorFlow)
+        self.colorByBand = colorByBand
     }
 
     private enum CodingKeys: String, CodingKey {
-        case wingWidth, colorMode, glowRadius, lineCount, fill, thickness, amplitude
+        case wingWidth, colorMode, glowRadius, lineCount, fill, thickness, amplitude, colorFlow, colorByBand
     }
 
     /// Пропущенное или нечитаемое поле берется из `standard`, значения вне диапазона ограничиваются.
@@ -208,7 +220,9 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
             lineCount: value(.lineCount, standard.lineCount),
             fill: value(.fill, standard.fill),
             thickness: value(.thickness, standard.thickness),
-            amplitude: value(.amplitude, standard.amplitude)
+            amplitude: value(.amplitude, standard.amplitude),
+            colorFlow: value(.colorFlow, standard.colorFlow),
+            colorByBand: value(.colorByBand, standard.colorByBand)
         )
     }
 
@@ -255,7 +269,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     ///   Без прохода свечения (`lightened()`) ноль.
     /// - Ширина крыла: множитель `0.75 + 0.25 × ширина / 64`. Число точек от ширины не зависит,
     ///   растет только площадь.
-    /// Цвет и «Размах» на цену не влияют, яркость свечения не часть вида и сюда не входит.
+    /// Цвет (с переливанием и цветом по частотам) и «Размах» на цену не влияют, яркость свечения
+    /// не часть вида и сюда не входит.
     /// По умолчанию (три линии, два свечения, без заливки) работа 5 условных проходов.
     public var renderCost: Double {
         Self.work(self) / Self.work(.standard)

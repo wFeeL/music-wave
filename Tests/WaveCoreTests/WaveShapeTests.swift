@@ -646,4 +646,220 @@ struct WaveShapeTests {
         let short = WavePaint.stops(palette: [RGBColor(hex: 0x22D3EE)], layer: .high, level: 1, time: 0, count: 3)
         #expect(short.count == 3)
     }
+
+    // MARK: - Переливание, цвет по частотам, контраст
+
+    /// Близкая пара: у первых двух цветов расстояние в OKLab 0.013, `distinct` поворачивает второй.
+    private static let closePair = [RGBColor(hex: 0x2F6BFF), RGBColor(hex: 0x3570FF), RGBColor(hex: 0xFF5A5A)]
+    /// Попарно 0.18...0.24, `distinct` ничего не поворачивает; все цвета линий остаются в гамме.
+    private static let bandPalette = [RGBColor(hex: 0x8B5CF6), RGBColor(hex: 0x3F8F8F), RGBColor(hex: 0xB0605F)]
+
+    private static func bits(_ stops: [WavePaint.Stop]) -> [[UInt64]] {
+        stops.map {
+            [$0.location.bitPattern, UInt64($0.color.r.bitPattern), UInt64($0.color.g.bitPattern),
+             UInt64($0.color.b.bitPattern), UInt64($0.opacity.bitPattern)]
+        }
+    }
+
+    private func sectionStops(
+        palette: [RGBColor], level: Float, time: Double, locations: [Double], profile: WaveProfile,
+        options: WavePaint.Options
+    ) -> [WavePaint.Stop] {
+        let placeholder = WavePaint.Stop(location: -1, color: RGBColor(hex: 0), opacity: -1)
+        var output = [WavePaint.Stop](repeating: placeholder, count: locations.count)
+        output.withUnsafeMutableBufferPointer {
+            WavePaint.sectionStops(
+                palette: palette, level: level, time: time, locations: locations, profile: profile,
+                options: options, into: $0
+            )
+        }
+        return output
+    }
+
+    private func hueDegrees(_ lab: OKLab) -> Float {
+        atan2(lab.b, lab.a) * 180 / .pi
+    }
+
+    private func hueDelta(_ a: OKLab, _ b: OKLab) -> Float {
+        var d = hueDegrees(a) - hueDegrees(b)
+        while d > 180 { d -= 360 }
+        while d < -180 { d += 360 }
+        return d
+    }
+
+    @Test func defaultOptionsMatchOldStops() {
+        #expect(WavePaint.Options.standard == WavePaint.Options())
+        #expect(WavePaint.Options.standard == WavePaint.Options(colorByBand: false, highContrast: false, flowPhase: 0))
+        let palettes = [Self.warm, Self.closePair, PaletteExtractor.fallback, []]
+        for profile in WaveProfile.allCases {
+            let locations = WavePaint.locations(for: profile)
+            for palette in palettes {
+                for layer in WaveLayer.allCases {
+                    for level: Float in [0, 0.2, 1] {
+                        for time in [0.0, 3.7, 19.9] {
+                            let plain = WavePaint.stops(
+                                palette: palette, layer: layer, level: level, time: time, locations: locations, profile: profile
+                            )
+                            let standard = WavePaint.stops(
+                                palette: palette, layer: layer, level: level, time: time, locations: locations,
+                                profile: profile, options: .standard
+                            )
+                            #expect(Self.bits(plain) == Self.bits(standard))
+                        }
+                    }
+                }
+            }
+            let counted = WavePaint.stops(palette: Self.warm, layer: .mid, level: 0.5, time: 2, count: 9, profile: profile)
+            let countedStandard = WavePaint.stops(
+                palette: Self.warm, layer: .mid, level: 0.5, time: 2, count: 9, profile: profile, options: .standard
+            )
+            #expect(Self.bits(counted) == Self.bits(countedStandard))
+        }
+    }
+
+    @Test func flowIsContinuousOnFinalStops() {
+        let labs = WavePaint.distinct(Self.closePair)
+        #expect(Self.closePair[0].oklab.distance(to: Self.closePair[1].oklab) < 0.02)
+        #expect(labs[1] != Self.closePair[1].oklab)
+        for profile in WaveProfile.allCases {
+            let locations = WavePaint.locations(for: profile)
+            for layer in WaveLayer.allCases {
+                var previous: [OKLab]?
+                for step in 0...1000 {
+                    let phase = Double(step) / 1000
+                    let colors = WavePaint.stops(
+                        palette: Self.closePair, layer: layer, level: 0.8, time: 3, locations: locations,
+                        profile: profile, options: WavePaint.Options(flowPhase: phase)
+                    ).map(\.color.oklab)
+                    if let previous {
+                        let jump = zip(colors, previous).map { $0.distance(to: $1) }.max() ?? 0
+                        #expect(jump < 0.02, "\(profile) \(layer) phase \(phase): \(jump)")
+                    }
+                    previous = colors
+                }
+            }
+        }
+    }
+
+    @Test func flowKeepsSeparation() {
+        let labs = WavePaint.distinct(Self.closePair)
+        #expect(Self.closePair[0].oklab.distance(to: Self.closePair[1].oklab) < WavePaint.minimumSeparation)
+        for (k, phase) in [0.0, 1.0 / 3, 2.0 / 3].enumerated() {
+            let flowing = WavePaint.flowingColors(Self.closePair, phase: phase)
+            for i in 0..<3 {
+                #expect(flowing[i].distance(to: labs[(i + k) % 3]) < 1e-4, "phase \(phase) layer \(i)")
+            }
+        }
+    }
+
+    @Test func colorByBandKeepsLayerHue() {
+        let labs = WavePaint.distinct(Self.bandPalette)
+        #expect(labs == Self.bandPalette.map(\.oklab))
+        let options = WavePaint.Options(colorByBand: true)
+        for profile in WaveProfile.allCases {
+            let locations = WavePaint.locations(for: profile)
+            for layer in WaveLayer.allCases {
+                let own = labs[layer.rawValue]
+                for level: Float in [0, 0.1, 0.3, 1] {
+                    for time in [0.0, 4.3, 11.0] {
+                        let stops = WavePaint.stops(
+                            palette: Self.bandPalette, layer: layer, level: level, time: time, locations: locations,
+                            profile: profile, options: options
+                        )
+                        for stop in stops {
+                            let lab = stop.color.oklab
+                            #expect(abs(hueDelta(lab, own)) <= 0.5, "\(profile) \(layer) \(level): \(hueDelta(lab, own))")
+                            #expect(lab.l <= WavePaint.maxLightness + 1e-3)
+                        }
+                    }
+                }
+                // Течение вдоль линии остается: у линии слоя есть и свой цвет, и он же светлее.
+                let loud = WavePaint.stops(
+                    palette: Self.bandPalette, layer: layer, level: 1, time: 0, locations: locations,
+                    profile: profile, options: options
+                ).map(\.color.oklab.l)
+                #expect(loud.max()! - loud.min()! > 0.05, "\(profile) \(layer)")
+            }
+        }
+        #expect(WavePaint.bandLightnessLift == 0.08)
+    }
+
+    @Test func sectionStopsFollowBands() {
+        // Границы баса и середины, середины и верха на логарифмической оси 40 Гц...16 кГц.
+        #expect(abs(WavePaint.bandEdges.low - 0.306) < 1e-3)
+        #expect(abs(WavePaint.bandEdges.high - 0.769) < 1e-3)
+        #expect(WavePaint.bandBlend == 0.06)
+        let options = WavePaint.Options(colorByBand: true)
+        func line(_ layer: WaveLayer, _ locations: [Double], _ profile: WaveProfile) -> [WavePaint.Stop] {
+            WavePaint.stops(
+                palette: Self.bandPalette, layer: layer, level: 0.9, time: 2.2, locations: locations,
+                profile: profile, options: options
+            )
+        }
+        let wing = [0.01, 0.55, 1.0]
+        let sections = sectionStops(
+            palette: Self.bandPalette, level: 0.9, time: 2.2, locations: wing, profile: .wing, options: options
+        )
+        #expect(sections.map(\.location) == wing)
+        #expect(colorDistance(sections[0].color, line(.bass, wing, .wing)[0].color) < 1e-5)
+        #expect(colorDistance(sections[1].color, line(.mid, wing, .wing)[1].color) < 1e-5)
+        #expect(colorDistance(sections[2].color, line(.high, wing, .wing)[2].color) < 1e-5)
+        // У каждого участка свой оттенок слоя.
+        let labs = WavePaint.distinct(Self.bandPalette)
+        for (stop, layer) in zip(sections, WaveLayer.allCases) {
+            #expect(abs(hueDelta(stop.color.oklab, labs[layer.rawValue])) <= 0.5, "\(layer)")
+        }
+        // Прозрачность одной линии: как у середины.
+        #expect(sections[1].opacity == line(.mid, wing, .wing)[1].opacity)
+
+        // Панель симметрично от середины: в середине бас, у краев верх.
+        let panel = [0.0, 0.5 - 0.275, 0.5, 0.5 + 0.275, 1.0]
+        let panelSections = sectionStops(
+            palette: Self.bandPalette, level: 0.9, time: 2.2, locations: panel, profile: .panel, options: options
+        )
+        #expect(colorDistance(panelSections[2].color, line(.bass, panel, .panel)[2].color) < 1e-5)
+        #expect(colorDistance(panelSections[1].color, line(.mid, panel, .panel)[1].color) < 1e-5)
+        #expect(colorDistance(panelSections[3].color, line(.mid, panel, .panel)[3].color) < 1e-5)
+        #expect(colorDistance(panelSections[0].color, line(.high, panel, .panel)[0].color) < 1e-5)
+        #expect(colorDistance(panelSections[4].color, line(.high, panel, .panel)[4].color) < 1e-5)
+
+        // Переход между участками плавный: на частом шаге цвет не прыгает.
+        let dense = (0...400).map { Double($0) / 400 }
+        let walk = sectionStops(
+            palette: Self.bandPalette, level: 0.9, time: 2.2, locations: dense, profile: .wing, options: options
+        ).map(\.color.oklab)
+        let jump = zip(walk, walk.dropFirst()).map { $0.distance(to: $1) }.max() ?? 0
+        #expect(jump < 0.03, "\(jump)")
+        // За пределами смешения цвет участка чистый.
+        let edge = WavePaint.bandEdges.low
+        let probe = [edge - 0.031, edge + 0.031]
+        let near = sectionStops(
+            palette: Self.bandPalette, level: 0.9, time: 2.2, locations: probe, profile: .wing, options: options
+        )
+        #expect(colorDistance(near[0].color, line(.bass, probe, .wing)[0].color) < 1e-5)
+        #expect(colorDistance(near[1].color, line(.mid, probe, .wing)[1].color) < 1e-5)
+    }
+
+    @Test func highContrastRaisesOpacity() {
+        #expect(WavePaint.contrastRestOpacity == 0.12)
+        #expect(WavePaint.contrastFullOpacity == 0.95)
+        let contrast = WavePaint.Options(highContrast: true)
+        let point = [0.5]
+        func opacity(_ layer: WaveLayer, _ level: Float, _ options: WavePaint.Options) -> Float {
+            WavePaint.stops(
+                palette: Self.warm, layer: layer, level: level, time: 0, locations: point, profile: .wing, options: options
+            )[0].opacity
+        }
+        #expect(abs(opacity(.mid, 1, contrast) - 0.95) < 1e-6)
+        #expect(abs(opacity(.mid, 1, .standard) - 0.75) < 1e-6)
+        #expect(abs(opacity(.bass, 1, contrast) - 0.76) < 1e-6)
+        #expect(abs(opacity(.bass, 1, .standard) - 0.6) < 1e-6)
+        #expect(abs(opacity(.mid, 0, contrast) - 0.12) < 1e-6)
+        #expect(abs(opacity(.mid, 0, .standard) - 0.06) < 1e-6)
+        let sections = sectionStops(
+            palette: Self.warm, level: 1, time: 0, locations: point, profile: .wing,
+            options: WavePaint.Options(colorByBand: true, highContrast: true)
+        )
+        #expect(abs(sections[0].opacity - 0.95) < 1e-6)
+    }
 }
