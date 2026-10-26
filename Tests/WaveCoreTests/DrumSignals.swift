@@ -223,13 +223,20 @@ enum Drums {
         return render(spec)
     }
 
-    /// Бочка на каждую долю и хэт восьмыми, темп скачком меняется с `from` на `to` в момент `at`.
+    /// Бочка на каждую долю и хэт (по умолчанию восьмыми), темп скачком меняется с `from` на `to` в
+    /// момент `at`.
     static func tempoJump(
         from: Double = 100, to: Double = 140, at: Double = 12, seconds: Double = 24, sampleRate: Double = 48_000,
-        seed: UInt64 = 1
+        hats: HatPattern = .eighths, seed: UInt64 = 1
     ) -> DrumScene {
         var spec = Spec(seconds: seconds, sampleRate: sampleRate, bpm: { $0 < at ? from : to }, seed: seed)
-        spec.pattern = { _ in [.kick(0), .hat(0), .hat(0.5)] }
+        spec.pattern = { _ in
+            switch hats {
+            case .none: [.kick(0)]
+            case .quarters: [.kick(0), .hat(0)]
+            case .eighths: [.kick(0), .hat(0), .hat(0.5)]
+            }
+        }
         return render(spec)
     }
 
