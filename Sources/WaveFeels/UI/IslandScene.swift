@@ -95,9 +95,10 @@ struct IslandBodyView: View, Equatable {
 ///
 /// Отдельный вид из простых значений: сцена строится на каждом кадре, а это тело пересчитывается,
 /// только когда меняются геометрия, состояние, баннер, его переход (`bannerMoving`) или «Уменьшение
-/// движения». Тело отдает те же виды, что раньше стояли прямо в сцене, они ложатся в ее `ZStack`
-/// так же, по одному.
-struct IslandBodyLayer: View {
+/// движения». Тела стоят в своем `ZStack` с выравниванием сверху слева: каждое тело и так во всю
+/// рамку острова, поэтому они ложатся туда же, где стояли прямо в сцене, и вид остается одним
+/// видом под `.equatable()`. Сцена сравнивает его по значению (`==`), а не побайтно.
+struct IslandBodyLayer: View, Equatable {
     let geometry: IslandGeometry
     let state: IslandState
     /// Баннер нового трека открыт (`AppModel.bannerVisible`).
@@ -106,39 +107,46 @@ struct IslandBodyLayer: View {
     let bannerMoving: Bool
     let reduceMotion: Bool
 
+    nonisolated static func == (lhs: IslandBodyLayer, rhs: IslandBodyLayer) -> Bool {
+        lhs.geometry == rhs.geometry && lhs.state == rhs.state && lhs.bannerVisible == rhs.bannerVisible
+            && lhs.bannerMoving == rhs.bannerMoving && lhs.reduceMotion == rhs.reduceMotion
+    }
+
     var body: some View {
-        if reduceMotion {
-            // Без перетекания: тело баннера сменяет свернутое прозрачностью, входящее
-            // проявляется, пока уходящее еще непрозрачно, и остров нигде не просвечивает.
-            // Тело баннера только у свернутого острова: у раскрытой панели оно было бы
-            // второй такой же панелью. Форма тела острова идет своей пружиной, а не
-            // анимацией прозрачности.
-            let collapsed = state == .collapsed
-            let bannerShown = collapsed && bannerVisible
-            IslandBodyView(geometry: geometry, state: state)
-                .equatable()
-                .animation(state == .expanded ? IslandView.expandAnimation : IslandView.collapseAnimation, value: state)
-                .opacity(bannerShown ? 0 : 1)
-                .animation(
-                    IslandView.reducedBodyAnimation(
-                        IslandTransition.reducedBodyFade(incoming: !bannerShown, collapsed: collapsed)
-                    ),
-                    value: bannerShown
-                )
-            if collapsed && (bannerVisible || bannerMoving) {
-                IslandBodyView(geometry: geometry, state: state, banner: true)
+        ZStack(alignment: .topLeading) {
+            if reduceMotion {
+                // Без перетекания: тело баннера сменяет свернутое прозрачностью, входящее
+                // проявляется, пока уходящее еще непрозрачно, и остров нигде не просвечивает.
+                // Тело баннера только у свернутого острова: у раскрытой панели оно было бы
+                // второй такой же панелью. Форма тела острова идет своей пружиной, а не
+                // анимацией прозрачности.
+                let collapsed = state == .collapsed
+                let bannerShown = collapsed && bannerVisible
+                IslandBodyView(geometry: geometry, state: state)
                     .equatable()
-                    .opacity(bannerVisible ? 1 : 0)
+                    .animation(state == .expanded ? IslandView.expandAnimation : IslandView.collapseAnimation, value: state)
+                    .opacity(bannerShown ? 0 : 1)
                     .animation(
                         IslandView.reducedBodyAnimation(
-                            IslandTransition.reducedBodyFade(incoming: bannerVisible, collapsed: true)
+                            IslandTransition.reducedBodyFade(incoming: !bannerShown, collapsed: collapsed)
                         ),
-                        value: bannerVisible
+                        value: bannerShown
                     )
+                if collapsed && (bannerVisible || bannerMoving) {
+                    IslandBodyView(geometry: geometry, state: state, banner: true)
+                        .equatable()
+                        .opacity(bannerVisible ? 1 : 0)
+                        .animation(
+                            IslandView.reducedBodyAnimation(
+                                IslandTransition.reducedBodyFade(incoming: bannerVisible, collapsed: true)
+                            ),
+                            value: bannerVisible
+                        )
+                }
+            } else {
+                IslandBodyView(geometry: geometry, state: state, banner: bannerVisible)
+                    .equatable()
             }
-        } else {
-            IslandBodyView(geometry: geometry, state: state, banner: bannerVisible)
-                .equatable()
         }
     }
 }
@@ -381,9 +389,9 @@ struct WaveLayerView: View, Equatable {
                 // и слой жив: у неживого слоя нет даже пустого размытия (`WaveGlowPass`).
                 WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
                     .modifier(WaveGlowPass(
-                        shown: glow > 0 && glowPass && live,
                         radius: IslandWavesView.glowBlur * glowSize * glowBlurScale,
-                        opacity: min(IslandWavesView.glowOpacity * glow * Double(max(glowSize, 1)).squareRoot(), 1)
+                        opacity: min(IslandWavesView.glowOpacity * glow * Double(max(glowSize, 1)).squareRoot(), 1),
+                        shown: glow > 0 && glowPass && live
                     ))
                 WaveCanvas(waves: waves, mirrored: mirrored)
                     .blendMode(.plusLighter)
@@ -425,7 +433,12 @@ struct WaveLayerView: View, Equatable {
 /// когда меняются только холсты, тело оболочки не пересчитывается. Оно пересчитывается при смене
 /// состояния, баннера или геометрии, в той же транзакции, что и раньше: маска идет за формой
 /// острова той же анимацией.
-struct WaveLayerShell: ViewModifier {
+///
+/// Обертки `.equatable()` у модификаторов нет, поэтому сравнение по значению держится на двух
+/// вещах: модификатор `Equatable` (`==` по всем полям), а поля идут без пустых байтов выравнивания
+/// (`IslandGeometry` с `hasNotch` последним, затем `state` и `maskBanner` по байту), так что и
+/// побайтное сравнение видит только сами значения. Порядок полей не менять.
+struct WaveLayerShell: ViewModifier, Equatable {
     /// Прямоугольник волн в координатах панели.
     let rect: CGRect
     /// Поле текстуры вокруг `rect` (`WaveLayerView.margin(glowSize:glowBlurScale:)`).
@@ -434,6 +447,11 @@ struct WaveLayerShell: ViewModifier {
     let state: IslandState
     /// Слой обрезается формой баннера.
     let maskBanner: Bool
+
+    nonisolated static func == (lhs: WaveLayerShell, rhs: WaveLayerShell) -> Bool {
+        lhs.rect == rhs.rect && lhs.margin == rhs.margin && lhs.geometry == rhs.geometry
+            && lhs.state == rhs.state && lhs.maskBanner == rhs.maskBanner
+    }
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -454,11 +472,16 @@ struct WaveLayerShell: ViewModifier {
 /// свечения есть, слой жив), иначе холста свечения нет вовсе. Появляется и уходит сразу
 /// (`.identity`): в живом слое его проявляет прозрачность оболочки, переход по умолчанию добавил
 /// бы к ней вторую. Как и у `WaveLayerShell`, тело зависит только от полей модификатора: на
-/// кадрах меняется лишь сам холст.
-struct WaveGlowPass: ViewModifier {
-    let shown: Bool
+/// кадрах меняется лишь сам холст. Тоже `Equatable`, `shown` последним: без пустых байтов
+/// выравнивания между полями.
+struct WaveGlowPass: ViewModifier, Equatable {
     let radius: CGFloat
     let opacity: Double
+    let shown: Bool
+
+    nonisolated static func == (lhs: WaveGlowPass, rhs: WaveGlowPass) -> Bool {
+        lhs.radius == rhs.radius && lhs.opacity == rhs.opacity && lhs.shown == rhs.shown
+    }
 
     @ViewBuilder
     func body(content: Content) -> some View {

@@ -309,6 +309,7 @@ struct IslandView: View {
                     geometry: geometry, state: state, bannerVisible: bannerVisible, bannerMoving: bannerMoving,
                     reduceMotion: reduceMotion
                 )
+                .equatable()
                 IslandWavesView(
                     visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow,
                     appearance: appearance, paused: paused, banner: bannerVisible,
@@ -375,8 +376,10 @@ struct IslandGeometry: Equatable, Sendable {
     /// Отступ волн капсулы от ее скругленных концов.
     static let pillWaveInset: CGFloat = 14
 
+    // Порядок полей важен: `hasNotch` последним, поэтому внутри значения нет пустых байтов
+    // выравнивания. Геометрию держат простые виды и модификаторы острова (`IslandOutline`,
+    // `WaveLayerShell`, `IslandBodyLayer`), и SwiftUI может сравнивать их побайтно.
     let size: CGSize
-    let hasNotch: Bool
     let notch: CGRect
     let collapsed: CGRect
     let expanded: CGRect
@@ -389,6 +392,7 @@ struct IslandGeometry: Equatable, Sendable {
     let bannerBody: CGRect
     /// Обложка, текст и волны баннера в координатах `bannerBody`.
     let bannerLayout: BannerLayout
+    let hasNotch: Bool
 
     init(layout: NotchLayout, wingWidth: CGFloat) {
         let panel = layout.panelFrame

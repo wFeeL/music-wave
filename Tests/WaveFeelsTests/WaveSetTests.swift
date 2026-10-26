@@ -339,10 +339,9 @@ struct WaveSetTests {
         #expect(WaveLayerView.margin(glowSize: 2, glowBlurScale: 1.5) == IslandWavesView.glowMargin * 3)
     }
 
-    /// Содержимое неживого слоя равно себе на следующем кадре, даже когда меняются свечение доли и
-    /// его цвет: на кадрах оно не пересчитывается. Живое не равно никогда и пересчитывается на
-    /// каждом кадре.
-    @Test func dormantWaveLayerSkipsFrames() {
+    /// `==` содержимого слоя: у неживого слоя свечение доли и его цвет не в счет (два кадра равны),
+    /// живое не равно даже самому себе.
+    @Test func dormantWaveLayerContentIgnoresBeat() {
         let rect = CGRect(x: 10, y: 20, width: 64, height: 32)
         func layer(_ waves: WaveSet, beatGlow: Float, color: PaletteColor) -> WaveLayerView {
             WaveLayerView(
@@ -356,6 +355,20 @@ struct WaveSetTests {
         let live = Self.waves { _ in }
         #expect(!live.layers.isEmpty)
         #expect(layer(live, beatGlow: 0, color: red) != layer(live, beatGlow: 0, color: red))
+    }
+
+    /// Оболочки острова из простых значений без пустых байтов выравнивания между полями: если SwiftUI
+    /// сравнивает их побайтно, он видит только сами значения, и неизменная оболочка остается равной.
+    @Test func islandShellsHaveNoInteriorPadding() {
+        typealias Geometry = MemoryLayout<IslandGeometry>
+        #expect(Geometry.offset(of: \.hasNotch) == Geometry.size - 1)
+        typealias Shell = MemoryLayout<WaveLayerShell>
+        #expect(Shell.offset(of: \.margin) == MemoryLayout<CGRect>.size)
+        #expect(Shell.offset(of: \.geometry) == MemoryLayout<CGRect>.size + MemoryLayout<CGFloat>.size)
+        #expect(Shell.offset(of: \.state) == Shell.offset(of: \.geometry).map { $0 + Geometry.size })
+        #expect(Shell.offset(of: \.maskBanner) == Shell.size - 1)
+        typealias Glow = MemoryLayout<WaveGlowPass>
+        #expect(Glow.size == MemoryLayout<CGFloat>.size + MemoryLayout<Double>.size + 1)
     }
 
     /// Цвет по частотам: одна волна красится участками (`sectionStops`) на точках с краями
