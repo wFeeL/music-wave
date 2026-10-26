@@ -402,6 +402,27 @@ struct BeatTrackerTests {
         #expect(lockedUntilMove)
     }
 
+    /// Перехват тенью (голоса гребенки, `combVotesDecideTheRace`) дает новую сетку со счетом тени:
+    /// вес сразу не выше цели по уверенности тени, полный вес старой сетки не переходит на «и».
+    @Test func shadowTakeoverTakesItsOwnWeight() throws {
+        let parameters = BeatTracker.Parameters()
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked && tracker.displayWeight == 1)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var atMove: (weight: Float, confidence: Double)?
+        hops.feed(&tracker, until: 16) { tracker in
+            let onOffbeat = tracker.nextBeat.map { abs(BeatTracker.circularDifference($0 - 0.5, period: 0.5)) < 0.03 } == true
+            if atMove == nil, onOffbeat { atMove = (tracker.displayWeight, tracker.confidence) }
+        }
+        let move = try #require(atMove, "the grid never moved")
+        let target = BeatTracker.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(move.confidence))
+        #expect(target < 0.5, "shadow confidence \(move.confidence)")
+        #expect(move.weight <= target, "weight \(move.weight) after the takeover, target \(target)")
+    }
+
     /// Пока идет гонка фаз, предсказанные доли текущей сетки светятся с `raceDim` (0.2, замер на
     /// GTZAN) от обычной яркости: уверенная вспышка на доле, в которой гребенка уже сомневается, хуже
     /// тусклой. Сравнение с двойником без приглушения на тех же шагах: состояние и id у них общие.
