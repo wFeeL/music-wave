@@ -202,9 +202,6 @@ final class AppModel {
     @ObservationIgnored private var paletteFlow = PaletteFlow()
     /// Мягкая остановка показанных значений кадра («Мягкая остановка», `islandVisuals`).
     @ObservationIgnored private var softStop = SoftStop()
-    /// Полосы кадра для мягкой остановки, пока она их меняет (тишина или угасание): один буфер на
-    /// все кадры вместо копии `sampled.bands` на каждом кадре угасания.
-    @ObservationIgnored private var softStopBands: [Float] = []
     /// `wavePalette` для режима `mode` и палитры обложки `artwork`.
     @ObservationIgnored private var wavePaletteCache: (mode: WaveColorMode, artwork: [PaletteColor], palette: [PaletteColor])?
     @ObservationIgnored private var lastVisualTime: Double?
@@ -1312,7 +1309,8 @@ final class AppModel {
     /// ограничен `maxVisualStep` (после сна ни скачка уровней, ни скачка цвета), повторный вызов с тем
     /// же `now` ничего не двигает. Кадр идет в замер отрисовки (`timelineTime`: дата `TimelineView`),
     /// раз в 10 с строки замера пишутся в лог (`recordRender`), и в запись ритма вместе с пульсом
-    /// (показанные свечение и пульс, после мягкой остановки). Уровни, свечение, «вздох» и пульс после
+    /// (свечение и пульс расписания до мягкой остановки: сверка синхронизации смотрит на цепочку
+    /// ритма). Уровни, свечение, «вздох» и пульс после
     /// мягкой остановки, а еще идущие переход палитры, угасание и переливание идут в детектор простоя
     /// (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после кадра.
     /// Снимки (`previewing`) получают заданные кадр, свечение, «вздох» и фазу переливания без шага,
@@ -1367,26 +1365,20 @@ final class AppModel {
                 ambient = BeatGlow.ambient(at: presented, info: schedule.ambient, frame: sampled)
             }
         }
+        // Свечение и пульс расписания до мягкой остановки: их пишет запись ритма, чтобы сверка
+        // синхронизации видела цепочку ритма, а не угасание на паузе.
+        let beatGlow = glow
+        let beatAmbient = ambient
+        // Полосы кадра анализа: `SoftStop` пишет в массив, только когда значение меняется (кадры
+        // угасания, где пол выше входа), тогда массив копируется один раз на кадр. Пока звук идет и
+        // после угасания записей нет, и копий тоже.
         var bands = sampled.bands
         if settings.softStop {
             let silent = sampled.rawLevelDB <= LevelProcessor.noiseFloorDB || sourcePaused
-            if silent || softStop.isFading {
-                // Мягкая остановка может менять полосы: они идут через буфер модели, а не через
-                // копию массива кадра анализа на каждом кадре угасания.
-                softStopBands.removeAll(keepingCapacity: true)
-                softStopBands.append(contentsOf: sampled.bands)
-                softStop.apply(
-                    layers: &layers, bands: &softStopBands, level: &level, glow: &glow, pulse: &breath,
-                    ambient: &ambient, silent: silent, now: now
-                )
-                bands = softStopBands
-            } else {
-                // Звук идет, угасания нет: значения проходят как есть и только запоминаются.
-                softStop.apply(
-                    layers: &layers, bands: &bands, level: &level, glow: &glow, pulse: &breath,
-                    ambient: &ambient, silent: false, now: now
-                )
-            }
+            softStop.apply(
+                layers: &layers, bands: &bands, level: &level, glow: &glow, pulse: &breath,
+                ambient: &ambient, silent: silent, now: now
+            )
         } else if softStop.isFading {
             // Выключили посреди угасания: оно не держит частоту кадров и не продолжится потом.
             softStop = SoftStop()
@@ -1395,8 +1387,8 @@ final class AppModel {
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
             rhythmRecording.frame(
-                presented: presented, glow: glow, ambient: ambient, schedule: shownSchedule, refreshPeriod: period,
-                reduceMotion: reduceMotion
+                presented: presented, glow: beatGlow, ambient: beatAmbient, schedule: shownSchedule,
+                refreshPeriod: period, reduceMotion: reduceMotion
             )
         }
         recordRender(now: now, timelineTime: timelineTime)
@@ -1581,7 +1573,9 @@ struct IslandVisuals {
     var sampled: WaveFrame
     var motion: WaveMotion
     /// Палитра с учетом перехода.
-    var palette: [PaletteColor]
+    var palette: [PaletteColor] {
+        didSet { glowSourceColor = Self.glowSource(palette: palette, flowPhase: flowPhase) }
+    }
     /// Свечение доли 0...1 на момент показа кадра: свечение под островом и точки у выреза.
     var glow: Float
     /// «Вздох» 0...1: масштаб свернутого острова.
@@ -1590,17 +1584,37 @@ struct IslandVisuals {
     /// выключенном «Мягком пульсе» и «Уменьшении движения», угасает с мягкой остановкой. Свечение под
     /// островом рисуется по `max(glow, ambient)` (`BeatGlowView.brightness`), акцент баса в `frame`
     /// тоже от большего из двух, точки у выреза только по `glow`.
-    var ambient: Float = 0
+    var ambient: Float
     /// Время кадра, с: по нему течет градиент волн.
     var time: Double
     /// Фаза переливания 0..<1 (`PaletteFlow.phase`), 0 без переливания. `palette` остается без
     /// течения: волны применяют его после `WavePaint.distinct` (`WaveSet(flowPhase:)`), свечение под
     /// островом и точки у выреза берут `glowSourceColor`.
-    var flowPhase: Double = 0
-
+    var flowPhase: Double {
+        didSet { glowSourceColor = Self.glowSource(palette: palette, flowPhase: flowPhase) }
+    }
     /// Цвет свечения под островом и точек у выреза до осветления (`WavePaint.glowColor`): первый
-    /// цвет палитры с переливанием (RGB-вариант `PaletteFlow.apply`, `distinct` там нет).
-    var glowSourceColor: PaletteColor {
+    /// цвет палитры с переливанием (RGB-вариант `PaletteFlow.apply`, `distinct` там нет). Считается
+    /// один раз на кадр, при создании и при смене `palette` или `flowPhase`, а не на каждом чтении.
+    private(set) var glowSourceColor: PaletteColor
+
+    init(
+        frame: WaveFrame, sampled: WaveFrame, motion: WaveMotion, palette: [PaletteColor], glow: Float, pulse: Float,
+        ambient: Float = 0, time: Double, flowPhase: Double = 0
+    ) {
+        self.frame = frame
+        self.sampled = sampled
+        self.motion = motion
+        self.palette = palette
+        self.glow = glow
+        self.pulse = pulse
+        self.ambient = ambient
+        self.time = time
+        self.flowPhase = flowPhase
+        glowSourceColor = Self.glowSource(palette: palette, flowPhase: flowPhase)
+    }
+
+    private static func glowSource(palette: [PaletteColor], flowPhase: Double) -> PaletteColor {
         PaletteFlow.apply(palette, phase: flowPhase).first ?? PaletteExtractor.fallback[0]
     }
 }
