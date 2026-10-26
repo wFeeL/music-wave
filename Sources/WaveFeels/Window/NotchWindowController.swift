@@ -120,6 +120,8 @@ final class NotchWindowController {
             // Зона свайпа сменилась: начатый жест (и его, возможно, потерянный `ended`) не в счет.
             self?.swipeDetector.cancelGesture()
             self?.updatePointer()
+            // Глобальный монитор прокрутки стоит, только пока остров виден.
+            self?.updateScrollMonitors()
         }
         relayout()
         observePanelSettings(generation: settingsGeneration)
@@ -345,15 +347,19 @@ final class NotchWindowController {
 
     /// Ставит и снимает мониторы прокрутки. Они стоят, только пока панель показана, остров
     /// есть и свайп включен; глобальный только у выреза: у капсулы его события не считаются
-    /// (`NotchLayout.countsSwipe`). Выключенный свайп и капсула не будят приложение на каждую
-    /// прокрутку в других окнах.
+    /// (`NotchLayout.countsSwipe`), и только пока остров не скрыт и не подавлен (пауза,
+    /// блокировка экрана, полноэкранное окно): над скрытым островом свайпа нет. Выключенный свайп,
+    /// капсула и скрытый остров не будят приложение на каждую прокрутку в других окнах. Смена
+    /// состояния острова пересчитывает мониторы (`onIslandStateChange`); локальный монитор от
+    /// состояния острова не зависит.
     ///
     /// Обработчики мониторов вызываются на главном потоке. Из события в главный актор уходят
     /// только значения (`SwipeScroll`), не само событие.
     private func updateScrollMonitors() {
         let before = (scrollGlobalMonitor != nil, scrollLocalMonitor != nil)
         let enabled = isShown && layout != nil && model.settings.trackSwipe
-        let wantsGlobal = enabled && layout?.hasNotch == true
+        let islandVisible = model.islandState != .hidden && !model.islandSuppressed
+        let wantsGlobal = enabled && layout?.hasNotch == true && islandVisible
 
         if wantsGlobal, scrollGlobalMonitor == nil {
             scrollGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
