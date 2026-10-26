@@ -102,6 +102,69 @@ struct RenderCostTests {
         #expect(wide.renderCost == light.renderCost)
     }
 
+    /// Каждый стиль на тех же настройках стоит не больше «Волн»: и на свернутом острове (`.wing`),
+    /// и в раскрытой панели (`.panel`), со свечением и без него.
+    @Test func everyLookCostsNoMoreThanWaves() {
+        var checked = 0
+        for lineCount in 1...6 {
+            for fill in [0.0, 1] {
+                for thickness in [0.5, 2] {
+                    for radius in [0.5, 3] {
+                        for wing in [64.0, 200] {
+                            let base = WaveAppearance(
+                                wingWidth: wing, colorMode: .artwork, glowRadius: radius, lineCount: lineCount,
+                                fill: fill, thickness: thickness, amplitude: 1
+                            )
+                            for appearance in [base, base.lightened()] {
+                                for profile in WaveProfile.allCases {
+                                    let waves = appearance.renderCost(for: profile)
+                                    for look in WaveLook.allCases {
+                                        var styled = appearance
+                                        styled.look = look
+                                        let cost = styled.renderCost(for: profile)
+                                        #expect(cost > 0, "\(look) \(profile)")
+                                        #expect(
+                                            cost <= waves + 1e-9,
+                                            "\(look) \(profile) lines \(lineCount) fill \(fill) thickness \(thickness) radius \(radius) wing \(wing) glow \(appearance.glowPass): \(cost) > \(waves)"
+                                        )
+                                        checked += 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #expect(checked == 6 * 2 * 2 * 2 * 2 * 2 * 2 * 4)
+    }
+
+    /// Цена стилей по модели: «Волны» не изменились, остальные считаются от своих линий.
+    @Test func lookCostsFollowTheModel() {
+        var appearance = WaveAppearance.standard
+        #expect(appearance.renderCost(for: .wing) == appearance.renderCost)
+        #expect(appearance.renderCost(for: .panel) == 1)
+        // «Спектр» стоит как одна волна общего уровня.
+        var one = appearance
+        one.lineCount = 1
+        appearance.look = .spectrum
+        for profile in WaveProfile.allCases {
+            #expect(abs(appearance.renderCost(for: profile) - one.renderCost(for: profile)) < 1e-12)
+        }
+        // «Минимал»: одна линия с толщиной × 0.6, со свечением, без заливки.
+        appearance.look = .minimal
+        appearance.fill = 1
+        let stroke = 0.75 + 0.25 * WaveLook.minimalWidthScale
+        #expect(abs(appearance.renderCost - stroke * 2 / 5) < 1e-12)
+        // «Пульс»: в крыле только «вздох» тела, в панели одна стоячая линия без свечения и заливки.
+        appearance.look = .pulse
+        appearance.wingWidth = 200
+        let span = 0.75 + 0.25 * 200 / 64
+        #expect(abs(appearance.renderCost(for: .wing) - 0.25 * span / 5) < 1e-12)
+        #expect(abs(appearance.renderCost(for: .panel) - 1.0 / 5) < 1e-12)
+        #expect(appearance.renderCost == appearance.renderCost(for: .wing))
+    }
+
     /// Проход свечения не сохраняется: в настройках его нет, прочитанный вид всегда со свечением.
     @Test func glowPassIsNotStored() throws {
         let light = Self.maxPreset.lightened()

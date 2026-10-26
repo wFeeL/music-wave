@@ -56,6 +56,52 @@ public enum WaveColorMode: Codable, Equatable, Sendable {
     case custom(RGBColor)
 }
 
+/// Стиль волн (вкладка «Вид»). Имя не `WaveStyle`: так в приложении называется раскладка
+/// крыло или панель.
+public enum WaveLook: String, Codable, CaseIterable, Sendable {
+    /// Бегущие волны слоев, по умолчанию.
+    case waves
+    /// Одна линия через уровни 24 полос (`SpectrumShape`), бас у выреза.
+    case spectrum
+    /// Одна тонкая линия общего уровня, без эха и заливки.
+    case minimal
+    /// Без бегущих волн: остров и свечение дышат (`PulseLook`).
+    case pulse
+
+    public var title: String {
+        switch self {
+        case .waves: "Волны"
+        case .spectrum: "Спектр"
+        case .minimal: "Минимал"
+        case .pulse: "Пульс"
+        }
+    }
+
+    /// Множитель толщины линии «Минимала».
+    public static let minimalWidthScale = 0.6
+}
+
+/// Как стиль рисуется: базовая линия (она же ось заливки) и множитель толщины линий.
+/// Единственный путь, по которому стиль передает это рисованию.
+public struct WaveLookGeometry: Sendable, Equatable {
+    public enum Baseline: Sendable, Equatable {
+        /// Волна вверх и вниз от середины.
+        case center
+        /// y без знака от нижней базовой линии, заливка до нее же.
+        case bottom
+    }
+
+    public var baseline: Baseline
+    public var widthScale: Double
+
+    public init(baseline: Baseline, widthScale: Double) {
+        self.baseline = baseline
+        self.widthScale = widthScale
+    }
+
+    public static let standard = WaveLookGeometry(baseline: .center, widthScale: 1)
+}
+
 /// Одна нарисованная линия волны. Основные линии идут от уровня своего слоя, эхо повторяет
 /// основную линию тише и прозрачнее со сдвигом фазы, чтобы читаться как глубина.
 public struct WaveLine: Sendable, Equatable {
@@ -64,6 +110,8 @@ public struct WaveLine: Sendable, Equatable {
         case layer(WaveLayer)
         /// Общий уровень (одна волна).
         case overall
+        /// Уровни 24 полос: форма `SpectrumShape.samples`, а не `WaveShape`.
+        case spectrum
     }
 
     public var source: Source
@@ -76,18 +124,24 @@ public struct WaveLine: Sendable, Equatable {
     public var amplitudeScale: Float
     /// Множитель прозрачности.
     public var opacity: Float
+    /// Стоячая линия «Пульса»: фаза не бежит, линия только дышит громкостью.
+    public var standing: Bool
 
-    public init(source: Source, shape: WaveLayer, phaseOffset: Double, amplitudeScale: Float, opacity: Float) {
+    public init(
+        source: Source, shape: WaveLayer, phaseOffset: Double, amplitudeScale: Float, opacity: Float,
+        standing: Bool = false
+    ) {
         self.source = source
         self.shape = shape
         self.phaseOffset = phaseOffset
         self.amplitudeScale = amplitudeScale
         self.opacity = opacity
+        self.standing = standing
     }
 
     /// Есть ли у линии свечение (размытая копия толстой линии под ней): только у основных линий
-    /// баса и середины. Верх должен быть четким, эхо тоже.
-    public var glows: Bool { phaseOffset == 0 && shape != .high }
+    /// баса и середины. Верх должен быть четким, эхо тоже. У стоячей линии свечения нет.
+    public var glows: Bool { phaseOffset == 0 && shape != .high && !standing }
 
     /// Сдвиг фазы эха, рад.
     static let echoPhase = 0.6
@@ -182,6 +236,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     }
     /// «Цвет по частотам»: бас, середина и верх каждый своим цветом палитры. По умолчанию выключен.
     public var colorByBand: Bool
+    /// Стиль волн: по умолчанию «Волны», неизвестный сохраненный стиль тоже дает «Волны».
+    public var look: WaveLook
     /// Рисуется ли свечение линий (размытая копия под ними). Не настройка и не сохраняется:
     /// выключает его только `lightened()`.
     public private(set) var glowPass = true
@@ -189,7 +245,7 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     public init(
         wingWidth: Double, colorMode: WaveColorMode, glowRadius: Double,
         lineCount: Int, fill: Double, thickness: Double, amplitude: Double,
-        colorFlow: Double = 0, colorByBand: Bool = false
+        colorFlow: Double = 0, colorByBand: Bool = false, look: WaveLook = .waves
     ) {
         self.wingWidth = Self.clamped(wingWidth, Limits.wingWidth, Defaults.wingWidth)
         self.colorMode = colorMode
@@ -200,10 +256,11 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         self.amplitude = Self.clamped(amplitude, Limits.amplitude, Defaults.amplitude)
         self.colorFlow = Self.clamped(colorFlow, Limits.colorFlow, Defaults.colorFlow)
         self.colorByBand = colorByBand
+        self.look = look
     }
 
     private enum CodingKeys: String, CodingKey {
-        case wingWidth, colorMode, glowRadius, lineCount, fill, thickness, amplitude, colorFlow, colorByBand
+        case wingWidth, colorMode, glowRadius, lineCount, fill, thickness, amplitude, colorFlow, colorByBand, look
     }
 
     /// Пропущенное или нечитаемое поле берется из `standard`, значения вне диапазона ограничиваются.
@@ -222,7 +279,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
             thickness: value(.thickness, standard.thickness),
             amplitude: value(.amplitude, standard.amplitude),
             colorFlow: value(.colorFlow, standard.colorFlow),
-            colorByBand: value(.colorByBand, standard.colorByBand)
+            colorByBand: value(.colorByBand, standard.colorByBand),
+            look: value(.look, standard.look)
         )
     }
 
@@ -235,8 +293,53 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         }
     }
 
-    /// Линии для текущего «Количества волн».
-    public var lines: [WaveLine] { WaveLine.lines(count: lineCount) }
+    /// Линии свернутого острова (`lines(for: .wing)`).
+    public var lines: [WaveLine] { lines(for: .wing) }
+
+    /// Линии стиля. `profile` здесь раскладка: `.wing` это свернутый остров (крылья у выреза и
+    /// капсула без выреза, у «Волн», «Спектра» и «Минимала» линии в обоих случаях одни и те же),
+    /// `.panel` это раскрытая панель.
+    /// - «Волны»: `WaveLine.lines(count: lineCount)`.
+    /// - «Спектр»: одна линия `.spectrum` формы середины.
+    /// - «Минимал»: одна линия общего уровня формы середины.
+    /// - «Пульс»: в крыле линий нет, в панели одна стоячая линия общего уровня. Бегущих линий
+    ///   нет ни в одной раскладке.
+    public func lines(for profile: WaveProfile) -> [WaveLine] {
+        switch look {
+        case .waves:
+            return WaveLine.lines(count: lineCount)
+        case .spectrum:
+            return [WaveLine(source: .spectrum, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)]
+        case .minimal:
+            return [WaveLine(source: .overall, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)]
+        case .pulse:
+            switch profile {
+            case .wing:
+                return []
+            case .panel:
+                return [WaveLine(source: .overall, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1, standing: true)]
+            }
+        }
+    }
+
+    /// Заливка, с которой рисуется стиль: «Минимал» и «Пульс» без заливки. Сохраненная `fill`
+    /// не меняется.
+    public var effectiveFill: Double {
+        switch look {
+        case .waves, .spectrum: fill
+        case .minimal, .pulse: 0
+        }
+    }
+
+    /// Базовая линия и толщина стиля: «Спектр» от нижней базовой линии, «Минимал» с толщиной
+    /// × `WaveLook.minimalWidthScale`, «Волны» и «Пульс» как раньше.
+    public var lookGeometry: WaveLookGeometry {
+        switch look {
+        case .waves, .pulse: .standard
+        case .spectrum: WaveLookGeometry(baseline: .bottom, widthScale: 1)
+        case .minimal: WaveLookGeometry(baseline: .center, widthScale: WaveLook.minimalWidthScale)
+        }
+    }
 
     /// Сколько линий остается в режиме энергосбережения: три основные, без эха.
     static let lightenedLineLimit = 3
@@ -272,20 +375,40 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     /// Цвет (с переливанием и цветом по частотам) и «Размах» на цену не влияют, яркость свечения
     /// не часть вида и сюда не входит.
     /// По умолчанию (три линии, два свечения, без заливки) работа 5 условных проходов.
+    /// Это цена свернутого острова, `renderCost(for: .wing)`.
     public var renderCost: Double {
-        Self.work(self) / Self.work(.standard)
+        renderCost(for: .wing)
     }
 
-    private static func work(_ appearance: WaveAppearance) -> Double {
-        let lines = appearance.lines
-        let stroke = 0.75 + 0.25 * appearance.thickness
+    /// Цена кадра стиля в раскладке `profile` (как в `lines(for:)`: `.wing` свернутый остров,
+    /// `.panel` раскрытая панель) по той же модели, что `renderCost`, от линий `lines(for:)`.
+    /// Обе цены делятся на работу вида по умолчанию в крыле и сравниваются между собой.
+    /// - Толщина обводки и свечения умножается на `lookGeometry.widthScale`, заливка считается
+    ///   по `effectiveFill`.
+    /// - «Пульс» в крыле: линий нет, есть «вздох» тела `pulseWork` × множитель ширины крыла.
+    ///   В раскрытой панели остров не дышит, `pulseWork` нет.
+    /// - Панель: ширина панели от «Ширины крыла» не зависит, множителя ширины нет.
+    public func renderCost(for profile: WaveProfile) -> Double {
+        Self.work(self, profile: profile) / Self.work(.standard, profile: .wing)
+    }
+
+    /// Работа «вздоха» острова в «Пульсе»: масштаб тела без линий, в условных проходах.
+    static let pulseWork = 0.25
+
+    private static func work(_ appearance: WaveAppearance, profile: WaveProfile) -> Double {
+        let lines = appearance.lines(for: profile)
+        let stroke = 0.75 + 0.25 * appearance.thickness * appearance.lookGeometry.widthScale
         let strokes = Double(lines.count) * stroke
-        let fills = appearance.fill > 0 ? 0.5 * Double(lines.count) : 0
+        let fills = appearance.effectiveFill > 0 ? 0.5 * Double(lines.count) : 0
         let glows = appearance.glowPass
             ? Double(lines.filter(\.glows).count) * stroke * appearance.glowRadius
             : 0
-        let span = 0.75 + 0.25 * appearance.wingWidth / Defaults.wingWidth
-        return span * (strokes + fills + glows)
+        let breath = appearance.look == .pulse && profile == .wing ? pulseWork : 0
+        let span = switch profile {
+        case .wing: 0.75 + 0.25 * appearance.wingWidth / Defaults.wingWidth
+        case .panel: 1.0
+        }
+        return span * (strokes + fills + glows + breath)
     }
 
     /// Светлота OKLab «Своего цвета» не ниже этой: на черных крыльях темная волна не видна.
