@@ -146,10 +146,17 @@ public struct ShownSpectrum: Sendable {
 
     public init() {}
 
-    /// Наибольший показанный уровень, линия или призрак: вход детектора простоя
-    /// (`RenderIdleDetector`). При другом стиле 0.
+    /// Наибольший уровень, линия или призрак. При другом стиле 0.
     public var highest: Float {
         active ? motion.highest : 0
+    }
+
+    /// Вход детектора простоя (`RenderIdleDetector`): наибольшее из того, что рисуется. С
+    /// призраком пика (`showsPeaks`, «След пиков») это `highest`, без него только линия: скрытый
+    /// призрак, который еще падает, не держит частые кадры. При другом стиле 0.
+    public func idleLevel(showsPeaks: Bool) -> Float {
+        guard active else { return 0 }
+        return showsPeaks ? motion.highest : motion.values.max() ?? 0
     }
 
     /// Снимки: линия и призрак встают в состояние `motion` без шага, следующий `step` со стилем

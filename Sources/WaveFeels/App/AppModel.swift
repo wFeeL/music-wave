@@ -1519,7 +1519,7 @@ final class AppModel {
     /// же `now` ничего не двигает. Кадр идет в замер отрисовки (`timelineTime`: дата `TimelineView`),
     /// раз в 10 с строки замера пишутся в лог (`recordRender`), и в запись ритма вместе с пульсом
     /// (свечение и пульс расписания до мягкой остановки: сверка синхронизации смотрит на цепочку
-    /// ритма). Уровни (вместе с наибольшим из линии и призрака «Спектра»), свечение, «вздох» и пульс
+    /// ритма). Уровни (вместе с «Спектром»: линия и призрак, если «След пиков» его рисует), свечение, «вздох» и пульс
     /// после мягкой остановки, а еще идущие переход палитры, угасание и переливание идут в детектор
     /// простоя (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после кадра.
     /// Снимки (`previewing`) получают заданные кадр, свечение, «вздох», фазу переливания и
@@ -1617,7 +1617,8 @@ final class AppModel {
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
         feedRenderIdle(
-            level: max(layers.max() ?? 0, level, shownSpectrum.highest), glow: glow, pulse: max(breath, ambient),
+            level: max(layers.max() ?? 0, level, shownSpectrum.idleLevel(showsPeaks: settings.spectrumPeaks)),
+            glow: glow, pulse: max(breath, ambient),
             flowing: PaletteFlow.period(speed: flowSpeed) != nil, now: now
         )
         return IslandVisuals(

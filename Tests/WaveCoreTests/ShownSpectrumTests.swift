@@ -137,9 +137,14 @@ struct ShownSpectrumTests {
         #expect(bad == shot)
 
         shown.show(motion)
+        #expect(shown.idleLevel(showsPeaks: true) == motion.highest)
+        // Без «Следа пиков» скрытый призрак над линией не держит частые кадры.
+        #expect(shown.idleLevel(showsPeaks: false) == motion.values.max())
+        #expect(shown.idleLevel(showsPeaks: false) < shown.idleLevel(showsPeaks: true))
         let skipped = Self.skipped(&shown, look: .waves, bands: loud, dt: 0)
         #expect(skipped)
         #expect(shown.highest == 0)
+        #expect(shown.idleLevel(showsPeaks: true) == 0 && shown.idleLevel(showsPeaks: false) == 0)
 
         let bands = (0..<Self.bandCount).map { Float($0) / 23 }
         shown.show(bands: bands)
