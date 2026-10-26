@@ -117,6 +117,8 @@ final class NotchWindowController {
             return event
         }
         model.onIslandStateChange = { [weak self] in
+            // Зона свайпа сменилась: начатый жест (и его, возможно, потерянный `ended`) не в счет.
+            self?.swipeDetector.cancelGesture()
             self?.updatePointer()
         }
         relayout()
@@ -355,6 +357,8 @@ final class NotchWindowController {
 
         if wantsGlobal, scrollGlobalMonitor == nil {
             scrollGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                // Чтение события повторено в обоих мониторах намеренно: общий помощник был бы
+                // изолирован (главный актор или nonisolated), а изоляция `NSEvent` в SDK не известна.
                 let scroll = SwipeScroll(
                     precise: event.hasPreciseScrollingDeltas,
                     phase: NotchWindowController.swipePhase(event.phase, momentum: event.momentumPhase),
@@ -376,6 +380,7 @@ final class NotchWindowController {
 
         if enabled, scrollLocalMonitor == nil {
             scrollLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                // Повтор чтения события намеренный, причина у глобального монитора выше.
                 let scroll = SwipeScroll(
                     precise: event.hasPreciseScrollingDeltas,
                     phase: NotchWindowController.swipePhase(event.phase, momentum: event.momentumPhase),
@@ -401,15 +406,18 @@ final class NotchWindowController {
 
     /// Прокрутка из глобального (`global`) или локального монитора. Засчитывается, если панель
     /// показана, свайп включен, раскладка ее принимает (`NotchLayout.countsSwipe`) и курсор над
-    /// островом текущего состояния (`NotchLayout.swipeArea`). В детектор идут только события
+    /// островом текущего состояния (`NotchLayout.swipeCovers`: без прозрачных плеч ниже полосы
+    /// выреза). Смена состояния острова или баннера отменяет начатый жест
+    /// (`onIslandStateChange`). В детектор идут только события
     /// трекпада (`hasPreciseScrollingDeltas`), колесо мыши нет. Возвращает, засчитана ли
     /// прокрутка над островом: локальный монитор такое событие поглощает.
     private func handleScroll(_ scroll: SwipeScroll, global: Bool) -> Bool {
         guard isShown, model.settings.trackSwipe, let layout, let panel else { return false }
         guard layout.countsSwipe(global: global, panelAcceptsMouse: !panel.ignoresMouseEvents) else { return false }
-        guard let area = layout.swipeArea(
+        guard layout.swipeCovers(
+            NSEvent.mouseLocation,
             state: model.islandState, suppressed: model.islandSuppressed, banner: model.bannerVisible
-        ), area.contains(NSEvent.mouseLocation) else { return false }
+        ) else { return false }
         logFirstScroll(global: global)
         guard scroll.precise else { return true }
         if let command = swipeDetector.feed(

@@ -849,4 +849,57 @@ struct NotchGeometryTests {
         #expect(!pill.countsSwipe(global: true, panelAcceptsMouse: true))
         #expect(!pill.countsSwipe(global: true, panelAcceptsMouse: false))
     }
+
+    /// У выреза прозрачные плечи по 9 pt рядом с телом раскрытой панели и баннера ниже полосы
+    /// строки меню свайп не ловят: там окно пропускает клики, и под ними может быть окно.
+    /// В полосе строки меню над плечами свайп считается, как над вырезом.
+    @Test func swipeSkipsShoulderStripsBelowMenuBar() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let below = layout.notch.minY - 10
+        let band = layout.notch.midY
+        let bodies: [(Bool, CGRect, CGRect)] = [
+            (false, layout.expandedIsland, layout.expandedClickArea),
+            (true, layout.expandedIsland, layout.expandedClickArea),
+        ]
+        for (banner, frame, body) in bodies {
+            #expect(frame.width > body.width)
+            for x in [frame.minX + 4, frame.maxX - 4] {
+                #expect(!layout.swipeCovers(CGPoint(x: x, y: below), state: .expanded, banner: banner), "\(x)")
+                #expect(layout.swipeCovers(CGPoint(x: x, y: band), state: .expanded, banner: banner), "\(x)")
+            }
+            #expect(layout.swipeCovers(CGPoint(x: body.midX, y: below), state: .expanded, banner: banner))
+        }
+        let frame = layout.bannerFrame
+        let body = layout.bannerIsland
+        #expect(frame.width > body.width)
+        for x in [frame.minX + 4, frame.maxX - 4] {
+            #expect(!layout.swipeCovers(CGPoint(x: x, y: below), state: .collapsed, banner: true), "\(x)")
+            #expect(layout.swipeCovers(CGPoint(x: x, y: band), state: .collapsed, banner: true), "\(x)")
+        }
+        #expect(layout.swipeCovers(CGPoint(x: body.midX, y: below), state: .collapsed, banner: true))
+        // Свернутый остров целиком в полосе строки меню: крылья и верх экрана считаются.
+        let wing = CGPoint(x: layout.notch.minX - layout.wingWidth / 2, y: band)
+        #expect(layout.swipeCovers(wing, state: .collapsed))
+        #expect(layout.swipeCovers(CGPoint(x: layout.notch.midX, y: layout.screenFrame.maxY), state: .collapsed))
+        #expect(!layout.swipeCovers(CGPoint(x: layout.notch.midX, y: layout.notch.minY - 1), state: .collapsed))
+        #expect(!layout.swipeCovers(CGPoint(x: body.midX, y: below), state: .hidden, banner: true))
+        #expect(!layout.swipeCovers(CGPoint(x: body.midX, y: below), state: .expanded, suppressed: true))
+    }
+
+    /// У капсулы плеч нет: свайп считается над всей зоной `swipeArea`.
+    @Test func pillSwipeCoversWholeArea() throws {
+        let layout = try #require(NotchGeometry.layout(for: [external()]))
+        for (state, banner) in [(IslandState.collapsed, false), (.collapsed, true), (.expanded, false)] {
+            let area = try #require(layout.swipeArea(state: state, banner: banner))
+            let points = [
+                CGPoint(x: area.minX + 1, y: area.minY + 1),
+                CGPoint(x: area.maxX - 1, y: area.maxY - 1),
+                CGPoint(x: area.midX, y: area.midY),
+            ]
+            for point in points {
+                #expect(layout.swipeCovers(point, state: state, banner: banner), "\(state) \(banner) \(point)")
+            }
+            #expect(!layout.swipeCovers(CGPoint(x: area.maxX + 1, y: area.midY), state: state, banner: banner))
+        }
+    }
 }

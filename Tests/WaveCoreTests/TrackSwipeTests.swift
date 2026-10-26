@@ -87,4 +87,39 @@ import Testing
         #expect(detector.feed(fingerDX: -30, dy: 0, phase: .changed, time: 0.03) == nil)
         #expect(detector.feed(fingerDX: -30, dy: 0, phase: .changed, time: 0.04) == .next)
     }
+
+    /// Остров сменил состояние посреди жеста: жест отменен, его остаток (и потерянный `ended`)
+    /// команд не дает, следующий жест с `began` работает как обычно.
+    @Test func cancelledGestureWaitsForNextBegin() {
+        var detector = TrackSwipeDetector()
+        #expect(gesture(&detector, start: 0, deltas: [-30]).allSatisfy { $0 == nil })
+        detector.cancelGesture()
+        #expect(detector.feed(fingerDX: -40, dy: 0, phase: .changed, time: 0.02) == nil)
+        #expect(detector.feed(fingerDX: -100, dy: 0, phase: .changed, time: 0.03) == nil)
+        #expect(detector.feed(fingerDX: 0, dy: 0, phase: .ended, time: 0.04) == nil)
+        #expect(gesture(&detector, start: 0.1, deltas: [-30, -40]).last == .next)
+    }
+
+    /// Отмена жеста без `ended`: события без `began` после нее молчат, сколько бы ни шли.
+    @Test func cancelledGestureWithLostEndStaysSilent() {
+        var detector = TrackSwipeDetector()
+        #expect(gesture(&detector, start: 0, deltas: [-30]).allSatisfy { $0 == nil })
+        detector.cancelGesture()
+        for step in 0..<10 {
+            #expect(detector.feed(fingerDX: -100, dy: 0, phase: .changed, time: 0.1 + Double(step)) == nil)
+        }
+        #expect(gesture(&detector, start: 20, deltas: [30, 40]).last == .previous)
+    }
+
+    /// Отмена не сбрасывает паузу после команды: смена трека, которая сама меняет остров
+    /// (баннер), не дает второй команды тем же движением.
+    @Test func cancelKeepsCooldown() {
+        var detector = TrackSwipeDetector()
+        #expect(gesture(&detector, start: 0, deltas: [-30, -40]).last == .next)
+        detector.cancelGesture()
+        let early = gesture(&detector, start: 0.1, deltas: [-100, -100])
+        #expect(early.allSatisfy { $0 == nil })
+        #expect(detector.feed(fingerDX: 0, dy: 0, phase: .ended, time: 0.2) == nil)
+        #expect(gesture(&detector, start: 0.02 + TrackSwipeDetector.cooldown, deltas: [-30, -40]).last == .next)
+    }
 }

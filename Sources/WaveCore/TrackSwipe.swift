@@ -4,7 +4,8 @@
 /// Жест длится от `began` до `ended`. Команда срабатывает, когда горизонтальный путь жеста
 /// набрал `threshold` точек и в `dominance` раз больше вертикального. За жест не больше одной
 /// команды, после команды `cooldown` секунд новые жесты молчат. Инерция (`momentum`) и колесо
-/// мыши без фазы (`none`) игнорируются целиком и в путь жеста не идут.
+/// мыши без фазы (`none`) игнорируются целиком и в путь жеста не идут. `cancelGesture()`
+/// отменяет текущий жест: до следующего `began` (или конца отмененного жеста) события молчат.
 public struct TrackSwipeDetector: Sendable {
     /// Фаза события прокрутки, приведенная приложением из `phase` и `momentumPhase`.
     public enum Phase: Sendable, Equatable {
@@ -27,6 +28,8 @@ public struct TrackSwipeDetector: Sendable {
     private var pathX = 0.0
     private var pathY = 0.0
     private var lastCommandTime: Double?
+    /// Жест отменен (`cancelGesture`): его остаток без `began` в путь не идет.
+    private var awaitingBegin = false
 
     public init() {}
 
@@ -39,8 +42,14 @@ public struct TrackSwipeDetector: Sendable {
         case .momentum, .none:
             return nil
         case .began:
+            awaitingBegin = false
             startGesture()
         case .changed, .ended:
+            if awaitingBegin {
+                // Остаток отмененного жеста; его конец снимает ожидание.
+                if phase == .ended { awaitingBegin = false }
+                return nil
+            }
             // Начало жеста потерялось: жест считается с первого пришедшего события.
             if !inGesture { startGesture() }
         }
@@ -51,6 +60,18 @@ public struct TrackSwipeDetector: Sendable {
             inGesture = false
         }
         return command
+    }
+
+    /// Отменяет текущий жест (остров сменил состояние, `ended` мог потеряться). События без
+    /// `began` после этого молчат, пока не придет `began` или `ended`. Пауза после последней
+    /// команды (`cooldown`) остается: смена трека, которая сама меняет остров, второй команды
+    /// не дает.
+    public mutating func cancelGesture() {
+        inGesture = false
+        firedInGesture = false
+        pathX = 0
+        pathY = 0
+        awaitingBegin = true
     }
 
     private mutating func startGesture() {

@@ -243,6 +243,28 @@ public struct NotchLayout: Sendable, Equatable {
         )
     }
 
+    /// Над островом ли точка `point` для свайпа: внутри `swipeArea`, а ниже полосы выреза
+    /// (строки меню, `notch.minY`) только над видимым телом, где окно принимает клики:
+    /// `expandedClickArea` у раскрытого острова, `bannerIsland` у баннера. Прозрачные плечи
+    /// по бокам там пропускают события в окно под ними, свайп их не ловит и не поглощает.
+    /// В полосе выреза над плечами окон приложений нет, свайп там считается. У капсулы плеч
+    /// нет, и правило ничего не меняет.
+    public func swipeCovers(
+        _ point: CGPoint, state: IslandState, suppressed: Bool = false, banner: Bool = false
+    ) -> Bool {
+        guard let area = swipeArea(state: state, suppressed: suppressed, banner: banner),
+              area.contains(point) else { return false }
+        guard point.y < notch.minY else { return true }
+        switch state {
+        case .hidden:
+            return false
+        case .collapsed:
+            return !banner || bannerIsland.contains(point)
+        case .expanded:
+            return expandedClickArea.contains(point)
+        }
+    }
+
     /// Засчитывать ли прокрутку в свайп. `global`: событие из глобального монитора (панель
     /// его пропускает, и оно уходит еще и в окно под курсором); `panelAcceptsMouse`: панель
     /// сейчас принимает события мыши (раскрытый остров или баннер). У выреза любую: над ним
