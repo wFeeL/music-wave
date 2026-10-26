@@ -97,7 +97,7 @@ struct FeaturesSettingsView: View {
             isOn: Binding(get: { settings.followDisplayOptions }, set: { settings.followDisplayOptions = $0 })
         ) {
             Text("Учитывать контраст и прозрачность")
-            Text("Как в Универсальном доступе: толще линии, без размытия")
+            Text("Как в Универсальном доступе: толще линии, меньше прозрачности")
         }
     }
 }
