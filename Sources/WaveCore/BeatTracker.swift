@@ -158,6 +158,12 @@ public struct BeatTracker: Sendable {
         /// Голоса гребенки нужны: на попаданиях одних неверный захват набирает их не реже тени на верной
         /// фазе, и тень проигрывала (wrongLock 19-20). 3 голоса, то есть скачок через 5 проверок
         /// (1.25 с) вместо 2, лучший замер; 2 и 4-8 голосов давали 17-18 файлов.
+        ///
+        /// Предел гонки 16 долей (было 8) вместе с доводами (`raceEvidenceChecks`): гонку, которую
+        /// доводы не решили, держать дольше. На GTZAN tune (steady) к доводам с пределом 8 точность всех
+        /// вспышек 0.8666 -> 0.8676, вспышек мимо долей всего / с захватом 2102 / 600 -> 2080 / 576,
+        /// wrongLock 13 / 260 -> 12 / 231, покрытие долей 0.4225 -> 0.4217. Без доводов предел 16
+        /// стоил покрытия (0.4216 -> 0.4181), а в эмуляции журнала 2 темнота гонки росла с 4.8 до 9.3 с.
         public var raceBeats: Int
         public var raceMargin: Double
         public var raceLimit: Int
@@ -274,7 +280,7 @@ public struct BeatTracker: Sendable {
             carryPhase: Double = 0.25,
             raceBeats: Int = 4,
             raceMargin: Double = 0.1,
-            raceLimit: Int = 8,
+            raceLimit: Int = 16,
             raceVotes: Int = 3,
             raceEvidenceChecks: Int = 8,
             raceEvidenceShare: Double = 0.75,

@@ -710,6 +710,41 @@ struct BeatTrackerTests {
         #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.03, "next beat \(next)")
     }
 
+    /// Гонка, которую ничто не решает (голоса и доводы выключены, тень без онсетов не набирает
+    /// перевеса по попаданиям), длится `raceLimit` долей тени (16, 8 с на 120 BPM) и бросается; сетка
+    /// и захват остаются на долях.
+    @Test func undecidedRaceLastsTheLimit() throws {
+        #expect(BeatTracker.Parameters().raceLimit == 16)
+        var parameters = BeatTracker.Parameters()
+        parameters.raceVotes = 0
+        parameters.raceEvidenceChecks = 0
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var start: Double?
+        while start == nil, hops.endTime < 12 {
+            hops.feed(&tracker, until: hops.endTime + 0.05) { tracker in
+                if start == nil, tracker.shadowNext != nil { start = tracker.now }
+            }
+        }
+        let raceStart = try #require(start, "no race")
+        hops.offbeatODF = 0
+        var end: Double?
+        var alwaysLocked = true
+        hops.feed(&tracker, until: 24) { tracker in
+            if end == nil, tracker.shadowNext == nil { end = tracker.now }
+            alwaysLocked = alwaysLocked && tracker.locked
+        }
+        let beats = (try #require(end, "the race never ended") - raceStart) / 0.5
+        #expect(beats >= 15 && beats <= 17, "race of \(beats) beats")
+        #expect(alwaysLocked)
+        let next = try #require(tracker.nextBeat)
+        #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.03, "next beat \(next)")
+    }
+
     /// Тень от PLP (`plpShadow`): гребенка выключена огромным запасом (`phaseJumpMargin`), «и» без
     /// онсетов вдвое сильнее доли. PLP переходит на «и» за несколько секунд, и когда он там уверен (не
     /// ниже `plpShadow`), он запускает тень и голосует за нее: сетка уходит на «и» без потери
