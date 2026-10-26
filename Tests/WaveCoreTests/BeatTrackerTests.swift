@@ -402,11 +402,11 @@ struct BeatTrackerTests {
         #expect(lockedUntilMove)
     }
 
-    /// Пока идет гонка фаз, предсказанные доли текущей сетки светятся с `raceDim` (0.3, замер на
+    /// Пока идет гонка фаз, предсказанные доли текущей сетки светятся с `raceDim` (0.2, замер на
     /// GTZAN) от обычной яркости: уверенная вспышка на доле, в которой гребенка уже сомневается, хуже
     /// тусклой. Сравнение с двойником без приглушения на тех же шагах: состояние и id у них общие.
     @Test func raceDimsTheGrid() throws {
-        #expect(BeatTracker.Parameters().raceDim == 0.3)
+        #expect(BeatTracker.Parameters().raceDim == 0.2)
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var plain = BeatTracker.Parameters()
         plain.raceDim = 1
@@ -438,7 +438,7 @@ struct BeatTrackerTests {
         for (id, beat) in racing {
             let reference = try #require(twinShown[id])
             #expect(reference > 0.5, "beat \(id): \(reference) without dimming")
-            #expect(abs(beat.amplitude - 0.3 * reference) < 1e-4, "beat \(id): \(beat.amplitude) of \(reference)")
+            #expect(abs(beat.amplitude - 0.2 * reference) < 1e-4, "beat \(id): \(beat.amplitude) of \(reference)")
         }
         // Вне гонки яркость та же, что у двойника.
         for (id, beat) in shown where !beat.racing {
