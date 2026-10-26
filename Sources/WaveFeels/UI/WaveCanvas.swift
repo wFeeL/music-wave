@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import WaveCore
 
@@ -157,6 +158,9 @@ nonisolated struct WaveSet: Sendable {
     /// Те же градиенты заливки со смешением в перцептивном пространстве: у наборов «Спектра»
     /// градиент, у остальных `nil`. Пустой без заливки.
     let perceptualFillGradients: [AnyGradient?]
+    /// Сглаженные пути линий по размеру холста, общие для всех холстов кадра (`WavePathCache`):
+    /// оба крыла и оба прохода берут один путь на линию. У пустого набора `nil`.
+    let pathCache: WavePathCache?
 
     /// Пустой набор: холст ничего не рисует.
     init(empty style: WaveStyle) {
@@ -167,6 +171,7 @@ nonisolated struct WaveSet: Sendable {
         geometry = .standard
         fillGradients = []
         perceptualFillGradients = []
+        pathCache = nil
     }
 
     /// Градиент из точек `stops`, прозрачность каждой точки через `opacity`.
@@ -355,6 +360,50 @@ nonisolated struct WaveSet: Sendable {
             fillGradients = []
             perceptualFillGradients = []
         }
+        pathCache = WavePathCache()
+    }
+}
+
+/// Сглаженные пути линий одного набора (`WaveSet`) по размеру холста: строятся один раз на кадр
+/// и размер, их делят крылья и проходы. Проход свечения рисует те же пути, только толще
+/// (толщина обводки задается при обводке, путь от нее не зависит). Зеркальное крыло берет путь
+/// правого, отраженный вокруг вертикали через середину холста (x -> ширина - x): точки и опорные
+/// точки кривых ложатся туда же, куда их ставил прежний расчет справа налево, середины между
+/// точками отличаются не больше чем на единицы последнего разряда (около 1e-13 pt). Живет вместе
+/// с набором, то есть один кадр. Доступ под замком на случай, если SwiftUI зовет замыкание
+/// `Canvas` не на главном потоке.
+nonisolated final class WavePathCache: @unchecked Sendable {
+    private struct Entry {
+        let size: CGSize
+        let mirrored: Bool
+        /// По пути на линию набора, `nil` у линии короче двух точек.
+        let paths: [Path?]
+    }
+
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    /// Пути линий для холста размера `size`, зеркальные при `mirrored`. `build` строит их слева
+    /// направо (x от 0 до ширины) и зовется не больше раза на размер; зеркальные получаются из
+    /// них отражением.
+    func paths(size: CGSize, mirrored: Bool, build: () -> [Path?]) -> [Path?] {
+        lock.withLock { () -> [Path?] in
+            if let hit = entries.first(where: { $0.size == size && $0.mirrored == mirrored }) {
+                return hit.paths
+            }
+            let straight: [Path?]
+            if let hit = entries.first(where: { $0.size == size && !$0.mirrored }) {
+                straight = hit.paths
+            } else {
+                straight = build()
+                entries.append(Entry(size: size, mirrored: false, paths: straight))
+            }
+            guard mirrored else { return straight }
+            let flip = CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: size.width, ty: 0)
+            let flipped = straight.map { $0?.applying(flip) }
+            entries.append(Entry(size: size, mirrored: true, paths: flipped))
+            return flipped
+        }
     }
 }
 
@@ -415,7 +464,7 @@ nonisolated struct WaveDrawing: Sendable {
     let pass: WavePass
 
     func draw(in context: inout GraphicsContext, size: CGSize) {
-        guard size.width > 1, size.height > 1 else { return }
+        guard size.width > 1, size.height > 1, let pathCache = waves.pathCache else { return }
         context.blendMode = .plusLighter
         let isWing = waves.style == .wing
         let margin = isWing ? Self.wingEdgeMargin : Self.panelEdgeMargin
@@ -433,20 +482,29 @@ nonisolated struct WaveDrawing: Sendable {
         let widths = isWing ? Self.wingLineWidths : Self.panelLineWidths
         let widthScale = CGFloat(waves.geometry.widthScale)
         // Крыло идет от выреза: слева направо или зеркально. Панель всегда слева направо.
-        let start: CGFloat = isWing && mirrored ? size.width : 0
-        let end: CGFloat = isWing && mirrored ? 0 : size.width
+        let flipped = isWing && mirrored
+        let start: CGFloat = flipped ? size.width : 0
+        let end: CGFloat = flipped ? 0 : size.width
 
-        // x точек считаются один раз на холст и число точек: их делят основные линии и эхо.
-        var columns = Columns(start: start, end: end)
-        // Путь каждой линии строится один раз и идет и в заливку, и в обводку.
-        let lines: [(layer: WaveSet.Layer, path: Path)] = waves.layers.compactMap { layer in
-            let count = layer.samples.count
-            guard count > 1, pass == .lines || layer.glows else { return nil }
-            let xs = columns.positions(count: count)
-            let points = zip(xs, layer.samples).map { x, y in
-                CGPoint(x: x, y: baseline - swing * CGFloat(y))
+        // Путь каждой линии строится один раз на кадр и размер холста (`WavePathCache`) и идет в
+        // заливку и обводку обоих крыльев и обоих проходов.
+        let layers = waves.layers
+        let paths = pathCache.paths(size: size, mirrored: flipped) {
+            // x точек считаются один раз на число точек: их делят основные линии и эхо.
+            var columns = Columns(start: 0, end: size.width)
+            return layers.map { layer -> Path? in
+                let count = layer.samples.count
+                guard count > 1 else { return nil }
+                let xs = columns.positions(count: count)
+                let points = zip(xs, layer.samples).map { x, y in
+                    CGPoint(x: x, y: baseline - swing * CGFloat(y))
+                }
+                return Self.smoothPath(through: points)
             }
-            return (layer: layer, path: Self.smoothPath(through: points))
+        }
+        let lines: [(layer: WaveSet.Layer, path: Path)] = zip(layers, paths).compactMap { layer, path in
+            guard let path, pass == .lines || layer.glows else { return nil }
+            return (layer: layer, path: path)
         }
         // Градиенты готовы в наборе (общие для крыльев и проходов), холст задает только края.
         let startPoint = CGPoint(x: start, y: baseline)
@@ -490,7 +548,7 @@ nonisolated struct WaveDrawing: Sendable {
     }
 
     /// x точек линий одного холста по числу точек: шаг `(end - start) / (count - 1)` от `start`.
-    /// Живет один вызов `draw`, поэтому ширина и зеркальность у всех запросов одни.
+    /// Живет одну постройку путей (`WavePathCache`), поэтому ширина у всех запросов одна.
     private struct Columns {
         let start: CGFloat
         let end: CGFloat
