@@ -82,4 +82,50 @@ struct LevelSpringTests {
         spring.reset()
         #expect(spring.value == 0 && spring.velocity == 0)
     }
+    /// Своя частота: спектр берет рост 45 и спад 10 рад/с, половина пути вниз за 168 мс. Без
+    /// параметров пружина та же, что и раньше.
+    @Test func customOmegasSetTheHalfTimes() {
+        func halfTime(_ spring: LevelSpring, from start: Float, toward target: Float) -> Double? {
+            var spring = spring
+            spring.reset(to: start)
+            let dt = 1.0 / 2400
+            for frame in 1...2400 {
+                let value = spring.step(toward: target, dt: dt)
+                if target > start ? value >= 0.5 : value <= 0.5 { return Double(frame) * dt }
+            }
+            return nil
+        }
+        let spectrum = LevelSpring(value: 0, riseOmega: 45, fallOmega: 10)
+        #expect(spectrum.riseOmega == 45 && spectrum.fallOmega == 10)
+        let down = halfTime(spectrum, from: 1, toward: 0)
+        #expect(down.map { abs($0 - 0.168) <= 0.002 } == true, "\(String(describing: down))")
+        let up = halfTime(spectrum, from: 0, toward: 1)
+        #expect(up.map { abs($0 - 0.0373) <= 0.001 } == true, "\(String(describing: up))")
+
+        let standard = LevelSpring(value: 0.2)
+        #expect(standard.riseOmega == LevelSpring.riseOmega && standard.fallOmega == LevelSpring.fallOmega)
+        var a = LevelSpring(value: 0.2)
+        var b = LevelSpring(value: 0.2, riseOmega: LevelSpring.riseOmega, fallOmega: LevelSpring.fallOmega)
+        for target in [Float(0.9), 0.1, 0.5] {
+            for _ in 0..<7 {
+                #expect(a.step(toward: target, dt: 1.0 / 60) == b.step(toward: target, dt: 1.0 / 60))
+            }
+        }
+        // Не конечная или не положительная частота берет частоту по умолчанию.
+        let bad = LevelSpring(value: 0, riseOmega: .nan, fallOmega: -3)
+        #expect(bad.riseOmega == LevelSpring.riseOmega && bad.fallOmega == LevelSpring.fallOmega)
+    }
+
+    /// Шаг точный: один шаг 1/30 с равен двум шагам 1/60 с при той же цели.
+    @Test func customSpringIsFrameRateIndependent() {
+        for (start, target) in [(Float(0), Float(1)), (1, 0)] {
+            var once = LevelSpring(value: start, riseOmega: 45, fallOmega: 10)
+            var twice = once
+            once.step(toward: target, dt: 1.0 / 30)
+            twice.step(toward: target, dt: 1.0 / 60)
+            twice.step(toward: target, dt: 1.0 / 60)
+            #expect(abs(once.value - twice.value) < 1e-6, "\(once.value) vs \(twice.value)")
+            #expect(abs(once.velocity - twice.velocity) < 1e-4)
+        }
+    }
 }

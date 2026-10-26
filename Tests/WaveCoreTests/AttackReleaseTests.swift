@@ -99,4 +99,31 @@ import Testing
         gravity.reset()
         #expect(gravity.value == 0)
     }
+    /// Своя выдержка и спад: призрак пика спектра держится 120 мс и падает с пика до нуля за
+    /// 0.6 с. Нулевая атака ставит цель сразу и ровно. Без параметров все как раньше.
+    @Test func customHoldAndFall() {
+        var ghost = GravityRelease(attack: 0, hold: 0.12, fall: 0.6)
+        #expect(ghost.hold == 0.12 && ghost.fall == 0.6)
+        #expect(ghost.step(toward: 0.3, dt: 1.0 / 60) == 0.3)
+        #expect(ghost.step(toward: 0.7000001, dt: 1.0 / 60) == 0.7000001)
+        func value(at time: Double) -> Float {
+            var gravity = GravityRelease(attack: 0, hold: 0.12, fall: 0.6)
+            gravity.reset(to: 1)
+            var value: Float = 1
+            for _ in 0..<Int((time * 200).rounded()) {
+                value = gravity.step(toward: 0, dt: 1.0 / 200)
+            }
+            return value
+        }
+        #expect(value(at: 0.11) == 1)
+        // Половина спада: 1 − 0.5² = 0.75.
+        #expect(abs(value(at: 0.42) - 0.75) < 0.01)
+        #expect(value(at: 0.73) == 0)
+
+        let standard = GravityRelease()
+        #expect(standard.hold == GravityRelease.hold && standard.fall == GravityRelease.fall)
+        // Не конечные и отрицательные значения берут значения по умолчанию.
+        let bad = GravityRelease(attack: 0, hold: -1, fall: .nan)
+        #expect(bad.hold == GravityRelease.hold && bad.fall == GravityRelease.fall)
+    }
 }
