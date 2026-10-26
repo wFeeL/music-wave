@@ -28,7 +28,7 @@ ROOT=$PWD
 # shellcheck source=scripts/signing-source.sh
 source scripts/signing-source.sh
 
-MIN_VERSION=1.2.0
+MIN_VERSION=1.3.0
 APP="$ROOT/dist/WaveFeels.app"
 INSTALLED=/Applications/WaveFeels.app
 
