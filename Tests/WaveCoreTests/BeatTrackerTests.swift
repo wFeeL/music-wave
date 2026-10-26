@@ -715,6 +715,102 @@ struct BeatTrackerTests {
         #expect(!other.locked && other.schedule.unlockReason == .reset)
     }
 
+    /// Пауза в том же треке (`reset(keepTempo: true)`): период, половина уверенности и захват в счете
+    /// попаданий остаются, фазу гребенка находит заново по прежнему периоду, как только в истории две
+    /// доли, и через 1,5 с после возобновления доли снова вспыхивают на новых местах. Полный сброс
+    /// (`false`) до первой оценки темпа (2 с истории) долей не показывает.
+    @Test(arguments: [true, false])
+    func resetKeepingTempoResumesFast(keepTempo: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        let confidence = tracker.confidence
+        tracker.reset(keepTempo: keepTempo)
+        #expect(!tracker.locked && tracker.lastUnlockReason == .reset)
+        #expect(tracker.nextBeat == nil && tracker.schedule.events.isEmpty)
+        #expect(tracker.resumingTempo == keepTempo)
+        if keepTempo {
+            #expect(tracker.confidence == confidence * 0.5)
+            #expect(tracker.period.map { abs($0 - 0.5) < 0.005 } == true, "period \(String(describing: tracker.period))")
+        } else {
+            #expect(tracker.confidence == 0 && tracker.period == nil)
+        }
+
+        // Новый поток с нуля, доли не там, где были до паузы: 0.37 против 0.25 по кругу периода.
+        var resumed = SyntheticBeats(bpm: 120)
+        resumed.nextBeatTime = 0.37
+        // Меньше двух долей истории: фазы еще нет, и вес показа без сетки не растет (иначе онсеты бочки
+        // приглушались бы как при сетке, которой нет).
+        resumed.feed(&tracker, until: 0.9)
+        #expect(tracker.nextBeat == nil && tracker.displayWeight == 0)
+        resumed.feed(&tracker, until: 1.5)
+        let flashes = tracker.schedule.events.filter { $0.predicted && $0.time > 1.5 && $0.amplitude > OfflineBeatChain.eventRise }
+        if keepTempo {
+            #expect(!flashes.isEmpty, "events \(tracker.schedule.events)")
+            for flash in flashes {
+                #expect(abs(BeatTracker.circularDifference(flash.time - 0.37, period: 0.5)) < 0.02, "flash at \(flash.time)")
+            }
+        } else {
+            #expect(flashes.isEmpty, "flashes \(flashes)")
+            #expect(tracker.period == nil)
+        }
+
+        // Первая настоящая оценка темпа (после 2 с истории) идет как подстройка: вернувшийся захват не
+        // теряется, сетка на месте, память больше не нужна.
+        var relocked = tracker.locked
+        var lost = false
+        resumed.feed(&tracker, until: 6) { tracker in
+            if tracker.locked {
+                relocked = true
+            } else if relocked {
+                lost = true
+            }
+        }
+        #expect(relocked && !lost && tracker.locked)
+        #expect(!tracker.resumingTempo)
+        #expect(tracker.nextBeat.map { abs(BeatTracker.circularDifference($0 - 0.37, period: 0.5)) < 0.01 } == true)
+    }
+
+    /// Память темпа не копится: второй сброс с памятью без шагов между ними уверенность снова не делит,
+    /// полный сброс память стирает, и сброс с памятью после него сохранять нечего.
+    @Test func keptTempoHalvesOnceAndFullResetForgetsIt() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        tracker.reset(keepTempo: true)
+        let kept = tracker.confidence
+        let period = tracker.period
+        #expect(kept > 0.4 && period != nil)
+        tracker.reset(keepTempo: true)
+        #expect(tracker.confidence == kept && tracker.period == period && tracker.resumingTempo)
+        tracker.reset()
+        #expect(tracker.confidence == 0 && tracker.period == nil && !tracker.resumingTempo)
+        tracker.reset(keepTempo: true)
+        #expect(tracker.confidence == 0 && tracker.period == nil && !tracker.resumingTempo)
+    }
+
+    /// Без захвата память дает только период и уверенность: новый захват ждет `lockHits` новых
+    /// попаданий подряд на сетке, найденной заново.
+    @Test func keptTempoWithoutLockNeedsNewHits() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 3)
+        try #require(!tracker.locked && tracker.period != nil)
+        let confidence = tracker.confidence
+        tracker.reset(keepTempo: true)
+        #expect(tracker.confidence == confidence * 0.5 && tracker.resumingTempo)
+        var resumed = SyntheticBeats(bpm: 120)
+        resumed.nextBeatTime = 0.37
+        var lockedAt: Double?
+        resumed.feed(&tracker, until: 6) { tracker in
+            if lockedAt == nil, tracker.locked { lockedAt = tracker.now }
+        }
+        // Сетка с 1 с потока, пять попаданий подряд с доли 1.37: захват не раньше 3.37 с.
+        #expect(lockedAt.map { $0 >= 3.3 } == true, "locked at \(String(describing: lockedAt))")
+    }
+
     /// Вес показа в трекере: 0, пока уверенность не выше `weightLow`, и доходит до 1 не позже чем за
     /// `weightRiseBeats` долей (плюс шаг на границе) после того, как уверенность дошла до `weightHigh`.
     /// Заменяет `blendCrossfadesInOneBeat`: смесь шла по захвату за одну долю, вес идет по уверенности и
@@ -1211,6 +1307,43 @@ struct BeatTrackerTests {
         hops.nextBeatTime = hops.endTime + 0.25
         hops.feed(&tracker, until: hops.endTime + 1.5)
         #expect(tracker.energyGate > 0.9)
+    }
+}
+
+/// Чей темп помнит трекер (`TrackTempoMemory`): пауза в том же треке сохраняет темп, без трека и
+/// после смены трека нет; трек сменился, пока трекер еще идет по памяти, значит память надо бросить.
+struct TrackTempoMemoryTests {
+    private let first = TrackKey(title: "Первый", artist: "Исполнитель", source: "ru.yandex.desktop.music")
+    private let second = TrackKey(title: "Второй", artist: "Исполнитель", source: "ru.yandex.desktop.music")
+
+    @Test func keepsTempoOnlyForTheSameKnownTrack() {
+        var memory = TrackTempoMemory()
+        #expect(!memory.keepsTempo(current: nil))
+        #expect(!memory.keepsTempo(current: first))
+        let dropOnStart = memory.feeding(current: first, resuming: false)
+        #expect(!dropOnStart && memory.track == first)
+        #expect(memory.keepsTempo(current: first))
+        #expect(!memory.keepsTempo(current: second))
+        #expect(!memory.keepsTempo(current: nil))
+        let dropWithoutTrack = memory.feeding(current: nil, resuming: false)
+        #expect(!dropWithoutTrack && memory.track == nil)
+        #expect(!memory.keepsTempo(current: nil))
+    }
+
+    @Test func trackChangeWhileResumingDropsTheMemory() {
+        var memory = TrackTempoMemory()
+        _ = memory.feeding(current: first, resuming: false)
+        let sameTrack = memory.feeding(current: first, resuming: true)
+        #expect(!sameTrack)
+        let nextTrack = memory.feeding(current: second, resuming: true)
+        #expect(nextTrack)
+        let trackLost = memory.feeding(current: nil, resuming: true)
+        #expect(trackLost)
+        // Смена трека посреди звука без памяти трекер не сбрасывает: он сам переходит на новый темп.
+        let backToFirst = memory.feeding(current: first, resuming: false)
+        let midSound = memory.feeding(current: second, resuming: false)
+        #expect(!backToFirst && !midSound)
+        #expect(memory.keepsTempo(current: second))
     }
 }
 

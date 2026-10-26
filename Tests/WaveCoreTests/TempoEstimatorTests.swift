@@ -15,6 +15,31 @@ struct TempoStickinessTests {
         #expect(tempo.period == 0.7)
     }
 
+    /// `reset(keepPeriod: true)` (пауза в том же треке, `BeatTracker.reset(keepTempo:)`): период
+    /// остается, первая оценка нового потока рядом с ним идет как подстройка, а не как смена темпа.
+    /// Темп считается установившимся, как только набралась история первой оценки: октава не
+    /// перебрасывает его по двум согласным оценкам. Полный сброс период стирает.
+    @Test func resetKeepingThePeriodDoesNotSwitch() throws {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 0.5)
+        tempo.reset(keepPeriod: true)
+        #expect(tempo.period == 0.5)
+        let first = tempo.accept(period: 0.51)
+        #expect(!first.switched && abs(first.period - 0.502) < 1e-12)
+
+        tempo.reset(keepPeriod: true)
+        for _ in 0..<Int(TempoEstimator.minimumHistory * 187.5) {
+            tempo.append(0, kick: 0)
+        }
+        let held = try #require(tempo.period)
+        #expect(tempo.accept(period: 0.25) == TempoEstimate(period: held, switched: false))
+        #expect(tempo.accept(period: 0.25) == TempoEstimate(period: held, switched: false))
+
+        tempo.reset()
+        #expect(tempo.period == nil)
+        #expect(tempo.accept(period: 0.5).switched)
+    }
+
     @Test func movesTwentyPercentTowardNearEstimates() {
         var tempo = TempoEstimator(framesPerSecond: 187.5)
         _ = tempo.accept(period: 0.5)

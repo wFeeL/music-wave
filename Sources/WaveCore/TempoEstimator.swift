@@ -245,17 +245,25 @@ public struct TempoEstimator: Sendable {
         self = TempoEstimator(framesPerSecond: framesPerSecond)
     }
 
-    /// Пауза, перемотка или смена источника: история и темп начинаются заново.
-    public mutating func reset() {
+    /// Пауза, перемотка или смена источника: история и темп начинаются заново. С `keepPeriod` (пауза
+    /// в том же треке, `BeatTracker.reset(keepTempo:)`) период остается: первая оценка нового потока
+    /// рядом с ним идет как подстройка, а не как смена темпа. Темп тогда считается установившимся,
+    /// как только наберется история первой оценки (`minimumHistory`), и кратная оценка не
+    /// перебрасывает его без `relatedSwitchUpdates` согласных.
+    public mutating func reset(keepPeriod: Bool = false) {
         for index in history.indices {
             history[index] = 0
             kickHistory[index] = 0
         }
         writeIndex = 0
         count = 0
-        period = nil
         framesAppended = 0
-        firstEstimateFrame = nil
+        if keepPeriod, period != nil {
+            firstEstimateFrame = 0
+        } else {
+            period = nil
+            firstEstimateFrame = nil
+        }
         clearRecent()
     }
 

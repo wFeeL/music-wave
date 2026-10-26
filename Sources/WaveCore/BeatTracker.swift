@@ -38,7 +38,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    `g_E = smoothstep(−24, −12, разность)`. Между бочками ворот открыт, в брейке закрывается;
 /// 6. вес показа `displayWeight` идет к `smoothstep(weightLow, weightHigh, уверенность)`: вверх не
 ///    быстрее `1 / weightRiseBeats` за долю, вниз не быстрее `1 / weightFallBeats`. Без захвата вес
-///    растет только после `weightHits` попаданий подряд. Новая сетка (смена темпа, скачок фазы,
+///    растет только после `weightHits` попаданий подряд, без сетки (после сброса с памятью темпа,
+///    пока фаза не найдена) не растет. Новая сетка (смена темпа, скачок фазы,
 ///    перехват тенью) сразу получает вес не выше цели по своей уверенности. `locked` для диагностики и
 ///    метрик, на показ влияет только через это правило роста;
 /// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): уровень полосы бочки в амплитуде идет
@@ -58,6 +59,12 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Прошедшие события остаются в
 /// расписании (до 8), чтобы рендер довел их спад. Оба счетчика id только растут, в том числе через
 /// `reset()` и смену темпа: `BeatGlow` помнит id 2 с.
+///
+/// Пауза в том же треке (`reset(keepTempo: true)`): фаза пропадает (поток начинается заново), а
+/// период, половина уверенности, захват в счете попаданий, средняя сила онсетов и период
+/// `TempoEstimator` остаются. Пока у нового потока нет своей оценки темпа (2 с истории), фазу на
+/// каждой проверке ищет гребенка по прежнему периоду, как только в истории `resumeHistoryBeats`
+/// долей, и сетка вспыхивает примерно через секунду, а не через 3-5 с.
 ///
 /// `process` не выделяет памяти, `schedule` собирает новый массив событий при каждом чтении.
 public struct BeatTracker: Sendable {
@@ -290,6 +297,10 @@ public struct BeatTracker: Sendable {
     static let ambientRelease = 0.150
     static let ambientAverage = 2.0
     static let ambientFloorDB: Float = LevelProcessor.noiseFloorDB
+    /// После сброса с памятью темпа гребенка ищет фазу по прежнему периоду, когда в истории столько
+    /// долей: у каждой задержки гребенки тогда хотя бы два зубца, одна громкая атака на «и» фазу не
+    /// ставит.
+    static let resumeHistoryBeats = 2.0
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
@@ -326,6 +337,12 @@ public struct BeatTracker: Sendable {
     /// `reset()` и `reconfigure` посреди захвата дают `.reset`.
     public internal(set) var lastUnlockReason: UnlockReason?
     private var disagreements = 0
+    /// Период, по которому гребенка ищет фазу после `reset(keepTempo: true)`, пока у нового потока
+    /// нет своей оценки темпа; `nil` без памяти.
+    private var resumePeriod: Double?
+    /// С последнего сброса были шаги: следующий сброс с памятью делит уверенность. Без шагов между
+    /// сбросами (несколько причин одной паузы) память остается как есть.
+    private var processedSinceReset = false
     /// Последние доли прошли накатом (`isCoasting`): следующая закрытая доля решает судьбу захвата.
     private var coasted = false
     /// Теневая фаза: следующая доля другой фазы того же периода, которую гребенка предложила вместо
@@ -421,8 +438,13 @@ public struct BeatTracker: Sendable {
     /// `ambientFloorDB` в амплитуде.
     private static let ambientFloorAmplitude = Float(pow(10.0, Double(ambientFloorDB) / 20))
 
+    /// Трекер идет по памяти темпа после `reset(keepTempo: true)`: у нового потока еще нет своей
+    /// оценки темпа.
+    public var resumingTempo: Bool { resumePeriod != nil }
+
     public mutating func process(_ hop: HopResult) {
         now = hop.endTime
+        processedSinceReset = true
         // Ворот и вес здесь еще от прошлого шага, до звука самой доли.
         if committedAmplitude == nil, let nextBeat, now >= nextBeat {
             committedAmplitude = predictedAmplitude
@@ -438,8 +460,14 @@ public struct BeatTracker: Sendable {
         if let due = nextUpdate, now >= due {
             // После долгого разрыва в потоке следующая оценка считается от «сейчас».
             nextUpdate = due + interval > now ? due + interval : now + interval
-            if !isCoasting, let estimate = tempo.update() {
-                updateTempo(estimate)
+            if !isCoasting {
+                if let estimate = tempo.update() {
+                    resumePeriod = nil
+                    updateTempo(estimate)
+                } else if let resumePeriod, Double(odfCount) * hopDuration >= Self.resumeHistoryBeats * resumePeriod {
+                    // Память темпа: прежний период как оценка без смены, фазу ставит гребенка.
+                    updateTempo(TempoEstimate(period: resumePeriod, switched: false))
+                }
             }
         } else if nextUpdate == nil {
             nextUpdate = now + interval
@@ -460,9 +488,23 @@ public struct BeatTracker: Sendable {
     }
 
     /// Пауза, перемотка или смена источника: темп, фаза, уверенность и ворот начинаются заново.
-    /// Счетчики id не сбрасываются, новые доли получают новые id.
-    public mutating func reset() {
-        tempo.reset()
+    /// Счетчики id не сбрасываются, новые доли получают новые id. Захват, который был, теряется с
+    /// причиной `.reset`.
+    ///
+    /// `keepTempo` (пауза в том же треке): если темп есть, остаются период, уверенность × 0.5, захват
+    /// в счете попаданий (не меньше `lockHits`, без захвата 0), средняя сила онсетов и период
+    /// `TempoEstimator`. Новый захват тогда идет от первого попадания, как только уверенность дойдет
+    /// до `lockConfidence`. Повторный сброс без шагов между ними память не меняет.
+    public mutating func reset(keepTempo: Bool = false) {
+        var kept: (period: Double, confidence: Double, hits: Int, strength: Float)?
+        if keepTempo, let period {
+            if processedSinceReset {
+                kept = (period, confidence * 0.5, locked ? max(hits, parameters.lockHits) : 0, strengthEMA)
+            } else {
+                kept = (period, confidence, hits, strengthEMA)
+            }
+        }
+        tempo.reset(keepPeriod: kept != nil)
         plp.reset()
         nextUpdate = nil
         now = 0
@@ -493,6 +535,14 @@ public struct BeatTracker: Sendable {
         ambientPrimed = false
         ambientEnergy = 0
         past.removeAll(keepingCapacity: true)
+        resumePeriod = kept?.period
+        processedSinceReset = false
+        if let kept {
+            period = kept.period
+            confidence = kept.confidence
+            hits = kept.hits
+            strengthEMA = kept.strength
+        }
     }
 
     /// Новая частота шагов (смена частоты дискретизации): все состояние начинается заново, как после
@@ -895,7 +945,7 @@ public struct BeatTracker: Sendable {
     private mutating func updateWeight() {
         displayWeight = Self.nextWeight(
             displayWeight, confidence: confidence, beats: hopDuration / (period ?? Self.defaultPeriod), parameters: parameters,
-            rising: locked || hits >= parameters.weightHits
+            rising: nextBeat != nil && (locked || hits >= parameters.weightHits)
         )
     }
 
