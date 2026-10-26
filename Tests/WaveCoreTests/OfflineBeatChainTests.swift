@@ -76,6 +76,35 @@ struct OfflineBeatChainTests {
         #expect(result.lockTime.map { $0 > 0 && $0 < 8 } == true)
     }
 
+    /// Принудительный сброс с памятью темпа (`resetInterval`): сбросы на сроках по времени потока, с
+    /// захватом перед ними, после каждого свечение возвращается на доли (бочка на каждой доле: в
+    /// разборе 1.2.1 32 из 32 возобновлений на доле). Без интервала сбросов нет и прогон тот же.
+    @Test func forcedResetsKeepTempoAndResumeOnTheBeat() async {
+        let (scene, plain, reset, trackerOnly) = await runOffCooperativePool {
+            let scene = Drums.fourOnFloor(bpm: 120, seconds: 24, hats: .eighths)
+            var config = OfflineBeatChain.Config(seed: 3)
+            let plain = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            config.resetInterval = 7
+            let reset = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            config.resetAnalyzer = false
+            let trackerOnly = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            return (scene, plain, reset, trackerOnly)
+        }
+        #expect(plain.resets.isEmpty)
+        #expect(reset.resets.count == 3)
+        let hop = StreamAnalyzer(sampleRate: scene.sampleRate).config.hopDuration
+        for (reset, due) in zip(reset.resets, [7.0, 14, 21]) {
+            #expect(reset.time >= due && reset.time < due + hop, "reset at \(reset.time)")
+            #expect(reset.locked)
+        }
+        #expect(trackerOnly.resets.map(\.time) == reset.resets.map(\.time))
+        let resume = BeatEvaluation.resume(result: reset, annotations: scene.beats, duration: 24, window: 0.07)
+        #expect(resume.resets == 3 && resume.withFlash == 3 && resume.firstOn == 3)
+        #expect(resume.offBeat == 0 && resume.partlyOffBeat == 0)
+        #expect(resume.flashes > 0 && resume.matched == resume.flashes)
+        #expect((resume.medianDelay ?? 9) < 2)
+    }
+
     /// Те же сэмплы и `seed` дают тот же результат, а фазы рендера меняют только вспышки: состояния
     /// и онсеты у них общие.
     @Test func analysisIsDeterministicAndShared() async {

@@ -40,6 +40,7 @@ public struct EvalArguments: Sendable, Equatable {
         case missingList
         case extraArgument(String)
         case unknownUnionGroup(union: String, group: String)
+        case conflictingOptions(String, String)
 
         public var description: String {
             switch self {
@@ -50,6 +51,7 @@ public struct EvalArguments: Sendable, Equatable {
             case .missingList: "missing list.tsv"
             case .extraArgument(let value): "unexpected argument '\(value)'"
             case .unknownUnionGroup(let union, let group): "--union \(union): no group '\(group)' in the list"
+            case .conflictingOptions(let first, let second): "\(first) cannot be combined with \(second)"
             }
         }
     }
@@ -75,6 +77,16 @@ public struct EvalArguments: Sendable, Equatable {
     public var skipSeconds = 0.0
     /// Взять только первые N файлов списка после фильтра по выборке (быстрые прогоны).
     public var maxFiles: Int?
+    /// Список это записи владельца (`OwnerEvaluation`): `<rhythm.json>\t<доли>\t<группа>`.
+    public var owner = false
+    /// Пары «B после A» (`EvalPairs`): сколько пар в каждой группе; `nil` без пар.
+    public var pairs: Int?
+    /// Сброс с памятью темпа каждые столько секунд (`OfflineBeatChain.Config.resetInterval`); `nil` без сбросов.
+    public var resetEvery: Double?
+    /// Записи владельца: звук записи подряд столько раз (петля для сбросов).
+    public var loop = 1
+    /// Сброс по `resetEvery` только у трекера, анализ продолжается (`OfflineBeatChain.Config.resetAnalyzer`).
+    public var resetTrackerOnly = false
 
     public init() {}
 
@@ -95,6 +107,14 @@ public struct EvalArguments: Sendable, Equatable {
           --max-files N              score only the first N files
           --per-file                 print one row per file as well
           --json                     write the report as JSON to stdout
+          --pairs N                  warm pairs: in every group the first 2N files of the split, track B
+                                     right after track A (29.5 s each, no reset) against B alone; scores B only
+          --reset-every S            forced reset with tempo memory every S seconds of stream (resume metric):
+                                     StreamAnalyzer.reset() and BeatTracker.reset(keepTempo: true), as the app
+          --reset-tracker-only       with --reset-every: reset the tracker only (the 1.2.1 evalreset.py probe)
+          --owner                    list.tsv holds owner rhythm logs: <rhythm.json>\t<beats>\t<group>, the WAV
+                                     next to the JSON; replayed with the log's latency, offset and render rate
+          --loop N                   owner logs only: play the recording N times in a row (default 1)
         """
 
     public static func parse(_ arguments: [String]) throws -> EvalArguments {
@@ -134,6 +154,22 @@ public struct EvalArguments: Sendable, Equatable {
                 result.json = true
             case "--per-file":
                 result.perFile = true
+            case "--owner":
+                result.owner = true
+            case "--reset-tracker-only":
+                result.resetTrackerOnly = true
+            case "--pairs":
+                let text = try value()
+                guard let count = Int(text), count >= 1 else { throw Error.invalidValue(option: name, value: text) }
+                result.pairs = count
+            case "--reset-every":
+                let seconds = try number()
+                guard seconds > 0 else { throw Error.invalidValue(option: name, value: String(seconds)) }
+                result.resetEvery = seconds
+            case "--loop":
+                let text = try value()
+                guard let count = Int(text), count >= 1 else { throw Error.invalidValue(option: name, value: text) }
+                result.loop = count
             case "--split":
                 let text = try value()
                 guard let split = Split(rawValue: text) else { throw Error.invalidValue(option: name, value: text) }
@@ -195,6 +231,10 @@ public struct EvalArguments: Sendable, Equatable {
             }
         }
         if result.help { return result }
+        if result.owner, result.pairs != nil { throw Error.conflictingOptions("--owner", "--pairs") }
+        if result.pairs != nil, result.resetEvery != nil { throw Error.conflictingOptions("--pairs", "--reset-every") }
+        if result.loop > 1, !result.owner { throw Error.conflictingOptions("--loop", "a GTZAN list (use --owner)") }
+        if result.resetTrackerOnly, result.resetEvery == nil { throw Error.missingValue("--reset-every") }
         guard let path = positional.first else { throw Error.missingList }
         if positional.count > 1 { throw Error.extraArgument(positional[1]) }
         result.listPath = path
@@ -218,9 +258,25 @@ public struct EvalArguments: Sendable, Equatable {
         config.renderRate = renderHz
         config.outputLatency = latencyMs / 1000
         config.syncOffset = offsetMs / 1000
+        config.resetInterval = resetEvery
+        config.resetAnalyzer = !resetTrackerOnly
         for override in overrides {
             _ = config.trackerParameters.set(override.name, to: override.value)
         }
+        return config
+    }
+
+    /// Настройка цепочки для записи владельца: как у `wave-eval --replay` (задержка, сдвиг и частота кадров
+    /// записи, `seed` как есть), плюс параметры трекера и сбросы из аргументов. Рендер, задержка и сдвиг из
+    /// аргументов не действуют.
+    public func ownerConfig(for meta: RhythmLog.Meta) -> OfflineBeatChain.Config {
+        var parameters = BeatTracker.Parameters()
+        for override in overrides {
+            _ = parameters.set(override.name, to: override.value)
+        }
+        var config = RhythmReplay.config(for: meta, options: RhythmReplay.Options(seed: seed, trackerParameters: parameters))
+        config.resetInterval = resetEvery
+        config.resetAnalyzer = !resetTrackerOnly
         return config
     }
 

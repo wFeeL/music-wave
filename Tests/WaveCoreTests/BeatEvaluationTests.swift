@@ -304,4 +304,120 @@ struct BeatEvaluationTests {
         let offset = try #require(score.meanOffsetMs)
         #expect(offset < 5 && offset > -45, "offset \(offset)")
     }
+
+    // MARK: Возобновление, пары, записи владельца
+
+    /// Сбросы на 2 и 5 с (задержка 20 мс, доли каждые 0.5 с). После первого (с захватом) вспышки на «и»:
+    /// возобновление на «и», точность 2 с после сброса 0. После второго (без захвата) первая вспышка на
+    /// доле, потом одна на «и»: возобновление частично на «и». Сброс за 1 с до конца не считается.
+    @Test func resumeScoresTheFirstFlashesAfterEachReset() throws {
+        var flashes: [OfflineBeatChain.Flash] = []
+        // После сброса на 2 с: «и» на 2.75, 3.25, 3.75, 4.25 (с захватом с 3.25).
+        for (index, time) in [2.75, 3.25, 3.75, 4.25].enumerated() { flashes.append(Self.flash(time + 0.020, locked: index > 0)) }
+        // После сброса на 5 с: доля 5.5, «и» 5.75, доли 6.5, 7.0.
+        for time in [5.5, 5.75, 6.5, 7.0] { flashes.append(Self.flash(time + 0.020, locked: false)) }
+        var result = Self.result(flashes: flashes)
+        result.resets = [
+            OfflineBeatChain.Reset(time: 2, locked: true), OfflineBeatChain.Reset(time: 5, locked: false),
+            OfflineBeatChain.Reset(time: 9, locked: true),
+        ]
+        let resume = BeatEvaluation.resume(result: result, annotations: Self.beats, duration: Self.duration, window: 0.07)
+        #expect(resume.resets == 2 && resume.lockedAtReset == 1 && resume.withFlash == 2)
+        #expect(resume.offBeat == 1 && resume.partlyOffBeat == 1 && resume.firstOn == 1)
+        #expect(resume.delays.count == 2 && abs(resume.delays[0] - 0.75) < 1e-9 && abs(resume.delays[1] - 0.5) < 1e-9)
+        // 2 с после сброса: 2.75, 3.25, 3.75 (все мимо) и 5.5, 5.75, 6.5 (две в долю).
+        #expect(resume.flashes == 6 && resume.matched == 2)
+        #expect(resume.lockedResetFlashes == 3 && resume.lockedResetMatched == 0)
+        #expect(resume.relockedFlashes == 2 && resume.relockedMatched == 0)
+        // Счет файла несет возобновления, сводка их складывает; без сбросов их нет.
+        let score = Self.score(result)
+        #expect(score.resume == resume)
+        let summary = BeatEvaluation.summarize(name: "g", scores: [score, score, Self.score(Self.result(flashes: flashes))])
+        #expect(summary.resume?.resets == 4 && summary.resume?.offBeat == 2)
+        #expect(Self.score(Self.result(flashes: flashes)).resume == nil)
+        let table = try #require(BeatEvaluation.resumeTable(title: "t", summaries: [summary]))
+        #expect(table.contains("offBeat") && table.contains("relockLP"))
+        #expect(BeatEvaluation.resumeTable(title: "t", summaries: [BeatEvaluation.summarize(name: "g", scores: [])]) == nil)
+    }
+
+    /// Пары: в каждой группе по порядку (0, 1), (2, 3), не больше заданного числа; группа с нечетным
+    /// числом файлов теряет последний.
+    @Test func pairsTakeConsecutiveFilesPerGroup() {
+        func entry(_ name: String, _ group: String) -> EvalList.Entry {
+            EvalList.Entry(wavPath: "/d/\(name).wav", annotationPath: "/a/\(name)", group: group, heldout: false)
+        }
+        let entries = [
+            entry("pop.0", "pop"), entry("rock.0", "rock"), entry("pop.1", "pop"), entry("pop.2", "pop"), entry("rock.1", "rock"),
+            entry("pop.3", "pop"), entry("pop.4", "pop"), entry("rock.2", "rock"),
+        ]
+        let pairs = EvalPairs.make(entries, perGroup: 4)
+        #expect(pairs.map(\.name) == ["pop.0+pop.1", "pop.2+pop.3", "rock.0+rock.1"])
+        #expect(EvalPairs.make(entries, perGroup: 1).map(\.name) == ["pop.0+pop.1", "rock.0+rock.1"])
+        #expect(EvalPairs.make(entries, perGroup: 0).isEmpty)
+        #expect(EvalPairs.clip([Float](repeating: 0, count: 100_000), sampleRate: 1_000).count == 29_500)
+    }
+
+    /// Счет B в склейке A + B: аннотации B сдвинуты на длину A, вспышки и захват A не в счете.
+    @Test func secondTrackOfAPairIsScoredAlone() {
+        // A: 10 с с вспышками мимо долей B; B: 10 с, вспышки на всех долях B.
+        let offBeats = Self.beats.map { Self.flash($0 + 0.25 + 0.020) }
+        let onBeats = Self.beats.map { Self.flash($0 + 10 + 0.020) }
+        let states = [
+            OfflineBeatChain.State(time: 0, locked: true, bpm: 120, confidence: 1),
+            OfflineBeatChain.State(time: 15, locked: false, bpm: 120, confidence: 0),
+        ]
+        let warm = EvalPairs.scoreSecond(
+            result: Self.result(flashes: offBeats + onBeats, states: states), firstDuration: 10, secondAnnotations: Self.beats,
+            secondDuration: 10, options: .init(), path: "a+b", group: "g", heldout: false
+        )
+        #expect(warm.flashCount == 20 && warm.matched == 20 && warm.precision == 1)
+        #expect(abs(warm.lockedCoverage - 0.5) < 1e-9)
+        #expect(warm.annotationCount == 20)
+    }
+
+    /// Записи владельца: вспышки на доле, на «и» и мимо, темнота с краями, без слияния и до слышимого
+    /// конца звука; итоги по группам, объединениям и всем.
+    @Test func ownerRecordingsCountOnHalfAndOther() throws {
+        // Сетка на оси файла 1, 1.5, ..., 9.5; задержка 0.1 с, сдвиг -0.03 с.
+        let grid = (2..<20).map { Double($0) * 0.5 }
+        let flashes = [
+            Self.flash(1.1 - 0.03), Self.flash(1.12),           // доля и вторая вспышка у той же доли
+            Self.flash(1.35, locked: false),                    // «и»
+            Self.flash(1.5),                                    // мимо (0.1 с до доли и середины)
+            Self.flash(5.6),                                    // доля после 4.1 с темноты
+            Self.flash(10.3),                                   // после слышимого конца 10.1 с
+        ]
+        let result = Self.result(
+            flashes: flashes, states: [OfflineBeatChain.State(time: 0, locked: false, bpm: nil, confidence: 0),
+                                       OfflineBeatChain.State(time: 5, locked: true, bpm: 120, confidence: 1)], latency: 0.1
+        )
+        let score = OwnerEvaluation.score(
+            result: result, grid: grid, audioSeconds: 10, syncOffset: -0.03, window: 0.07, name: "r", group: "a"
+        )
+        #expect(score.flashes == 5 && score.on == 3 && score.half == 1 && score.other == 1)
+        #expect(score.lockedFlashes == 4 && score.lockedOn == 3 && score.lockedHalf == 0)
+        #expect(abs(try #require(score.precision) - 0.6) < 1e-12)
+        #expect(abs(try #require(score.gridBPM) - 120) < 1e-9)
+        #expect(abs(score.end - 10.1) < 1e-12)
+        // Темнота 1.5-5.6 (4.1 с) и 5.6-10.1 (4.5 с).
+        #expect(abs(score.darkSeconds - 8.6) < 1e-9 && abs(score.longestDark - 4.5) < 1e-9)
+        #expect(abs(score.lockedShare - 5.1 / 10.1) < 1e-9)
+        #expect(score.firstLock == 5 && score.resume == nil)
+
+        var other = score
+        other.name = "s"
+        other.group = "b"
+        let totals = OwnerEvaluation.totals([score, other, score], unions: [.init(name: "ab", groups: ["a", "b"])])
+        #expect(totals.map(\.name) == ["a", "b", "ab", "TOTAL"])
+        #expect(totals[0].flashes == 10 && totals[2].flashes == 15 && totals[3].on == 9)
+        let table = OwnerEvaluation.table(recordings: [score, other], totals: totals)
+        #expect(table.contains("half") && table.contains("TOTAL") && table.contains("0.600"))
+    }
+
+    /// Петля записи: звук подряд, сетка каждого повтора со сдвигом на длину звука.
+    @Test func ownerLoopRepeatsAudioAndGrid() {
+        #expect(OwnerEvaluation.looped([1, 2, 3], count: 3) == [1, 2, 3, 1, 2, 3, 1, 2, 3])
+        #expect(OwnerEvaluation.looped([1, 2], count: 1) == [1, 2])
+        #expect(OwnerEvaluation.loopedGrid([0.5, 1.5], duration: 2, count: 3) == [0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+    }
 }

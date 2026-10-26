@@ -155,6 +155,119 @@ public enum BeatEvaluation {
         public var lockFlipsPerMinute = 0.0
         /// Потери захвата по причинам.
         public var unlocks: [UnlockReason: Int] = [:]
+        /// Возобновления после принудительных сбросов (`OfflineBeatChain.Config.resetInterval`); `nil` без них.
+        public var resume: ResumeScore?
+    }
+
+    // MARK: Возобновление
+
+    /// Сколько секунд после сброса считается точность возобновления.
+    public static let resumeWindow = 2.0
+    /// Сколько первых вспышек после сброса определяют, на «и» ли возобновился показ.
+    public static let resumeFlashes = 4
+
+    /// Возобновления после сбросов с памятью темпа (`BeatTracker.reset(keepTempo:)`): куда легли первые
+    /// вспышки и как точны вспышки первых `resumeWindow` секунд. Считаются сбросы, после которых до конца
+    /// файла есть `resumeWindow` секунд.
+    public struct ResumeScore: Sendable, Equatable, Codable {
+        public var resets = 0
+        /// Сбросы, перед которыми трекер держал захват.
+        public var lockedAtReset = 0
+        /// Сбросы, после которых до следующего сброса (или конца) была хоть одна вспышка.
+        public var withFlash = 0
+        /// Первая вспышка после сброса на доле.
+        public var firstOn = 0
+        /// Все первые `resumeFlashes` вспышек (меньше, если раньше пришел следующий сброс или конец) на
+        /// середине между долями: показ возобновился на «и».
+        public var offBeat = 0
+        /// Среди первых вспышек есть и на «и», и в другом месте.
+        public var partlyOffBeat = 0
+        /// Секунды от сброса до первой вспышки (на слышимой оси от слышимого момента сброса).
+        public var delays: [Double] = []
+        /// Вспышки первых `resumeWindow` секунд после всех сбросов и сколько из них попали в долю.
+        public var flashes = 0
+        public var matched = 0
+        /// То же только после сбросов с захватом.
+        public var lockedResetFlashes = 0
+        public var lockedResetMatched = 0
+        /// Вспышки с захватом в первые `resumeWindow` секунд после сбросов с захватом: быстрый новый захват
+        /// по двум долям новой истории.
+        public var relockedFlashes = 0
+        public var relockedMatched = 0
+
+        public init() {}
+
+        /// Сумма двух счетов (задержки подряд).
+        public mutating func add(_ other: ResumeScore) {
+            resets += other.resets
+            lockedAtReset += other.lockedAtReset
+            withFlash += other.withFlash
+            firstOn += other.firstOn
+            offBeat += other.offBeat
+            partlyOffBeat += other.partlyOffBeat
+            delays += other.delays
+            flashes += other.flashes
+            matched += other.matched
+            lockedResetFlashes += other.lockedResetFlashes
+            lockedResetMatched += other.lockedResetMatched
+            relockedFlashes += other.relockedFlashes
+            relockedMatched += other.relockedMatched
+        }
+
+        /// Медиана задержки первой вспышки; `nil` без вспышек.
+        public var medianDelay: Double? { BeatMetrics.percentile(delays, 0.5) }
+    }
+
+    /// Счет возобновлений прогона с принудительными сбросами (`result.resets`) против аннотаций файла
+    /// `annotations` (моменты файла) длиной `duration` секунд. Вспышки сливаются как в `score`. Место
+    /// вспышки по `BeatMetrics.place`, точность один к одному в окне `window`.
+    public static func resume(
+        result: OfflineBeatChain.Result, annotations: [Double], duration: Double, window: Double
+    ) -> ResumeScore {
+        let latency = result.outputLatency
+        let beats = result.audible(annotations.filter { $0 <= duration }).sorted()
+        let flashes = dedupe(result.flashes.filter { $0.time <= duration + latency })
+        let resets = result.resets.sorted { $0.time < $1.time }
+        var score = ResumeScore()
+        func precisionCount(_ times: [Double], from: Double, to: Double) -> Int {
+            guard !times.isEmpty else { return 0 }
+            let near = beats.filter { $0 >= from - window && $0 <= to + window }
+            let precision = BeatMetrics.fMeasure(detections: times, annotations: near, window: window).precision
+            return Int((precision * Double(times.count)).rounded())
+        }
+        for (index, reset) in resets.enumerated() where reset.time + resumeWindow <= duration {
+            let start = reset.time + latency
+            let next = index + 1 < resets.count ? resets[index + 1].time + latency : duration + latency
+            score.resets += 1
+            if reset.locked { score.lockedAtReset += 1 }
+            let span = flashes.filter { $0.time > start && $0.time < next }
+            if let first = span.first {
+                score.withFlash += 1
+                score.delays.append(first.time - start)
+                let places = span.prefix(resumeFlashes).map { BeatMetrics.place(of: $0.time, beats: beats, window: window) }
+                if places.first == .on { score.firstOn += 1 }
+                let halves = places.filter { $0 == .half }.count
+                if halves == places.count {
+                    score.offBeat += 1
+                } else if halves > 0 {
+                    score.partlyOffBeat += 1
+                }
+            }
+            let end = min(start + resumeWindow, next)
+            let early = span.filter { $0.time < end }
+            let times = early.map(\.time)
+            let matched = precisionCount(times, from: start, to: end)
+            score.flashes += times.count
+            score.matched += matched
+            if reset.locked {
+                score.lockedResetFlashes += times.count
+                score.lockedResetMatched += matched
+                let locked = early.filter(\.locked).map(\.time)
+                score.relockedFlashes += locked.count
+                score.relockedMatched += precisionCount(locked, from: start, to: end)
+            }
+        }
+        return score
     }
 
     /// Слияние вспышек: идут по времени, каждая ближе `gap` к последней оставленной выпадает; если
@@ -225,7 +338,8 @@ public enum BeatEvaluation {
             lockedCoverage: coverage, lockTime: result.lockTime, tempoBPM: result.tempoBPM,
             longestDarkBeats: BeatMetrics.longestDarkRun(detections: times, annotations: audibleBeats, window: window),
             longestDarkBeatsAfterLock: darkAfterLock,
-            lockFlipsPerMinute: span > 0 ? Double(lockChanges.changes) * 60 / span : 0, unlocks: lockChanges.unlocks
+            lockFlipsPerMinute: span > 0 ? Double(lockChanges.changes) * 60 / span : 0, unlocks: lockChanges.unlocks,
+            resume: result.resets.isEmpty ? nil : resume(result: result, annotations: annotations, duration: duration, window: window)
         )
     }
 
@@ -290,6 +404,8 @@ public enum BeatEvaluation {
         public var lockFlipsPerMinute: Double
         /// Потери захвата по причинам, сумма по файлам.
         public var unlocks: [UnlockReason: Int]
+        /// Сумма возобновлений по файлам; `nil`, если сбросов не было.
+        public var resume: ResumeScore?
     }
 
     public static let wrongLockMinFlashes = 10
@@ -331,7 +447,13 @@ public enum BeatEvaluation {
             darkRunAfterLockP90: BeatMetrics.percentile(afterLock, 0.9) ?? 0,
             darkAfterLockFiles: afterLock.count,
             lockFlipsPerMinute: mean(scores.map(\.lockFlipsPerMinute)),
-            unlocks: scores.reduce(into: [:]) { total, score in total.merge(score.unlocks, uniquingKeysWith: +) }
+            unlocks: scores.reduce(into: [:]) { total, score in total.merge(score.unlocks, uniquingKeysWith: +) },
+            resume: scores.reduce(nil) { (total: ResumeScore?, score) in
+                guard let resume = score.resume else { return total }
+                var sum = total ?? ResumeScore()
+                sum.add(resume)
+                return sum
+            }
         )
     }
 
@@ -416,6 +538,39 @@ public enum BeatEvaluation {
                 pad(row.name, width) + "  "
                     + zip(cells, heads).map { right($0, max($1.count, 7)) }.joined(separator: " ")
             )
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    public static let resumeNotes = [
+        "resume: forced StreamAnalyzer.reset() + BeatTracker.reset(keepTempo: true) every --reset-every seconds of stream, audio continues; resets with 2 s of file left are scored",
+        "resume columns: lockedAt = tracker locked before the reset; flashed = a flash before the next reset; firstOn = first flash on a beat; offBeat = all of the first 4 flashes on the half-beat (fewer if the next reset comes first); partly = some of them on the half-beat",
+        "delay50 = median seconds from the reset to the first flash; prec2s = precision of all flashes in the 2 s after every reset; lockedRst = the same after resets that were locked; relockLP = locked flashes in those 2 s after locked resets",
+    ]
+
+    /// Таблица возобновлений по строкам сводки, у которых они есть; `nil`, если сбросов не было.
+    public static func resumeTable(title: String, summaries: [Summary]) -> String? {
+        resumeTable(title: title, rows: summaries.compactMap { row in row.resume.map { (row.name, $0) } })
+    }
+
+    /// Таблица возобновлений по именованным строкам; `nil` без строк.
+    public static func resumeTable(title: String, rows: [(String, ResumeScore)]) -> String? {
+        guard !rows.isEmpty else { return nil }
+        let width = max(8, rows.map(\.0.count).max() ?? 0)
+        let heads = ["resets", "lockedAt", "flashed", "firstOn", "offBeat", "partly", "delay50", "prec2s", "n", "lockedRst", "n", "relockLP", "n"]
+        var lines = [title, pad("group", width) + "  " + heads.map { right($0, max($0.count, 7)) }.joined(separator: " ")]
+        for (name, resume) in rows {
+            func ratio(_ matched: Int, _ total: Int) -> String {
+                total == 0 ? "-" : String(format: "%.3f", Double(matched) / Double(total))
+            }
+            let cells = [
+                String(resume.resets), String(resume.lockedAtReset), String(resume.withFlash), String(resume.firstOn),
+                String(resume.offBeat), String(resume.partlyOffBeat), resume.medianDelay.map { String(format: "%.2f", $0) } ?? "-",
+                ratio(resume.matched, resume.flashes), String(resume.flashes),
+                ratio(resume.lockedResetMatched, resume.lockedResetFlashes), String(resume.lockedResetFlashes),
+                ratio(resume.relockedMatched, resume.relockedFlashes), String(resume.relockedFlashes),
+            ]
+            lines.append(pad(name, width) + "  " + zip(cells, heads).map { right($0, max($1.count, 7)) }.joined(separator: " "))
         }
         return lines.joined(separator: "\n")
     }

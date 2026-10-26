@@ -394,6 +394,9 @@ public struct BeatTracker: Sendable {
     private var shadowBeats = 0
     private var shadowLead = 0
     private var shadowVotes = 0
+    /// Отношение лучшей оценки гребенки к оценке у фазы ФАПЧ на последней проверке темпа
+    /// (`BeatSchedule.combRatio`); `nil` до первой проверки с сеткой.
+    private(set) var combRatio: Double?
     private var strengthEMA: Float = 0
     /// Id доли `nextBeat`, у `nextBeat + T` на 1 больше.
     private var beatCounter: UInt64 = 0
@@ -460,7 +463,9 @@ public struct BeatTracker: Sendable {
             locked: locked,
             unlockReason: locked ? nil : lastUnlockReason,
             weight: displayWeight,
-            ambient: ambient
+            ambient: ambient,
+            race: shadowNext.map { RaceInfo(shadow: $0, dim: parameters.raceDim) },
+            combRatio: combRatio
         )
     }
 
@@ -568,6 +573,7 @@ public struct BeatTracker: Sendable {
         locked = false
         disagreements = 0
         proposedByPLP = false
+        combRatio = nil
         coasted = false
         shownParity = nil
         dropShadow()
@@ -626,6 +632,9 @@ public struct BeatTracker: Sendable {
             current = next - previous
         }
         let comb = phaseCandidate(period: estimate.period, current: current)
+        if let comb, current != nil, comb.currentScore > 0 {
+            combRatio = comb.score / comb.currentScore
+        }
         guard let nextBeat, !estimate.switched else {
             dropShadow()
             if let nextBeat, let previous, let comb, carry(from: previous, next: nextBeat, comb: comb) { return }

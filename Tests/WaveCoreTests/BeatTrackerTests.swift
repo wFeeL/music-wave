@@ -510,6 +510,45 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Состояние гонки в расписании (для записи ритма): без тени `race` нет, отношение гребенки к фазе
+    /// ФАПЧ 1, пока сетка на сильной фазе; пока идет тень, расписание несет ее долю и `raceDim`, а
+    /// предсказанные доли светятся не ярче `raceDim`; отношение гребенки на проверке, запустившей тень,
+    /// выше `1 + phaseJumpMargin`.
+    @Test func scheduleCarriesTheRaceState() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        #expect(tracker.schedule.race == nil)
+        let aligned = try #require(tracker.schedule.combRatio)
+        #expect(aligned >= 1 && aligned < 1.05, "comb ratio \(aligned) on the locked phase")
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var raceSeen = false
+        var mismatch = false
+        var brightDuringRace = false
+        var highestRatio = 0.0
+        hops.feed(&tracker, until: 16) { tracker in
+            let schedule = tracker.schedule
+            if let race = schedule.race {
+                raceSeen = true
+                if race.shadow != tracker.shadowNext || race.dim != tracker.parameters.raceDim { mismatch = true }
+                let brightest = schedule.events.filter { $0.predicted && $0.time > tracker.now }.map(\.amplitude).max() ?? 0
+                if brightest > tracker.parameters.raceDim + 1e-6 { brightDuringRace = true }
+            } else if tracker.shadowNext != nil {
+                mismatch = true
+            }
+            highestRatio = max(highestRatio, schedule.combRatio ?? 0)
+        }
+        #expect(raceSeen)
+        #expect(!mismatch)
+        #expect(!brightDuringRace)
+        #expect(highestRatio > 1 + tracker.parameters.phaseJumpMargin)
+        // Сброс забывает и отношение гребенки.
+        tracker.reset()
+        #expect(tracker.schedule.combRatio == nil && tracker.schedule.race == nil)
+    }
+
     /// Голоса гребенки: при уверенном захвате гребенка на «и» (100 против 50, без онсетов) не
     /// перебрасывает фазу сразу. Захват держится, пока идет гонка, и сетка уходит к тени через
     /// `raceVotes` проверок темпа (по 0.25 с) после ее старта, а не раньше (в 1.1 скачок и сброс

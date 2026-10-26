@@ -98,6 +98,19 @@ struct BeatGlowTests {
         #expect(weighted.shifted(by: 0.02).weight == 0.3)
     }
 
+    /// Состояние гонки для записи ритма: доля тени едет вместе с событиями при `shifted`, множитель
+    /// гонки и отношение гребенки остаются; у пустого расписания их нет.
+    @Test func raceStateShiftsWithTheEvents() throws {
+        let racing = BeatSchedule(
+            events: [], bpm: 120, period: 0.5, confidence: 0.9, locked: true, race: RaceInfo(shadow: 1.25, dim: 0.2), combRatio: 1.3
+        )
+        let shifted = try #require(racing.shifted(by: 0.02).race)
+        #expect(abs(shifted.shadow - 1.27) < 1e-12)
+        #expect(shifted.dim == 0.2)
+        #expect(racing.shifted(by: 0.02).combRatio == 1.3)
+        #expect(BeatSchedule.empty.race == nil && BeatSchedule.empty.combRatio == nil)
+    }
+
     @Test func lateEventStartsBright() {
         let event = Self.event(id: 7, time: 10, amplitude: 0.8)
         let schedule = Self.schedule([event])

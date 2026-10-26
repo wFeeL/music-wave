@@ -52,6 +52,15 @@ public struct OfflineBeatChain: Sendable {
         public var softPulse = false
         /// С `softPulse`: писать пульс каждого кадра в `Result.ambientTrace` (проверки времени энергии).
         public var recordAmbientTrace = false
+        /// Сброс с памятью темпа каждые столько секунд потока, как у приложения после паузы, скрытия острова
+        /// или пересборки tap в том же треке: `StreamAnalyzer.reset()` и `BeatTracker.reset(keepTempo: true)`
+        /// после шага, на котором время потока дошло до срока. Звук идет без разрыва. `nil` без сбросов
+        /// (оценка возобновления, `wave-eval --reset-every`).
+        public var resetInterval: Double?
+        /// Со сбросом по `resetInterval` начинать заново и анализ (`StreamAnalyzer.reset()`: функции онсетов,
+        /// выбор пиков, уровни), как приложение на паузе, после простоя и пересборки tap. `false` сбрасывает
+        /// только трекер, как пробный прогон разбора 1.2.1 (`evalreset.py`).
+        public var resetAnalyzer = true
         public var seed: UInt64
 
         public init(seed: UInt64 = 1) {
@@ -86,9 +95,14 @@ public struct OfflineBeatChain: Sendable {
         public var unlockReason: UnlockReason?
         /// Вес показа (`BeatSchedule.weight`).
         public var weight: Float
+        /// Шла гонка фаз (`BeatSchedule.race`).
+        public var racing: Bool
+        /// Отношение гребенки (`BeatSchedule.combRatio`).
+        public var combRatio: Double?
 
         public init(
-            time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil, weight: Float = 0
+            time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil, weight: Float = 0,
+            racing: Bool = false, combRatio: Double? = nil
         ) {
             self.time = time
             self.locked = locked
@@ -96,6 +110,22 @@ public struct OfflineBeatChain: Sendable {
             self.confidence = confidence
             self.unlockReason = unlockReason
             self.weight = weight
+            self.racing = racing
+            self.combRatio = combRatio
+        }
+    }
+
+    /// Принудительный сброс (`Config.resetInterval`).
+    public struct Reset: Sendable, Equatable {
+        /// Конец шага, после которого был сброс, секунды потока от первого сэмпла (ось файла, без задержки
+        /// вывода).
+        public var time: Double
+        /// Трекер держал захват перед сбросом.
+        public var locked: Bool
+
+        public init(time: Double, locked: Bool) {
+            self.time = time
+            self.locked = locked
         }
     }
 
@@ -138,6 +168,8 @@ public struct OfflineBeatChain: Sendable {
         public var renderedFrames = 0
         /// Мягкий пульс на каждом кадре рендера (`Config.softPulse` и `recordAmbientTrace`), иначе пусто.
         public var ambientTrace: [AmbientPoint] = []
+        /// Принудительные сбросы по времени (`Config.resetInterval`), иначе пусто.
+        public var resets: [Reset] = []
 
         /// Первая публикация с захватом, секунды от первого сэмпла.
         public var lockTime: Double? {
@@ -189,6 +221,7 @@ public struct OfflineBeatChain: Sendable {
         /// `Config.softPulse`: энергия бочки каждого шага, время пробуждения, после которого она видна
         /// рендеру, и момент ее кадра на оси хоста (центр окна плюс задержка вывода и сдвиг).
         var energies: [(wake: Double, time: Double, energy: Float)] = []
+        var resets: [Reset] = []
         var end = 0.0
     }
 
@@ -243,6 +276,8 @@ public struct OfflineBeatChain: Sendable {
         let wakePhase = wakePeriod * Double(rng.nextUnit() * 0.5 + 0.5)
         var lastWake = -Double.infinity
         var wakeIndex = 0
+        let resetInterval = config.resetInterval.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        var nextReset = resetInterval ?? .infinity
         while true {
             let jittered = hostStart + wakePhase + Double(wakeIndex) * wakePeriod + config.wakeJitter * Double(rng.nextUnit())
             let wake = max(jittered, lastWake)
@@ -264,6 +299,12 @@ public struct OfflineBeatChain: Sendable {
                         analysis.kickOnsets.append(kick.time + config.outputLatency)
                     }
                     tracker.process(hop)
+                    if let resetInterval, hop.endTime >= nextReset {
+                        analysis.resets.append(Reset(time: hop.endTime, locked: tracker.locked))
+                        if config.resetAnalyzer { analyzer.reset() }
+                        tracker.reset(keepTempo: true)
+                        while nextReset <= hop.endTime { nextReset += resetInterval }
+                    }
                     if config.softPulse, let centre = clock.hostTime(ofSample: nextHopEnd - fftSize / 2) {
                         analysis.energies.append(
                             (wake, centre + config.outputLatency + config.syncOffset, tracker.ambientEnergy)
@@ -280,7 +321,8 @@ public struct OfflineBeatChain: Sendable {
             analysis.states.append(
                 State(
                     time: wake - hostStart, locked: published.locked, bpm: published.bpm, confidence: published.confidence,
-                    unlockReason: published.unlockReason, weight: published.weight
+                    unlockReason: published.unlockReason, weight: published.weight, racing: published.race != nil,
+                    combRatio: published.combRatio
                 )
             )
             for event in published.events where event.predicted && wake <= event.time - BeatGlow.lead {
@@ -355,7 +397,8 @@ public struct OfflineBeatChain: Sendable {
             peakAmbient: peakAmbient,
             ambientFrames: ambientFrames,
             renderedFrames: frame,
-            ambientTrace: ambientTrace
+            ambientTrace: ambientTrace,
+            resets: analysis.resets
         )
     }
 

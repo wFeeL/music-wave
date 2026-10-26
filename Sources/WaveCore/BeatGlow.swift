@@ -46,6 +46,21 @@ public struct AmbientInfo: Sendable, Equatable {
     }
 }
 
+/// Гонка фаз трекера (`BeatTracker`, тень): доля другой фазы того же периода, которая идет рядом с
+/// текущей сеткой, и множитель яркости текущей сетки на время гонки. Для записи ритма и диагностики, на
+/// показ не влияет (яркость уже в `GlowEvent.amplitude`).
+public struct RaceInfo: Sendable, Equatable {
+    /// Следующая доля тени, та же ось, что у событий расписания.
+    public var shadow: Double
+    /// Множитель яркости предсказанных долей текущей сетки, пока идет гонка (`raceDim`).
+    public var dim: Float
+
+    public init(shadow: Double, dim: Float) {
+        self.shadow = shadow
+        self.dim = dim
+    }
+}
+
 /// Расписание свечения, которое анализ публикует для рендера.
 public struct BeatSchedule: Sendable, Equatable {
     /// До 8 последних событий и 2 следующих предсказанных, по времени.
@@ -64,13 +79,19 @@ public struct BeatSchedule: Sendable, Equatable {
     /// Вход мягкого пульса (`BeatGlow.ambient`); `nil`, когда расписание не от трекера (метроном,
     /// пустое): тогда пульса нет. На свечение `BeatGlow.value` не влияет.
     public var ambient: AmbientInfo?
+    /// Гонка фаз; `nil`, пока ее нет (и у расписаний не от трекера). На показ не влияет.
+    public var race: RaceInfo?
+    /// Отношение лучшей оценки гребенки фазы к оценке у фазы ФАПЧ на последней проверке темпа (1, когда
+    /// сетка на лучшей фазе; выше `1 + phaseJumpMargin` гребенка голосует против сетки); `nil` до первой
+    /// проверки. На показ не влияет.
+    public var combRatio: Double?
 
     public static let empty = BeatSchedule(events: [], bpm: nil, period: nil, confidence: 0, locked: false)
 
     /// Без `weight` вес берется из захвата (1 с захватом, 0 без), как показ был до веса.
     public init(
         events: [GlowEvent], bpm: Double?, period: Double?, confidence: Double, locked: Bool, unlockReason: UnlockReason? = nil,
-        weight: Float? = nil, ambient: AmbientInfo? = nil
+        weight: Float? = nil, ambient: AmbientInfo? = nil, race: RaceInfo? = nil, combRatio: Double? = nil
     ) {
         self.events = events
         self.bpm = bpm
@@ -80,16 +101,19 @@ public struct BeatSchedule: Sendable, Equatable {
         self.weight = weight ?? (locked ? 1 : 0)
         self.unlockReason = unlockReason
         self.ambient = ambient
+        self.race = race
+        self.combRatio = combRatio
     }
 
     /// То же расписание на другой оси времени (поток в хост, задержка вывода, сдвиг синхронизации):
-    /// меняются только времена событий и доля сетки пульса, id остаются.
+    /// меняются только времена событий, доля сетки пульса и доля тени, id остаются.
     public func shifted(by offset: Double) -> BeatSchedule {
         var copy = self
         for index in copy.events.indices {
             copy.events[index].time += offset
         }
         copy.ambient?.anchor += offset
+        copy.race?.shadow += offset
         return copy
     }
 }

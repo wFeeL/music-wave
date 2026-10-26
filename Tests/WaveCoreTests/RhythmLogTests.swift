@@ -232,7 +232,7 @@ struct RhythmLogTests {
         Self.hop(&recorder, endSample: 856, kick: 0.8)
         recorder.stop(.stopped)
         let log = recorder.finish()
-        #expect(log.schemaVersion == 1)
+        #expect(log.schemaVersion == RhythmLog.currentSchemaVersion)
         #expect(log.meta.endReason == .islandHidden)
         #expect(log.meta.duration == 30)
         #expect(log.meta.audioSeconds == 0.64)
@@ -260,7 +260,7 @@ struct RhythmLogTests {
         let decoded = try RhythmLog.decode(data)
         #expect(decoded == log)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(object["schemaVersion"] as? Int == 1)
+        #expect(object["schemaVersion"] as? Int == 2)
         #expect(Set(object.keys) == ["schemaVersion", "meta", "kicks", "onsets", "schedules", "flashes"])
         let meta = try #require(object["meta"] as? [String: Any])
         #expect(meta["commit"] as? String == "abc1234")
@@ -372,13 +372,80 @@ struct RhythmLogTests {
         #expect(plainMeta["softPulse"] == nil && plainMeta["ambientFrames"] == nil && plainMeta["ambientPeak"] == nil)
     }
 
+    /// Читаются схемы 1 (до 1.3) и 2 (гонка фаз и яркость долей), другие нет.
     @Test func otherSchemaVersionsAreRejected() throws {
-        var log = RhythmRecorder(duration: 1, meta: Self.meta()).finish()
-        log.schemaVersion = 2
-        let data = try log.encoded()
-        #expect(throws: RhythmLog.DecodeError.unsupportedSchema(2)) {
-            try RhythmLog.decode(data)
+        #expect(RhythmLog.currentSchemaVersion == 2)
+        for version in [0, 3] {
+            var log = RhythmRecorder(duration: 1, meta: Self.meta()).finish()
+            log.schemaVersion = version
+            let data = try log.encoded()
+            #expect(throws: RhythmLog.DecodeError.unsupportedSchema(version)) {
+                try RhythmLog.decode(data)
+            }
         }
+        var old = RhythmRecorder(duration: 1, meta: Self.meta()).finish()
+        old.schemaVersion = 1
+        #expect(try RhythmLog.decode(try old.encoded()).schemaVersion == 1)
+    }
+
+    /// Схема 2: у расписания яркость каждой предсказанной доли (как ее опубликовал трекер, с гонкой и
+    /// весом), доля тени и множитель гонки, пока идет гонка, и отношение гребенки последней проверки.
+    /// Новая строка пишется, когда начинается или кончается гонка, яркость доли меняется на 0.02 и больше
+    /// или отношение гребенки на 0.01 и больше. Журнал 1.2 (схема 1) без этих полей читается с `nil`,
+    /// незнакомые поля meta (например, `flashLength` из параллельной задачи) не мешают.
+    @Test func raceStateAndBeatAmplitudesAreLogged() throws {
+        var recorder = RhythmRecorder(duration: 10, meta: Self.meta())
+        Self.hop(&recorder, endSample: 600)
+        func published(_ amplitude: Float, race: RaceInfo? = nil, ratio: Double? = 1.02) -> BeatSchedule {
+            var schedule = Self.schedule(locked: true, bpm: 120, confidence: 0.9, beats: [501, 501.5], onset: 500.9)
+            for index in schedule.events.indices where schedule.events[index].predicted {
+                schedule.events[index].amplitude = amplitude
+            }
+            schedule.race = race
+            schedule.combRatio = ratio
+            return schedule
+        }
+        recorder.appendSchedule(published(0.8), publishedAtHost: 500.2)
+        // Яркость на 0.01 и отношение на 0.005: та же картина.
+        recorder.appendSchedule(published(0.81, ratio: 1.025), publishedAtHost: 500.21)
+        recorder.appendSchedule(published(0.16, race: RaceInfo(shadow: 501.25, dim: 0.2), ratio: 1.4), publishedAtHost: 500.22)
+        recorder.appendSchedule(published(0.16, race: RaceInfo(shadow: 501.25, dim: 0.2), ratio: 1.3), publishedAtHost: 500.23)
+        recorder.appendSchedule(published(0.8, ratio: 1.3), publishedAtHost: 500.24)
+        let log = recorder.finish()
+        #expect(log.schemaVersion == 2)
+        #expect(log.schedules.count == 4)
+        #expect(log.schedules.map(\.amplitudes) == [[0.8, 0.8], [0.16, 0.16], [0.16, 0.16], [0.8, 0.8]])
+        #expect(log.schedules.map(\.combRatio) == [1.02, 1.4, 1.3, 1.3])
+        #expect(log.schedules[0].race == nil)
+        let race = try #require(log.schedules[1].race)
+        // Доля тени на оси записи, как доли расписания.
+        #expect(abs(race.shadow - 1.25) < 1e-9)
+        #expect(race.dim == 0.2)
+        #expect(log.schedules[3].race == nil)
+        let data = try log.encoded()
+        #expect(try RhythmLog.decode(data) == log)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let schedules = try #require(object["schedules"] as? [[String: Any]])
+        #expect(schedules[0]["race"] == nil)
+        #expect(schedules[1]["race"] != nil)
+
+        let old = Data(
+            """
+            {"schemaVersion": 1, "kicks": [], "onsets": [], "flashes": [],
+             "meta": {"appVersion": "1.2.0", "build": "1", "commit": "25cb42f", "swiftVersion": "6.2.3",
+                      "deviceName": "d", "deviceUID": "u", "latencyMode": "auto", "outputLatency": 0.134,
+                      "syncOffset": -0.03, "sampleRate": 44100, "renderPeriod": 0.0166, "reduceMotion": false,
+                      "glowIntensity": 1, "beatPulse": true, "softPulse": true, "lowPower": false, "clippedSamples": 0,
+                      "startHostSeconds": 100, "duration": 30, "audioSeconds": 30, "renderedFrames": 1800,
+                      "renderedUntil": 30, "ambientFrames": 10, "ambientPeak": 0.1, "endReason": "complete",
+                      "flashLength": 1.5},
+             "schedules": [{"time": 1, "bpm": 120, "confidence": 0.7, "locked": true, "beats": [1.2], "weight": 1}]}
+            """.utf8
+        )
+        let decoded = try RhythmLog.decode(old)
+        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.schedules.count == 1)
+        #expect(decoded.schedules[0].amplitudes == nil && decoded.schedules[0].race == nil && decoded.schedules[0].combRatio == nil)
     }
 
     @Test func fileNamesUseTheStartStamp() {
@@ -478,6 +545,35 @@ struct RhythmLogTests {
 
     /// Средний вес показа за `[0, end]` по времени, до первого расписания 0; без веса хотя бы у одного
     /// расписания (журнал до B5) среднего нет.
+    /// Гонка фаз в линии времени: секунды гонки до `end` и сколько раз она начиналась, медиана отношения
+    /// гребенки. У журнала схемы 1 (нет `amplitudes`) гонка не записана, а не «ноль секунд».
+    @Test func timelineRaceFromSchedules() throws {
+        let race = RhythmLog.Schedule.Race(shadow: 3.3, dim: 0.2)
+        let schedules = [
+            RhythmLog.Schedule(time: 1, bpm: 100, confidence: 1, locked: true, beats: [], amplitudes: [], combRatio: 1.0),
+            RhythmLog.Schedule(time: 3, bpm: 100, confidence: 1, locked: true, beats: [], amplitudes: [], race: race, combRatio: 1.4),
+            RhythmLog.Schedule(time: 5, bpm: 100, confidence: 1, locked: true, beats: [], amplitudes: [], combRatio: 1.2),
+            RhythmLog.Schedule(time: 8, bpm: 100, confidence: 1, locked: true, beats: [], amplitudes: [], race: race, combRatio: 1.5),
+            RhythmLog.Schedule(time: 12, bpm: 100, confidence: 1, locked: true, beats: [], amplitudes: [], race: race, combRatio: 9),
+        ]
+        let timeline = RhythmReplay.Timeline(schedules: schedules, end: 10)
+        // 3-5 и 8-10 с.
+        #expect(timeline.raceSeconds.map { abs($0 - 4) < 1e-12 } == true)
+        #expect(timeline.raceStarts == 2)
+        // Медиана 1.0, 1.4, 1.2, 1.5 (ближний ранг): 1.2.
+        #expect(timeline.medianCombRatio == 1.2)
+        let old = schedules.map { RhythmLog.Schedule(time: $0.time, bpm: $0.bpm, confidence: $0.confidence, locked: $0.locked, beats: []) }
+        #expect(RhythmReplay.Timeline(schedules: old, end: 10).raceSeconds == nil)
+        #expect(RhythmReplay.Timeline(schedules: old, end: 10).raceStarts == nil)
+        let states = [
+            OfflineBeatChain.State(time: 0, locked: true, bpm: 100, confidence: 1),
+            OfflineBeatChain.State(time: 2, locked: true, bpm: 100, confidence: 1, racing: true, combRatio: 1.3),
+            OfflineBeatChain.State(time: 2.5, locked: true, bpm: 100, confidence: 1),
+        ]
+        let replay = RhythmReplay.Timeline(states: states, end: 4)
+        #expect(replay.raceSeconds == 0.5 && replay.raceStarts == 1 && replay.medianCombRatio == 1.3)
+    }
+
     @Test func timelineMeanWeight() {
         let schedules = [
             RhythmLog.Schedule(time: 2, bpm: 120, confidence: 0.5, locked: false, beats: [], weight: 0.5),
