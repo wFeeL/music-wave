@@ -115,12 +115,10 @@ struct OfflineBeatChainTests {
     /// захватом 0.93 (без правила 0.81). Не проходят две проверки: точность ниже 0.95 из-за ранней
     /// сетки на замедлении (-70...-76 мс на 20-23 с, до смены темпа) и темп публикаций: трекер по
     /// замыслу остается на удвоенном темпе, через долю идет только показ.
-    @Test(.disabled("B8 fixed the doubled grid (dark 1, flashes on the kicks); the early ramp grid (B4) keeps locked precision at 0.93, and the tempo check asserts the tracker tempo, which stays doubled by design"))
-    func ritardandoKeepsGlow() async throws {
-        let (scene, result) = await runOffCooperativePool {
-            let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)
-            return (scene, OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: .init()))
-        }
+    /// Требование спецификации отдельно от точности (`ritardandoLockedTempoAndPrecision`): после
+    /// первого захвата темная серия не длиннее 2 долей.
+    @Test func ritardandoKeepsGlow() async throws {
+        let (scene, result) = await Self.ritardando()
         let lock = try #require(result.lockTime)
         // Последние полсекунды не считаются: анализ кончился, расписание еще предсказывает доли.
         let beats = result.audible(scene.beats.filter { $0 >= lock && $0 <= 29.5 })
@@ -128,6 +126,13 @@ struct OfflineBeatChainTests {
             detections: result.flashes.map(\.time), annotations: beats, window: BeatEvaluation.Options().window
         )
         #expect(dark <= 2, "longest dark run after the first lock at \(lock) s: \(dark) beats")
+    }
+
+    /// Темп публикаций с захватом и точность вспышек с захватом на той же сцене, что
+    /// `ritardandoKeepsGlow` (почему они не проходят, там же).
+    @Test(.disabled("B8 fixed the doubled grid (dark 1, flashes on the kicks); the early ramp grid (B4) keeps locked precision at 0.93, and the tempo check asserts the tracker tempo, which stays doubled by design"))
+    func ritardandoLockedTempoAndPrecision() async throws {
+        let (scene, result) = await Self.ritardando()
         // Захват на удвоенном темпе светил бы и на каждой доле, и на каждом «и» (темных долей нет),
         // поэтому темп каждой публикации с захватом в пределах 10 % от темпа сцены в этот момент, а
         // вспышки с захватом почти все в долях.
@@ -147,6 +152,14 @@ struct OfflineBeatChainTests {
             detections: locked, annotations: result.audible(scene.beats), window: BeatEvaluation.Options().window
         ).precision
         #expect(locked.count >= 20 && precision >= 0.95, "\(locked.count) locked flashes, precision \(precision)")
+    }
+
+    /// Сцена замедления 80 -> 72 BPM со слабой долей 0.1 и прогон цепочки по ней.
+    private static func ritardando() async -> (DrumScene, OfflineBeatChain.Result) {
+        await runOffCooperativePool {
+            let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)
+            return (scene, OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: .init()))
+        }
     }
 
     /// Энергия мягкого пульса идет по слышимой оси, как уровни волн: кадр шага публикуется на центр
