@@ -67,7 +67,7 @@ struct AppSettingsTests {
             #expect(settings.colorByBand == false)
             #expect(settings.softStop == true)
             #expect(settings.artworkGlow == true)
-            #expect(settings.progressLine == true)
+            #expect(settings.progressLine == false)
             #expect(settings.autoSource == false)
             #expect(settings.trackSwipe == true)
             #expect(settings.expandDelay == IslandStateMachine.defaultExpandDelay)
@@ -102,7 +102,7 @@ struct AppSettingsTests {
             written.colorByBand = true
             written.softStop = false
             written.artworkGlow = false
-            written.progressLine = false
+            written.progressLine = true
             written.autoSource = true
             written.trackSwipe = false
             written.expandDelay = 0.5
@@ -127,7 +127,7 @@ struct AppSettingsTests {
             #expect(read.colorByBand == true)
             #expect(read.softStop == false)
             #expect(read.artworkGlow == false)
-            #expect(read.progressLine == false)
+            #expect(read.progressLine == true)
             #expect(read.autoSource == true)
             #expect(read.trackSwipe == false)
             #expect(read.expandDelay == 0.5)
@@ -162,7 +162,7 @@ struct AppSettingsTests {
             settings.colorByBand = true
             settings.softStop = false
             settings.artworkGlow = false
-            settings.progressLine = false
+            settings.progressLine = true
             settings.autoSource = true
             settings.trackSwipe = false
             settings.expandDelay = 0.3
@@ -445,7 +445,7 @@ extension AppSettingsTests {
             #expect(settings.appearance.colorByBand == false)
             #expect(settings.softStop == true)
             #expect(settings.artworkGlow == true)
-            #expect(settings.progressLine == true)
+            #expect(settings.progressLine == false)
             #expect(settings.autoSource == false)
             #expect(settings.trackSwipe == true)
             #expect(settings.expandDelay == IslandStateMachine.defaultExpandDelay)
@@ -491,6 +491,16 @@ extension AppSettingsTests {
             #expect(AppSettings(defaults: defaults).colorMode == .artwork)
             defaults.set("не данные", forKey: "wf.colorMode")
             #expect(AppSettings(defaults: defaults).colorMode == .artwork)
+        }
+    }
+
+    /// Полоса прогресса по умолчанию выключена; кто включил ее сам в 1.2, сохраняет выбор.
+    @Test func progressLineIsOffUnlessTheOwnerTurnedItOn() {
+        Self.withDefaults { defaults in
+            #expect(AppSettings(defaults: defaults).progressLine == false)
+            #expect(AppSettings.Default.progressLine == false)
+            defaults.set(true, forKey: "wf.progressLine")
+            #expect(AppSettings(defaults: defaults).progressLine == true)
         }
     }
 

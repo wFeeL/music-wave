@@ -90,7 +90,7 @@ final class AppSettings {
         static let colorByBand = WaveAppearance.standard.colorByBand
         static let softStop = true
         static let artworkGlow = true
-        static let progressLine = true
+        static let progressLine = false
         static let autoSource = false
         static let trackSwipe = true
         static let expandDelay = IslandStateMachine.defaultExpandDelay
