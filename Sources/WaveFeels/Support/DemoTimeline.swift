@@ -13,6 +13,9 @@ nonisolated struct DemoMoment: Sendable {
     let pulse: Float
     /// Мягкий пульс 0...`BeatGlow.ambientCeiling` (`BeatGlow.ambient`).
     var ambient: Float = 0
+    /// Расписание трекера на этот момент: из него предпросмотр пересчитывает свечение со своей
+    /// «Длительностью вспышки» (`glow` посчитано со спадом 1×). `nil` у моментов без расписания.
+    var schedule: BeatSchedule?
 }
 
 /// Прогон демо по шагам через `StreamAnalyzer` и `BeatTracker` вне реального времени, момент
@@ -73,7 +76,8 @@ nonisolated struct DemoTimeline: Sendable {
             moments.append(DemoMoment(
                 time: time, frame: frame, motion: motion, glow: glow,
                 pulse: BeatPulse.breath(spring: spring, glow: glow, weight: schedule.weight),
-                ambient: BeatGlow.ambient(at: time, info: schedule.ambient, frame: frame)
+                ambient: BeatGlow.ambient(at: time, info: schedule.ambient, frame: frame),
+                schedule: schedule
             ))
         }
         self.moments = moments

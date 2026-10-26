@@ -50,19 +50,34 @@ struct BeatGlowTests {
         #expect(abs(mutating - Float(exp(-1.0))) < 1e-4)
     }
 
-    /// Расчет со стандартным множителем (то, что считают офлайн-цепочка, прогон журнала и wave-eval)
-    /// не отличается от расчета без аргумента на последовательности кадров с памятью.
-    @Test func defaultDecayScaleKeepsReplayFlashes() {
+    /// Множитель растягивает только хвост: вспышки (подъем свечения) начинаются на тех же кадрах, что и
+    /// без него, свечение со множителем 2 нигде не ниже обычного и в хвосте выше. Прогон журнала и
+    /// wave-eval множитель не передают, поэтому их числа остаются прежними.
+    @Test func decayScaleKeepsFlashStartsAndStretchesTails() {
         let events = (0..<6).map { Self.event(id: UInt64($0), time: 10 + 0.5 * Double($0)) }
+        let schedule = Self.schedule(events)
         var plain = BeatGlow()
-        var explicit = BeatGlow()
+        var slow = BeatGlow()
+        var plainStarts: [Int] = []
+        var slowStarts: [Int] = []
+        var previousPlain: Float = 0
+        var previousSlow: Float = 0
+        var longer = false
         for frame in 0..<240 {
             let t = 9.9 + Double(frame) * Self.refresh
-            let schedule = Self.schedule(events)
             let first = plain.value(at: t, schedule: schedule, refreshPeriod: Self.refresh)
-            let second = explicit.value(at: t, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 1)
-            #expect(first == second)
+            let second = slow.value(at: t, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 2)
+            #expect(second >= first)
+            longer = longer || second > first + 0.01
+            // Начало вспышки: свечение вернулось к яркой отметке с низкого значения у обычного расчета.
+            if first > 0.9, previousPlain < 0.5 { plainStarts.append(frame) }
+            if second > 0.9, previousSlow < 0.5 { slowStarts.append(frame) }
+            previousPlain = first
+            previousSlow = second
         }
+        #expect(longer)
+        #expect(plainStarts.count == 6)
+        #expect(plainStarts == slowStarts)
     }
 
     @Test func peaksAtLeadTime() {

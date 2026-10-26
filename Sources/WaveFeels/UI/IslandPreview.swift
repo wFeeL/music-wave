@@ -98,6 +98,15 @@ final class PreviewPlayer {
         }
     }
 
+    /// Свечение момента демо с «Длительностью вспышки» `flashLength`: при 1× или без расписания
+    /// готовое `moment.glow`, иначе то же расписание с растянутым спадом (десяток событий на кадр).
+    static func glow(of moment: DemoMoment, flashLength: Double) -> Float {
+        guard flashLength != 1, let schedule = moment.schedule else { return moment.glow }
+        return BeatGlow.value(
+            at: moment.time, schedule: schedule, refreshPeriod: DemoTimeline.step, decayScale: flashLength
+        )
+    }
+
     /// Кадр предпросмотра на `now` секунд. Первый кадр встает на `loopStart` с пружинами на его
     /// уровнях; дальше шаг не длиннее `AppModel.maxVisualStep`, на тот же шаг идет переливание со
     /// скоростью `flowSpeed` («Скорость переливания», 0 без него). Без демо: тихий остров.
@@ -105,7 +114,8 @@ final class PreviewPlayer {
     /// вдвое медленнее. `softPulse`: «Мягкий пульс» из настроек, без него пульса нет. Акцент баса,
     /// как у острова, от большего из свечения и пульса.
     func visuals(
-        now: Double, palette: [PaletteColor], flowSpeed: Double = 0, reduceMotion: Bool, softPulse: Bool = true
+        now: Double, palette: [PaletteColor], flowSpeed: Double = 0, reduceMotion: Bool, softPulse: Bool = true,
+        flashLength: Double = 1
     ) -> IslandVisuals {
         guard let timeline, now.isFinite else {
             return IslandVisuals(
@@ -138,7 +148,7 @@ final class PreviewPlayer {
         }
         lastTime = now
 
-        let glow = reduceMotion ? 0 : moment.glow
+        let glow = reduceMotion ? 0 : Self.glow(of: moment, flashLength: flashLength)
         let ambient = reduceMotion || !softPulse ? 0 : moment.ambient
         var frame = sampled
         frame.layers = BeatGlow.accented(layerSprings.map(\.value), glow: max(glow, ambient))
@@ -226,6 +236,7 @@ struct IslandPreview: View {
         let beatPulse = settings.beatPulse
         let softPulse = settings.softPulse
         let flowSpeed = settings.colorFlow
+        let flashLength = settings.flashLength
         let layout = Self.layout(appearance: appearance, wingLimit: wingLimit)
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         let size = Self.stripSize
@@ -250,7 +261,8 @@ struct IslandPreview: View {
                                 )
                                 : player.visuals(
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,
-                                    flowSpeed: flowSpeed, reduceMotion: reduceMotion, softPulse: softPulse
+                                    flowSpeed: flowSpeed, reduceMotion: reduceMotion, softPulse: softPulse,
+                                    flashLength: flashLength
                                 )
                             // Предпросмотр показывает свернутый остров без баннера.
                             let breath = IslandView.breathing(

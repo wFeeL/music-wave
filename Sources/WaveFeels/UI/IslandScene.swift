@@ -246,7 +246,7 @@ struct IslandWavesView: View {
     ) -> some View {
         let size = CGFloat(appearance.glowSize)
         let blurScale = CGFloat(appearance.glowBlurScale)
-        let margin = Self.glowMargin * max(size, 1)
+        let margin = Self.glowMargin * max(size, 1) * max(blurScale, 1)
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
         return ZStack(alignment: .topLeading) {
             ZStack {

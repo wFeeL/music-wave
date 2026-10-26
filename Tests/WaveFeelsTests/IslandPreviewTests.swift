@@ -101,6 +101,23 @@ struct IslandPreviewTests {
         #expect(AppearanceSettingsView.costHint(for: moderate) == nil)
     }
 
+    /// «Длительность вспышки» меняет свечение предпросмотра по расписанию момента: при 1× и без
+    /// расписания остается готовое значение, при 2× хвост вспышки выше.
+    @Test func previewGlowFollowsFlashLength() {
+        let event = GlowEvent(id: 1, time: 10, amplitude: 1, predicted: true)
+        let schedule = BeatSchedule(events: [event], bpm: 120, period: 0.5, confidence: 1, locked: true)
+        let time = 10.1
+        let steady = BeatGlow.value(at: time, schedule: schedule, refreshPeriod: DemoTimeline.step)
+        let moment = DemoMoment(
+            time: time, frame: .silent, motion: WaveMotion(), glow: steady, pulse: 0, schedule: schedule
+        )
+        #expect(PreviewPlayer.glow(of: moment, flashLength: 1) == steady)
+        #expect(PreviewPlayer.glow(of: moment, flashLength: 2) > steady)
+        #expect(PreviewPlayer.glow(of: moment, flashLength: 0.5) < steady)
+        let bare = DemoMoment(time: time, frame: .silent, motion: WaveMotion(), glow: 0.3, pulse: 0)
+        #expect(PreviewPlayer.glow(of: bare, flashLength: 2) == 0.3)
+    }
+
     /// «Уменьшение движения»: ни свечения доли, ни «вздоха», хотя в демо они есть.
     @Test func previewReduceMotionHasNoGlowOrPulse() {
         let cache = PreviewTimelineCache()
