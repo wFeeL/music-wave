@@ -107,6 +107,12 @@ public struct BeatTracker: Sendable {
         public var raceMargin: Double
         public var raceLimit: Int
         public var raceVotes: Int
+        /// Ниже этого энергетического ворота при захвате идет накат (`isCoasting`): промахи не
+        /// считаются и оценки темпа не берутся, в брейке захват не уходит, и после возврата бочки
+        /// вспышки идут без нового захвата с нуля. 0 выключает. 0.1 (ворот почти закрыт): на GTZAN tune
+        /// числа как без наката, а 0.25-0.75 держали захват в местах с бочкой потише и дали wrongLock
+        /// 17-19.
+        public var coastGate: Float
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -133,6 +139,7 @@ public struct BeatTracker: Sendable {
             raceMargin: Double = 0.1,
             raceLimit: Int = 8,
             raceVotes: Int = 3,
+            coastGate: Float = 0.1,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -156,6 +163,7 @@ public struct BeatTracker: Sendable {
             self.raceMargin = raceMargin
             self.raceLimit = raceLimit
             self.raceVotes = raceVotes
+            self.coastGate = coastGate
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -221,6 +229,8 @@ public struct BeatTracker: Sendable {
     /// `reset()` и `reconfigure` посреди захвата дают `.reset`.
     public internal(set) var lastUnlockReason: UnlockReason?
     private var disagreements = 0
+    /// Последние доли прошли накатом (`isCoasting`): следующая закрытая доля решает судьбу захвата.
+    private var coasted = false
     /// Теневая фаза: следующая доля другой фазы того же периода, которую гребенка предложила вместо
     /// мгновенного скачка. Считает попадания по тем же широкополосным онсетам; `nil`, пока гонки нет.
     private(set) var shadowNext: Double?
@@ -301,7 +311,7 @@ public struct BeatTracker: Sendable {
         if let due = nextUpdate, now >= due {
             // После долгого разрыва в потоке следующая оценка считается от «сейчас».
             nextUpdate = due + interval > now ? due + interval : now + interval
-            if let estimate = tempo.update() {
+            if !isCoasting, let estimate = tempo.update() {
                 updateTempo(estimate)
             }
         } else if nextUpdate == nil {
@@ -341,6 +351,7 @@ public struct BeatTracker: Sendable {
         lastUnlockReason = locked ? .reset : nil
         locked = false
         disagreements = 0
+        coasted = false
         dropShadow()
         strengthEMA = 0
         beatCounter += 2
@@ -618,14 +629,23 @@ public struct BeatTracker: Sendable {
 
     private mutating func closeWindows() {
         while let nextBeat, let period, now > nextBeat + parameters.matchWindow * period {
-            let hit = nextMatched ? 1.0 : 0.0
-            confidence += parameters.confidenceGain * (hit - confidence)
-            hits = nextMatched ? hits + 1 : 0
-            if locked {
-                locked = confidence >= parameters.unlockConfidence
-                if !locked { lastUnlockReason = .misses }
+            if isCoasting, !nextMatched {
+                // Брейк без бочки при захвате: доля без онсета не довод против сетки, уверенность,
+                // счет и захват стоят, сетка идет дальше по последнему периоду.
+                coasted = true
             } else {
-                locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
+                let hit = nextMatched ? 1.0 : 0.0
+                confidence += parameters.confidenceGain * (hit - confidence)
+                hits = nextMatched ? hits + 1 : 0
+                if locked {
+                    // Первая доля после брейка решает: промах значит, что сетка ушла, захват сразу
+                    // отпускается. Ее вспышка зафиксирована еще при закрытом вороте и не видна.
+                    locked = confidence >= parameters.unlockConfidence && (nextMatched || !coasted)
+                    if !locked { lastUnlockReason = .misses }
+                } else {
+                    locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
+                }
+                coasted = false
             }
             archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
             self.nextBeat = nextBeat + period
@@ -656,8 +676,17 @@ public struct BeatTracker: Sendable {
         blend = locked ? min(blend + step, 1) : max(blend - step, 0)
     }
 
+    /// Накат: захват есть, а энергетический ворот ниже `coastGate` (брейк без бочки). Промахи не
+    /// считаются, оценки темпа не берутся: в истории без бочки оценка плывет (на `Drums.breakdown`
+    /// период уходил с 0.499 до 0.488 с, и после брейка вспышки шли на 90 мс мимо).
+    private var isCoasting: Bool {
+        locked && energyGate < parameters.coastGate
+    }
+
+    /// После наката сетка не видна, пока первая доля с открытым воротом не попадет: бочка новой
+    /// сетки открывает ворот раньше, чем закрывается окно старой доли.
     private var predictedAmplitude: Float {
-        strengthEMA * energyGate * blend
+        coasted ? 0 : strengthEMA * energyGate * blend
     }
 
     /// Яркость `nextBeat`: зафиксированная или текущая.

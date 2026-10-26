@@ -70,6 +70,69 @@ struct BeatTrackerTests {
         #expect(wasLocked)
     }
 
+    /// Брейк без бочки 8 с посреди захвата (`Drums.breakdown`, бочка возвращается на 18 с на той же
+    /// сетке): вспышки гаснут вместе с воротом, а после возврата сетка продолжается без нового захвата
+    /// с нуля. Вспышка предсказанной доли (яркость от `eventRise`) есть на одной из первых трех бочек
+    /// после возврата и стоит на бочке; в 1.1 нужно было 5 новых попаданий и еще доля смеси.
+    @Test func breakdownCoasts() async throws {
+        let hops = await runOffCooperativePool { Hops.breakdown }
+        let scene = SharedScenes.breakdown
+        let returned = try #require(scene.kicks.first { $0 >= 18 - 0.01 })
+        let firstKicks = scene.kicks.filter { $0 >= returned }.prefix(3)
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var brightest: [UInt64: (time: Double, amplitude: Float)] = [:]
+        var lockedBefore = false
+        for hop in hops {
+            tracker.process(hop)
+            if hop.endTime < 10 { lockedBefore = lockedBefore || tracker.locked }
+            guard hop.endTime >= returned - 0.5 else { continue }
+            for event in tracker.schedule.events where event.predicted {
+                let known = brightest[event.id]?.amplitude ?? 0
+                if event.amplitude > known { brightest[event.id] = (event.time, event.amplitude) }
+            }
+        }
+        try #require(lockedBefore)
+        let flashes = brightest.values.filter { $0.amplitude >= OfflineBeatChain.eventRise }.map(\.time).sorted()
+        let last = try #require(firstKicks.last)
+        let early = flashes.filter { $0 >= returned - 0.1 && $0 <= last + 0.05 }
+        let first = try #require(early.first, "no predicted flash on the first three kicks; flashes \(flashes.prefix(6))")
+        let distance = scene.kicks.map { abs($0 - first) }.min() ?? .infinity
+        #expect(distance < 0.04, "first flash after the break at \(first), \(distance) s from a kick")
+    }
+
+    /// Брейк, после которого доли вернулись на полпериода позже (сетка наката больше не та): первая
+    /// доля после возврата промахивается и сразу отпускает захват, ни одной яркой предсказанной
+    /// вспышки мимо новых долей (уверенная вспышка не на ту долю хуже темноты).
+    @Test func coastReturnOffTheGridUnlocks() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        // Тишина 4 с (уровень бочки -40 dBFS): ворот закрывается, захват держится накатом.
+        hops.feedSilence(&tracker, until: 14)
+        try #require(tracker.energyGate < tracker.parameters.coastGate)
+        try #require(tracker.locked)
+        // Доли возвращаются на 0.5 + k · 0.5 с вместо 0.25 + k · 0.5 с.
+        hops.nextBeatTime = 14.5
+        var unlockedAt: Double?
+        // Яркость доли, когда время потока до нее дошло (дальше она зафиксирована).
+        var shown: [UInt64: (time: Double, amplitude: Float)] = [:]
+        hops.feed(&tracker, until: 18) { tracker in
+            if unlockedAt == nil, !tracker.locked { unlockedAt = tracker.now }
+            for event in tracker.schedule.events where event.predicted && event.time <= tracker.now && event.time > 14 {
+                if shown[event.id] == nil { shown[event.id] = (event.time, event.amplitude) }
+            }
+        }
+        let unlock = try #require(unlockedAt, "still locked on the old grid")
+        // Окно первой старой доли после возврата (14.75 с) закрывается через 0.15 периода.
+        #expect(unlock <= 14.75 + 0.5 * 0.15 + 0.01, "unlocked at \(unlock)")
+        #expect(tracker.lastUnlockReason == .misses || tracker.locked)
+        let offGrid = shown.values.filter {
+            $0.amplitude >= OfflineBeatChain.eventRise && abs(BeatTracker.circularDifference($0.time - 0.5, period: 0.5)) > 0.07
+        }
+        #expect(offGrid.isEmpty, "bright predicted flashes off the new beats: \(offGrid)")
+    }
+
     @Test func gateHoldsBetweenKicks() async {
         let hops = await runOffCooperativePool { Hops.steady }
         var tracker = BeatTracker(framesPerSecond: Self.fps)
@@ -341,10 +404,14 @@ struct BeatTrackerTests {
         try #require(tracker.locked)
         var before = tracker.confidence
         var released: (before: Double, after: Double)?
-        var end = hops.endTime
-        while released == nil, end < 20 {
-            end += 0.05
-            hops.feedSilence(&tracker, until: end)
+        // Шаги без атак с уровнем бочки как на долях: ворот открыт, доли считаются промахами (при
+        // закрытом вороте идет накат и промахи не считаются, это `breakdownCoasts`).
+        var time = hops.endTime
+        while released == nil, time < 20 {
+            time += hops.hop
+            var hop = SyntheticBeats.hop(endTime: time, broadband: nil, kick: nil)
+            hop.kickLevelDB = -6
+            tracker.process(hop)
             if !tracker.locked { released = (before, tracker.confidence) }
             before = tracker.confidence
         }
