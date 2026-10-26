@@ -740,6 +740,43 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Бочка у доли сетки отбрасывается, только когда сама доля вспыхнет (яркость выше `eventRise`):
+    /// при полном весе, но слабых атаках (сила 0.15, яркость доли около 0.15) бочка на доле остается в
+    /// расписании, при сильных (сила 1) отбрасывается. Раньше решал один вес (выше 0.5).
+    @Test(arguments: [(Float(0.15), true), (Float(1), false)])
+    func kickNearTheGridDroppedOnlyWhenTheBeatFlashes(strength: Float, kept: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        let hop = 256.0 / 48_000
+        var time = 0.0
+        var next = 0.25
+        var kicks: [Double] = []
+        var seenKicks: Set<Double> = []
+        var beatAmplitude: Float = 0
+        while time < 10 {
+            time += hop
+            var onset: OnsetEvent?
+            if next <= time {
+                onset = OnsetEvent(time: next, strength: strength)
+                if time > 8 { kicks.append(next) }
+                next += 0.5
+            }
+            tracker.process(SyntheticBeats.hop(endTime: time, broadband: onset, kick: onset))
+            for event in tracker.schedule.events where event.time > 8 {
+                if !event.predicted { seenKicks.insert(event.time) }
+                if event.predicted, event.time <= tracker.now { beatAmplitude = max(beatAmplitude, event.amplitude) }
+            }
+        }
+        try #require(tracker.locked && tracker.displayWeight == 1)
+        try #require(!kicks.isEmpty)
+        if kept {
+            #expect(beatAmplitude <= OfflineBeatChain.eventRise, "beat \(beatAmplitude)")
+            #expect(kicks.allSatisfy { seenKicks.contains($0) }, "kicks \(kicks), in schedule \(seenKicks.sorted())")
+        } else {
+            #expect(beatAmplitude > OfflineBeatChain.eventRise, "beat \(beatAmplitude)")
+            #expect(seenKicks.isEmpty, "kicks in schedule \(seenKicks.sorted())")
+        }
+    }
+
     /// Яркость предсказанной доли фиксируется, когда время потока доходит до доли, и дальше не
     /// меняется, хотя вес и ворот растут: проверка на захвате с нуля, где вес идет вверх.
     @Test func amplitudeFrozenAtFirstSight() throws {

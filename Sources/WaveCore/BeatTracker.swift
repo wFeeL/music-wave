@@ -43,7 +43,9 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей. Яркость ближайшей доли фиксируется, когда время потока
 /// доходит до нее: бочка на самой доле не меняет уже начатую вспышку. Онсет бочки ближе `dropWindow · T`
-/// к предсказанной доле при весе выше 0.5 отбрасывается, остальные светятся с яркостью
+/// к предсказанной доле отбрасывается, если сама доля вспыхнет (яркость выше `OfflineBeatChain.eventRise`;
+/// на GTZAN tune против правила «вес выше 0.5» точность всех вспышек 0.8549 -> 0.8572, вспышек мимо
+/// долей 2391 -> 2356), остальные светятся с яркостью
 /// `clamp(strength, onsetFloor, 1) × (offGridScale + (1 − offGridScale) × (1 − вес)) × подтверждение`
 /// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Прошедшие события остаются в
 /// расписании (до 8), чтобы рендер довел их спад. Оба счетчика id только растут, в том числе через
@@ -806,9 +808,15 @@ public struct BeatTracker: Sendable {
     }
 
     private mutating func addKickOnset(_ onset: OnsetEvent) {
-        if displayWeight > 0.5, let nextBeat, let period {
-            let distance = min(abs(onset.time - nextBeat), abs(onset.time - (nextBeat - period)))
-            if distance < parameters.dropWindow * period { return }
+        if let nextBeat, let period {
+            // Бочка у доли сетки отбрасывается, только если сама доля вспыхнет: иначе на передаче от
+            // бочек к сетке (вес уже выше 0.5, а яркость доли еще ниже порога) доля оставалась тусклой.
+            let toNext = abs(onset.time - nextBeat)
+            let toPrevious = abs(onset.time - (nextBeat - period))
+            if min(toNext, toPrevious) < parameters.dropWindow * period {
+                let beatAmplitude = toNext <= toPrevious ? nextAmplitude : archivedAmplitude(id: beatCounter &- 1)
+                if beatAmplitude > OfflineBeatChain.eventRise { return }
+            }
         }
         let strength = onset.strength.isFinite ? min(max(onset.strength, parameters.onsetFloor), 1) : parameters.onsetFloor
         let offGrid = parameters.offGridScale + (1 - parameters.offGridScale) * (1 - displayWeight)
@@ -844,6 +852,14 @@ public struct BeatTracker: Sendable {
             return max(parameters.kickConfirmFloor, Self.smoothstep(parameters.kickConfirmLow, Self.confirmHigh, ratio))
         }
         return Self.smoothstep(Self.confirmLow, Self.confirmHigh, ratio)
+    }
+
+    /// Яркость прошедшей предсказанной доли `id` из прошедших событий, 0, если ее там нет.
+    private func archivedAmplitude(id: UInt64) -> Float {
+        for event in past where event.predicted && event.id == id {
+            return event.amplitude
+        }
+        return 0
     }
 
     private mutating func archive(_ event: GlowEvent) {
