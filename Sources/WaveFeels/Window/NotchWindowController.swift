@@ -31,6 +31,15 @@ import WaveCore
 /// наведении), при `collapsed` и `banner` всегда вне ее, щелчок по баннеру ничего не делает.
 /// Клики и опрос курсора идут по состоянию острова, как обычно.
 ///
+/// Свайп. Горизонтальная прокрутка двумя пальцами над островом листает треки
+/// (`TrackSwipeDetector`, команда уходит в `AppModel.handleSwipe`). Мониторы `.scrollWheel`
+/// стоят, только пока панель показана и свайп включен. Глобальный видит прокрутку, пока панель
+/// пропускает события мыши (свернутый остров), локальный, пока принимает (раскрытый остров
+/// или баннер), и поглощает прокрутку над островом. У выреза засчитываются оба: над вырезом
+/// окон приложений нет. У капсулы только локальный (`NotchLayout.countsSwipe`), глобальный там
+/// не ставится: пока капсула пропускает мышь, та же прокрутка листала бы и окно под ней.
+/// Разрешений мониторы прокрутки не требуют (Универсальный доступ нужен только для клавиш).
+///
 /// Подписок и таймеров в `deinit` нет: владелец вызывает `stop()`.
 @MainActor
 final class NotchWindowController {
@@ -53,7 +62,14 @@ final class NotchWindowController {
     /// Где был курсор при последнем пересчете: опрос засчитывает движение, только если
     /// курсор сдвинулся.
     private var lastPointerLocation: NSPoint?
-    /// Номер подписки на ширину крыла и радиус свечения; `stop()` его меняет, и старая
+    /// Мониторы прокрутки для свайпа (`updateScrollMonitors`).
+    private var scrollGlobalMonitor: Any?
+    private var scrollLocalMonitor: Any?
+    private var swipeDetector = TrackSwipeDetector()
+    /// Первая прокрутка над островом с показа панели уже записана в лог: по монитору.
+    private var loggedGlobalScroll = false
+    private var loggedLocalScroll = false
+    /// Номер подписки на ширину крыла, радиус свечения и свайп; `stop()` его меняет, и старая
     /// подписка больше не продлевается.
     private var settingsGeneration = 0
 
@@ -119,6 +135,7 @@ final class NotchWindowController {
             fullscreen.stop()
             fullscreenChanged()
             updatePointer()
+            updateScrollMonitors()
             return
         }
 
@@ -141,6 +158,7 @@ final class NotchWindowController {
             fullscreen.start(screenID: newLayout.screenID)
         }
         updatePointer()
+        updateScrollMonitors()
     }
 
     /// Снимает подписки, мониторы и таймер, убирает панель.
@@ -163,6 +181,10 @@ final class NotchWindowController {
             NSEvent.removeMonitor(localMonitor)
         }
         localMonitor = nil
+        updateScrollMonitors()
+        swipeDetector = TrackSwipeDetector()
+        loggedGlobalScroll = false
+        loggedLocalScroll = false
         model.onIslandStateChange = nil
         stopPolling()
         fullscreen.stop()
@@ -187,15 +209,17 @@ final class NotchWindowController {
         }
     }
 
-    /// Следит за шириной крыла и радиусом свечения. `onChange` приходит до записи нового
-    /// значения, поэтому панель переставляется в следующем шаге главного актора; там же
-    /// подписка продлевается, пока `generation` не устарел.
+    /// Следит за шириной крыла, радиусом свечения и свайпом. `onChange` приходит до записи
+    /// нового значения, поэтому панель переставляется (и мониторы прокрутки ставятся или
+    /// снимаются) в следующем шаге главного актора; там же подписка продлевается, пока
+    /// `generation` не устарел.
     private func observePanelSettings(generation: Int) {
         guard isShown, generation == settingsGeneration else { return }
         let settings = model.settings
         withObservationTracking {
             _ = settings.wingWidth
             _ = settings.glowRadius
+            _ = settings.trackSwipe
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.panelSettingsChanged(generation: generation)
@@ -213,6 +237,7 @@ final class NotchWindowController {
                 updatePointer()
             }
         }
+        updateScrollMonitors()
         observePanelSettings(generation: generation)
     }
 
@@ -314,6 +339,126 @@ final class NotchWindowController {
         pollTimer = nil
     }
 
+    // MARK: - Свайп
+
+    /// Ставит и снимает мониторы прокрутки. Они стоят, только пока панель показана, остров
+    /// есть и свайп включен; глобальный только у выреза: у капсулы его события не считаются
+    /// (`NotchLayout.countsSwipe`). Выключенный свайп и капсула не будят приложение на каждую
+    /// прокрутку в других окнах.
+    ///
+    /// Обработчики мониторов вызываются на главном потоке. Из события в главный актор уходят
+    /// только значения (`SwipeScroll`), не само событие.
+    private func updateScrollMonitors() {
+        let before = (scrollGlobalMonitor != nil, scrollLocalMonitor != nil)
+        let enabled = isShown && layout != nil && model.settings.trackSwipe
+        let wantsGlobal = enabled && layout?.hasNotch == true
+
+        if wantsGlobal, scrollGlobalMonitor == nil {
+            scrollGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let scroll = SwipeScroll(
+                    precise: event.hasPreciseScrollingDeltas,
+                    phase: NotchWindowController.swipePhase(event.phase, momentum: event.momentumPhase),
+                    fingerDX: Double(event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX),
+                    dy: Double(event.scrollingDeltaY),
+                    time: event.timestamp
+                )
+                MainActor.assumeIsolated {
+                    _ = self?.handleScroll(scroll, global: true)
+                }
+            }
+            if scrollGlobalMonitor == nil {
+                log("глобальный монитор прокрутки не поставлен")
+            }
+        } else if !wantsGlobal, let monitor = scrollGlobalMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollGlobalMonitor = nil
+        }
+
+        if enabled, scrollLocalMonitor == nil {
+            scrollLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                let scroll = SwipeScroll(
+                    precise: event.hasPreciseScrollingDeltas,
+                    phase: NotchWindowController.swipePhase(event.phase, momentum: event.momentumPhase),
+                    fingerDX: Double(event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX),
+                    dy: Double(event.scrollingDeltaY),
+                    time: event.timestamp
+                )
+                let consumed = MainActor.assumeIsolated {
+                    self?.handleScroll(scroll, global: false) ?? false
+                }
+                return consumed ? nil : event
+            }
+        } else if !enabled, let monitor = scrollLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollLocalMonitor = nil
+        }
+
+        let after = (scrollGlobalMonitor != nil, scrollLocalMonitor != nil)
+        if after != before {
+            log(Self.describeScrollMonitors(global: after.0, local: after.1))
+        }
+    }
+
+    /// Прокрутка из глобального (`global`) или локального монитора. Засчитывается, если панель
+    /// показана, свайп включен, раскладка ее принимает (`NotchLayout.countsSwipe`) и курсор над
+    /// островом текущего состояния (`NotchLayout.swipeArea`). В детектор идут только события
+    /// трекпада (`hasPreciseScrollingDeltas`), колесо мыши нет. Возвращает, засчитана ли
+    /// прокрутка над островом: локальный монитор такое событие поглощает.
+    private func handleScroll(_ scroll: SwipeScroll, global: Bool) -> Bool {
+        guard isShown, model.settings.trackSwipe, let layout, let panel else { return false }
+        guard layout.countsSwipe(global: global, panelAcceptsMouse: !panel.ignoresMouseEvents) else { return false }
+        guard let area = layout.swipeArea(
+            state: model.islandState, suppressed: model.islandSuppressed, banner: model.bannerVisible
+        ), area.contains(NSEvent.mouseLocation) else { return false }
+        logFirstScroll(global: global)
+        guard scroll.precise else { return true }
+        if let command = swipeDetector.feed(
+            fingerDX: scroll.fingerDX, dy: scroll.dy, phase: scroll.phase, time: scroll.time
+        ) {
+            model.handleSwipe(command)
+        }
+        return true
+    }
+
+    /// Фаза прокрутки для `TrackSwipeDetector`. `NSEvent.Phase` это набор флагов, поэтому
+    /// `contains`, а не сравнение. Непустая `momentumPhase`: инерция после жеста. Иначе
+    /// `began` и `mayBegin` начинают жест, `changed` продолжает, `ended` и `cancelled`
+    /// заканчивают. Пустая фаза (колесо мыши) и одна `stationary`: `.none`.
+    nonisolated static func swipePhase(_ phase: NSEvent.Phase, momentum: NSEvent.Phase) -> TrackSwipeDetector.Phase {
+        if !momentum.isEmpty { return .momentum }
+        if phase.contains(.began) || phase.contains(.mayBegin) { return .began }
+        if phase.contains(.changed) { return .changed }
+        if phase.contains(.ended) || phase.contains(.cancelled) { return .ended }
+        return .none
+    }
+
+    /// Первая засчитанная прокрутка каждого монитора с показа панели: по логу видно, доходит
+    /// ли прокрутка над островом, даже если свайп не сработал.
+    private func logFirstScroll(global: Bool) {
+        if global {
+            guard !loggedGlobalScroll else { return }
+            loggedGlobalScroll = true
+            log("прокрутка над островом доходит: глобальный монитор")
+        } else {
+            guard !loggedLocalScroll else { return }
+            loggedLocalScroll = true
+            log("прокрутка над островом доходит: локальный монитор")
+        }
+    }
+
+    private static func describeScrollMonitors(global: Bool, local: Bool) -> String {
+        switch (global, local) {
+        case (true, true):
+            return "мониторы прокрутки для свайпа: глобальный и локальный"
+        case (false, true):
+            return "мониторы прокрутки для свайпа: только локальный"
+        case (true, false):
+            return "мониторы прокрутки для свайпа: только глобальный"
+        case (false, false):
+            return "мониторы прокрутки для свайпа сняты"
+        }
+    }
+
     // MARK: - Полноэкранный режим
 
     private func fullscreenChanged() {
@@ -359,6 +504,18 @@ final class NotchWindowController {
         Log.ui.info("\(message, privacy: .public)")
         Log.file(message)
     }
+}
+
+/// Прокрутка для свайпа: значения из `NSEvent`, без самого события.
+private struct SwipeScroll: Sendable {
+    /// Трекпад или Magic Mouse (`hasPreciseScrollingDeltas`), не колесо мыши.
+    var precise: Bool
+    var phase: TrackSwipeDetector.Phase
+    /// Сдвиг пальцев по горизонтали, вправо положительный, без учета «естественной прокрутки».
+    var fingerDX: Double
+    var dy: Double
+    /// `NSEvent.timestamp`, секунды с загрузки системы.
+    var time: Double
 }
 
 extension CGRect {

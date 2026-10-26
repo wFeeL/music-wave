@@ -777,4 +777,76 @@ struct NotchGeometryTests {
         #expect(!NotchPointer.countsAsHover(inZone: false, moved: true, banner: true, wasInZone: true))
         #expect(!NotchPointer.countsAsHover(inZone: false, moved: false, banner: false, wasInZone: true))
     }
+
+    /// Свайп над островом считается там, где остров виден сейчас: свернутый с крыльями,
+    /// баннер или раскрытая панель. Скрытый и принудительно скрытый остров свайпов не ловит.
+    @Test func swipeAreaFollowsIslandState() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        let collapsed = layout.collapsedIsland(wingWidth: layout.wingWidth)
+        #expect(layout.swipeArea(state: .hidden) == nil)
+        #expect(layout.swipeArea(state: .hidden, banner: true) == nil)
+        for state in [IslandState.collapsed, .expanded] {
+            #expect(layout.swipeArea(state: state, suppressed: true) == nil, "\(state)")
+            #expect(layout.swipeArea(state: state, suppressed: true, banner: true) == nil, "\(state)")
+        }
+        let cases: [(IslandState, Bool, CGRect)] = [
+            (.collapsed, false, collapsed),
+            (.collapsed, true, layout.bannerFrame),
+            (.expanded, false, layout.expandedIsland),
+            (.expanded, true, layout.expandedIsland),
+        ]
+        for (state, banner, island) in cases {
+            let area = try #require(layout.swipeArea(state: state, banner: banner))
+            #expect(area.minX == island.minX, "\(state) \(banner)")
+            #expect(area.maxX == island.maxX, "\(state) \(banner)")
+            #expect(area.minY == island.minY, "\(state) \(banner)")
+            // Верхняя строка пикселей экрана тоже над островом.
+            #expect(area.contains(CGPoint(x: island.midX, y: layout.screenFrame.maxY)), "\(state) \(banner)")
+            #expect(!area.contains(CGPoint(x: island.midX, y: island.minY - 1)), "\(state) \(banner)")
+        }
+    }
+
+    /// В отличие от зоны наведения, свайп над крыльями свернутого острова тоже считается.
+    @Test func swipeAreaIncludesWings() throws {
+        let layout = try #require(NotchGeometry.layout(for: [notched()]))
+        #expect(layout.wingWidth > 0)
+        let area = try #require(layout.swipeArea(state: .collapsed))
+        let wing = CGPoint(x: layout.notch.minX - layout.wingWidth / 2, y: layout.notch.midY)
+        #expect(area.contains(wing))
+        #expect(!layout.hoverZone(expanded: false).contains(wing))
+        let beyond = CGPoint(x: layout.notch.minX - layout.wingWidth - 1, y: layout.notch.midY)
+        #expect(!area.contains(beyond))
+    }
+
+    /// Капсула висит под строкой меню: свайп над строкой меню над ней не считается.
+    @Test func pillSwipeAreaStaysUnderMenuBar() throws {
+        let layout = try #require(NotchGeometry.layout(for: [external()]))
+        #expect(layout.swipeArea(state: .collapsed) == layout.collapsedIsland(wingWidth: layout.wingWidth))
+        #expect(layout.swipeArea(state: .expanded) == layout.expandedIsland)
+        #expect(layout.swipeArea(state: .collapsed, banner: true) == layout.bannerFrame)
+        let menuBar = CGPoint(x: layout.notch.midX, y: layout.screenFrame.maxY - 1)
+        for state in [IslandState.collapsed, .expanded] {
+            for banner in [false, true] {
+                let area = try #require(layout.swipeArea(state: state, banner: banner))
+                #expect(!area.contains(menuBar), "\(state) \(banner)")
+            }
+        }
+    }
+
+    /// У выреза свайп считается из обоих мониторов: над вырезом окон приложений нет. У капсулы
+    /// только из локального и только пока панель принимает мышь: иначе та же прокрутка листала
+    /// бы и окно под капсулой.
+    @Test func pillCountsOnlyLocalSwipesOverAcceptingPanel() throws {
+        let notch = try #require(NotchGeometry.layout(for: [notched()]))
+        let pill = try #require(NotchGeometry.layout(for: [external()]))
+        for global in [false, true] {
+            for accepts in [false, true] {
+                #expect(notch.countsSwipe(global: global, panelAcceptsMouse: accepts), "\(global) \(accepts)")
+            }
+        }
+        #expect(pill.countsSwipe(global: false, panelAcceptsMouse: true))
+        #expect(!pill.countsSwipe(global: false, panelAcceptsMouse: false))
+        #expect(!pill.countsSwipe(global: true, panelAcceptsMouse: true))
+        #expect(!pill.countsSwipe(global: true, panelAcceptsMouse: false))
+    }
 }

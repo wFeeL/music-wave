@@ -217,6 +217,41 @@ public struct NotchLayout: Sendable, Equatable {
             needsPolling: expanded || bannerOverCollapsed
         )
     }
+
+    /// Где прокрутка идет в свайп по треку (`TrackSwipeDetector`) при состоянии `state`: остров,
+    /// каким он виден сейчас. Раскрытый: `expandedIsland`; свернутый с баннером (`banner`):
+    /// `bannerFrame`; свернутый: `collapsedIsland` с текущим крылом, крылья тоже считаются.
+    /// Скрытый и принудительно скрытый (`suppressed`) остров свайпов не ловит: `nil`. Остров,
+    /// верх которого на верху экрана (у выреза), выступает выше экрана на `hoverTopOvershoot`,
+    /// как зона наведения: курсор на самой верхней строке пикселей тоже над островом. Капсула
+    /// висит под строкой меню, над строкой меню ее зоны нет.
+    public func swipeArea(state: IslandState, suppressed: Bool = false, banner: Bool = false) -> CGRect? {
+        guard !suppressed else { return nil }
+        let island: CGRect
+        switch state {
+        case .hidden:
+            return nil
+        case .collapsed:
+            island = banner ? bannerFrame : collapsedIsland(wingWidth: wingWidth)
+        case .expanded:
+            island = expandedIsland
+        }
+        guard island.maxY >= screenFrame.maxY - NotchGeometry.screenTopTolerance else { return island }
+        return CGRect(
+            x: island.minX, y: island.minY,
+            width: island.width, height: island.height + NotchGeometry.hoverTopOvershoot
+        )
+    }
+
+    /// Засчитывать ли прокрутку в свайп. `global`: событие из глобального монитора (панель
+    /// его пропускает, и оно уходит еще и в окно под курсором); `panelAcceptsMouse`: панель
+    /// сейчас принимает события мыши (раскрытый остров или баннер). У выреза любую: над ним
+    /// окон приложений нет, прокрутку там никто, кроме острова, не получает. У капсулы только
+    /// локальную, пока панель принимает мышь и сама поглощает прокрутку: иначе жест листал бы
+    /// и трек, и окно под капсулой.
+    public func countsSwipe(global: Bool, panelAcceptsMouse: Bool) -> Bool {
+        hasNotch || (!global && panelAcceptsMouse)
+    }
 }
 
 /// Решение по положению курсора у выреза.
@@ -297,6 +332,9 @@ public enum NotchGeometry {
     public static let wingAuxMargin: CGFloat = 8
     /// Насколько зона наведения выступает выше верха экрана.
     static let hoverTopOvershoot: CGFloat = 2
+    /// Остров, верх которого не ниже верха экрана на эту величину, висит от верха экрана
+    /// (`NotchLayout.swipeArea`). Капсула ниже на строку меню и зазор, много больше.
+    static let screenTopTolerance: CGFloat = 0.5
     /// Запас под панелью для свечения при «Радиусе свечения» 1× (как в 0.9.0): свечение
     /// размыто на 14 pt и уходит ниже острова примерно на три радиуса размытия.
     public static let glowMargin: CGFloat = 40
