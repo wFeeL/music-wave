@@ -386,6 +386,50 @@ struct BeatTrackerTests {
         #expect(lockedUntilMove)
     }
 
+    /// Пока идет гонка фаз, предсказанные доли текущей сетки светятся с `raceDim` (0.3, замер на
+    /// GTZAN) от обычной яркости: уверенная вспышка на доле, в которой гребенка уже сомневается, хуже
+    /// тусклой. Сравнение с двойником без приглушения на тех же шагах: состояние и id у них общие.
+    @Test func raceDimsTheGrid() throws {
+        #expect(BeatTracker.Parameters().raceDim == 0.3)
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var plain = BeatTracker.Parameters()
+        plain.raceDim = 1
+        var twin = BeatTracker(framesPerSecond: Self.fps, parameters: plain)
+        var hops = SyntheticBeats(bpm: 120)
+        var twinHops = hops
+        hops.feed(&tracker, until: 10)
+        twinHops.feed(&twin, until: 10)
+        try #require(tracker.locked)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        twinHops.offbeatODF = 100
+        twinHops.nextOffbeatTime = twinHops.nextBeatTime + 0.25
+        // Яркость доли, когда время потока до нее дошло, и шла ли в этот момент гонка.
+        var shown: [UInt64: (amplitude: Float, racing: Bool)] = [:]
+        var twinShown: [UInt64: Float] = [:]
+        hops.feed(&tracker, until: 16) { tracker in
+            for event in tracker.schedule.events where event.predicted && event.time <= tracker.now && event.time > 10 {
+                if shown[event.id] == nil { shown[event.id] = (event.amplitude, tracker.shadowNext != nil) }
+            }
+        }
+        twinHops.feed(&twin, until: 16) { twin in
+            for event in twin.schedule.events where event.predicted && event.time <= twin.now && event.time > 10 {
+                if twinShown[event.id] == nil { twinShown[event.id] = event.amplitude }
+            }
+        }
+        let racing = shown.filter { $0.value.racing }
+        #expect(!racing.isEmpty, "no beat shown during the race")
+        for (id, beat) in racing {
+            let reference = try #require(twinShown[id])
+            #expect(reference > 0.5, "beat \(id): \(reference) without dimming")
+            #expect(abs(beat.amplitude - 0.3 * reference) < 1e-4, "beat \(id): \(beat.amplitude) of \(reference)")
+        }
+        // Вне гонки яркость та же, что у двойника.
+        for (id, beat) in shown where !beat.racing {
+            #expect(beat.amplitude == twinShown[id], "beat \(id) outside the race")
+        }
+    }
+
     /// Захват с нуля на пятом попадании подряд (уверенность 0.76, после четырех 0.68 уже выше 0.6, но
     /// попаданий мало), отпускание, когда уверенность падает ниже 0.25.
     @Test func locksOnTheFifthHitAndReleasesBelowAQuarter() throws {

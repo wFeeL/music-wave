@@ -107,6 +107,12 @@ public struct BeatTracker: Sendable {
         public var raceMargin: Double
         public var raceLimit: Int
         public var raceVotes: Int
+        /// Яркость предсказанных долей текущей сетки, пока идет гонка (`shadowNext` есть): гребенка уже
+        /// сомневается в фазе, и уверенные вспышки на возможно неверной доле хуже тусклых. На GTZAN tune
+        /// без приглушения вспышек с захватом мимо долей 836, при 0.5 / 0.4 / 0.3 / 0.2 828 / 816 / 785 /
+        /// 777, wrongLockFl 354 -> 349 / 332 / 316 / 310, покрытие долей 0.364 -> 0.363 / 0.362 / 0.359
+        /// / 0.356. 0.3 первая точка не хуже гонки без гонки (790 / 323), тусклая вспышка еще видна.
+        public var raceDim: Float
         /// Ниже этого энергетического ворота при захвате идет накат (`isCoasting`): промахи не
         /// считаются и оценки темпа не берутся, в брейке захват не уходит, и после возврата бочки
         /// вспышки идут без нового захвата с нуля. 0 выключает. 0.1 (ворот почти закрыт): на GTZAN tune
@@ -139,6 +145,7 @@ public struct BeatTracker: Sendable {
             raceMargin: Double = 0.1,
             raceLimit: Int = 8,
             raceVotes: Int = 3,
+            raceDim: Float = 0.3,
             coastGate: Float = 0.1,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
@@ -163,6 +170,7 @@ public struct BeatTracker: Sendable {
             self.raceMargin = raceMargin
             self.raceLimit = raceLimit
             self.raceVotes = raceVotes
+            self.raceDim = raceDim
             self.coastGate = coastGate
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
@@ -687,9 +695,11 @@ public struct BeatTracker: Sendable {
     }
 
     /// После наката сетка не видна, пока первая доля с открытым воротом не попадет: бочка новой
-    /// сетки открывает ворот раньше, чем закрывается окно старой доли.
+    /// сетки открывает ворот раньше, чем закрывается окно старой доли. Во время гонки фаз сетка
+    /// светится с `raceDim`.
     private var predictedAmplitude: Float {
-        coasted ? 0 : strengthEMA * energyGate * blend
+        guard !coasted else { return 0 }
+        return strengthEMA * energyGate * blend * (shadowNext == nil ? 1 : parameters.raceDim)
     }
 
     /// Яркость `nextBeat`: зафиксированная или текущая.

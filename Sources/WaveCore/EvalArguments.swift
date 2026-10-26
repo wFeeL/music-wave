@@ -238,7 +238,7 @@ extension BeatTracker.Parameters {
     public static let names: [String] = [
         "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "crossfadeBeats",
-        "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "coastGate",
+        "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceDim", "coastGate",
         "gateFallPerBeatDB", "gateFallNoTempoDB",
     ]
 
@@ -263,6 +263,7 @@ extension BeatTracker.Parameters {
         case "offGridScale": offGridScale = Float(value)
         case "onsetFloor": onsetFloor = Float(value)
         case "coastGate": coastGate = Float(value)
+        case "raceDim": raceDim = Float(value)
         case "gateFallPerBeatDB": gateFallPerBeatDB = Float(value)
         case "gateFallNoTempoDB": gateFallNoTempoDB = Float(value)
         case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes":
