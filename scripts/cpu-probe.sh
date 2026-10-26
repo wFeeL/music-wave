@@ -11,7 +11,7 @@
 #   default: вид 1.1 по умолчанию (линий 3, заливка 0, радиус свечения 1, свечение 0.6, крылья 64,
 #            толщина 1, амплитуда 1); предел play 15 %, итог в cpu.txt;
 #   max:     верхние границы диапазонов (линий 6, заливка 1, радиус свечения 3, свечение 1, крылья
-#            200, толщина 2, амплитуда 2); предел play 20 %, итог в cpu-max.txt;
+#            200, толщина 2, амплитуда 2, переливание 1); предел play 20 %, итог в cpu-max.txt;
 #   user:    настройки владельца: все ключи wf.* из com.wfeels.wavefeels (`defaults export`, из
 #            словаря остаются только они, затем `defaults import`), пауза выключается
 #            принудительно (wf.paused = 0); предел play 20 %, как у max (диапазоны те же), итог
@@ -219,14 +219,14 @@ fi
 # возвращает ошибку. Числа пишутся как -float и -int: AppSettings читает их через
 # `double(forKey:)` и NSNumber и ограничивает теми же диапазонами, что и ползунки.
 write_preset() {
-    local lines fill radius glow wings thickness amplitude
+    local lines fill radius glow wings thickness amplitude flow
     if [[ $PRESET == user ]]; then
         copy_user_settings || return 1
     else
         if [[ $PRESET == max ]]; then
-            lines=6 fill=1 radius=3 glow=1 wings=200 thickness=2 amplitude=2
+            lines=6 fill=1 radius=3 glow=1 wings=200 thickness=2 amplitude=2 flow=1
         else
-            lines=3 fill=0 radius=1 glow=0.6 wings=64 thickness=1 amplitude=1
+            lines=3 fill=0 radius=1 glow=0.6 wings=64 thickness=1 amplitude=1 flow=0
         fi
         defaults delete "$SUITE" > /dev/null 2>&1
         defaults write "$SUITE" wf.lineCount -int "$lines" &&
@@ -236,6 +236,7 @@ write_preset() {
             defaults write "$SUITE" wf.wingWidth -float "$wings" &&
             defaults write "$SUITE" wf.lineThickness -float "$thickness" &&
             defaults write "$SUITE" wf.waveAmplitude -float "$amplitude" &&
+            defaults write "$SUITE" wf.colorFlow -float "$flow" &&
             defaults write "$SUITE" wf.beatPulse -bool true &&
             defaults write "$SUITE" wf.softPulse -bool true &&
             defaults write "$SUITE" wf.paused -bool false || return 1

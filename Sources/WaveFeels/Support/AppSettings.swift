@@ -35,6 +35,17 @@ final class AppSettings {
         static let fill = "wf.fill"
         static let lineThickness = "wf.lineThickness"
         static let waveAmplitude = "wf.waveAmplitude"
+        /// Стиль волн `WaveLook`. Ключ назван по смыслу настройки, свойство `look`.
+        static let waveStyle = "wf.waveStyle"
+        static let colorFlow = "wf.colorFlow"
+        static let colorByBand = "wf.colorByBand"
+        static let softStop = "wf.softStop"
+        static let artworkGlow = "wf.artworkGlow"
+        static let progressLine = "wf.progressLine"
+        static let autoSource = "wf.autoSource"
+        static let trackSwipe = "wf.trackSwipe"
+        static let expandDelay = "wf.expandDelay"
+        static let followDisplayOptions = "wf.followDisplayOptions"
     }
 
     enum Limits {
@@ -44,6 +55,8 @@ final class AppSettings {
         static let wingWidth = WaveAppearance.Limits.wingWidth
         static let glowIntensity: ClosedRange<Double> = 0...1
         static let hideDelay: ClosedRange<Double> = 1...30
+        static let colorFlow = WaveAppearance.Limits.colorFlow
+        static let expandDelay = IslandStateMachine.expandDelayRange
     }
 
     enum Default {
@@ -65,6 +78,16 @@ final class AppSettings {
         static let fill = WaveAppearance.standard.fill
         static let lineThickness = WaveAppearance.standard.thickness
         static let waveAmplitude = WaveAppearance.standard.amplitude
+        static let look = WaveAppearance.standard.look
+        static let colorFlow = WaveAppearance.standard.colorFlow
+        static let colorByBand = WaveAppearance.standard.colorByBand
+        static let softStop = true
+        static let artworkGlow = true
+        static let progressLine = true
+        static let autoSource = false
+        static let trackSwipe = true
+        static let expandDelay = IslandStateMachine.defaultExpandDelay
+        static let followDisplayOptions = true
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -89,6 +112,16 @@ final class AppSettings {
     @ObservationIgnored private var storedFill: Double
     @ObservationIgnored private var storedLineThickness: Double
     @ObservationIgnored private var storedWaveAmplitude: Double
+    @ObservationIgnored private var storedLook: WaveLook
+    @ObservationIgnored private var storedColorFlow: Double
+    @ObservationIgnored private var storedColorByBand: Bool
+    @ObservationIgnored private var storedSoftStop: Bool
+    @ObservationIgnored private var storedArtworkGlow: Bool
+    @ObservationIgnored private var storedProgressLine: Bool
+    @ObservationIgnored private var storedAutoSource: Bool
+    @ObservationIgnored private var storedTrackSwipe: Bool
+    @ObservationIgnored private var storedExpandDelay: Double
+    @ObservationIgnored private var storedFollowDisplayOptions: Bool
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -147,6 +180,25 @@ final class AppSettings {
             WaveAppearance.Limits.amplitude,
             fallback: Default.waveAmplitude
         )
+        storedLook = Self.readJSON(WaveLook.self, defaults, Key.waveStyle) ?? Default.look
+        storedColorFlow = Self.clamp(
+            Self.readDouble(defaults, Key.colorFlow) ?? Default.colorFlow,
+            Limits.colorFlow,
+            fallback: Default.colorFlow
+        )
+        storedColorByBand = Self.readBool(defaults, Key.colorByBand) ?? Default.colorByBand
+        storedSoftStop = Self.readBool(defaults, Key.softStop) ?? Default.softStop
+        storedArtworkGlow = Self.readBool(defaults, Key.artworkGlow) ?? Default.artworkGlow
+        storedProgressLine = Self.readBool(defaults, Key.progressLine) ?? Default.progressLine
+        storedAutoSource = Self.readBool(defaults, Key.autoSource) ?? Default.autoSource
+        storedTrackSwipe = Self.readBool(defaults, Key.trackSwipe) ?? Default.trackSwipe
+        storedExpandDelay = Self.clamp(
+            Self.readDouble(defaults, Key.expandDelay) ?? Default.expandDelay,
+            Limits.expandDelay,
+            fallback: Default.expandDelay
+        )
+        storedFollowDisplayOptions = Self.readBool(defaults, Key.followDisplayOptions)
+            ?? Default.followDisplayOptions
     }
 
     // MARK: - Свойства
@@ -343,13 +395,113 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Остров и панель
+
+    /// Мягкая остановка: на паузе волны затихают и выпрямляются, свечение гаснет плавно (`SoftStop`).
+    var softStop: Bool {
+        get {
+            access(keyPath: \.softStop)
+            return storedSoftStop
+        }
+        set {
+            guard newValue != storedSoftStop else { return }
+            withMutation(keyPath: \.softStop) { storedSoftStop = newValue }
+            defaults.set(newValue, forKey: Key.softStop)
+        }
+    }
+
+    /// Свечение цвета обложки за раскрытой панелью (`ArtworkGlow`).
+    var artworkGlow: Bool {
+        get {
+            access(keyPath: \.artworkGlow)
+            return storedArtworkGlow
+        }
+        set {
+            guard newValue != storedArtworkGlow else { return }
+            withMutation(keyPath: \.artworkGlow) { storedArtworkGlow = newValue }
+            defaults.set(newValue, forKey: Key.artworkGlow)
+        }
+    }
+
+    /// Полоса прогресса по нижней кромке свернутого острова: доля проигранного трека из
+    /// Now Playing, без Now Playing не видна.
+    var progressLine: Bool {
+        get {
+            access(keyPath: \.progressLine)
+            return storedProgressLine
+        }
+        set {
+            guard newValue != storedProgressLine else { return }
+            withMutation(keyPath: \.progressLine) { storedProgressLine = newValue }
+            defaults.set(newValue, forKey: Key.progressLine)
+        }
+    }
+
+    /// Автовыбор источника: волны переходят на другое заигравшее приложение и возвращаются,
+    /// когда оно замолчало (`AutoSourceSwitcher`). По умолчанию выключен.
+    var autoSource: Bool {
+        get {
+            access(keyPath: \.autoSource)
+            return storedAutoSource
+        }
+        set {
+            guard newValue != storedAutoSource else { return }
+            withMutation(keyPath: \.autoSource) { storedAutoSource = newValue }
+            defaults.set(newValue, forKey: Key.autoSource)
+        }
+    }
+
+    /// Горизонтальный свайп двумя пальцами над островом: предыдущий или следующий трек
+    /// (`TrackSwipeDetector`).
+    var trackSwipe: Bool {
+        get {
+            access(keyPath: \.trackSwipe)
+            return storedTrackSwipe
+        }
+        set {
+            guard newValue != storedTrackSwipe else { return }
+            withMutation(keyPath: \.trackSwipe) { storedTrackSwipe = newValue }
+            defaults.set(newValue, forKey: Key.trackSwipe)
+        }
+    }
+
+    /// Сколько курсор держится у выреза до раскрытия, секунды:
+    /// `IslandStateMachine.expandDelayRange`, по умолчанию `defaultExpandDelay`.
+    var expandDelay: Double {
+        get {
+            access(keyPath: \.expandDelay)
+            return storedExpandDelay
+        }
+        set {
+            let value = Self.clamp(newValue, Limits.expandDelay, fallback: Default.expandDelay)
+            guard value != storedExpandDelay else { return }
+            withMutation(keyPath: \.expandDelay) { storedExpandDelay = value }
+            defaults.set(value, forKey: Key.expandDelay)
+        }
+    }
+
+    /// Подстраивать вид под системные «Увеличить контраст» и «Уменьшить прозрачность»
+    /// (`WaveAppearance.adapted(to:)`).
+    var followDisplayOptions: Bool {
+        get {
+            access(keyPath: \.followDisplayOptions)
+            return storedFollowDisplayOptions
+        }
+        set {
+            guard newValue != storedFollowDisplayOptions else { return }
+            withMutation(keyPath: \.followDisplayOptions) { storedFollowDisplayOptions = newValue }
+            defaults.set(newValue, forKey: Key.followDisplayOptions)
+        }
+    }
+
     // MARK: - Вид волн
 
     /// Вид волн целиком из сохраненных значений (вкладка «Вид»). Только читает.
     var appearance: WaveAppearance {
         WaveAppearance(
             wingWidth: wingWidth, colorMode: colorMode, glowRadius: glowRadius, lineCount: lineCount,
-            fill: fill, thickness: lineThickness, amplitude: waveAmplitude
+            fill: fill, thickness: lineThickness, amplitude: waveAmplitude,
+            colorFlow: colorFlow, colorByBand: colorByBand, look: look
         )
     }
 
@@ -436,6 +588,49 @@ final class AppSettings {
             guard value != storedWaveAmplitude else { return }
             withMutation(keyPath: \.waveAmplitude) { storedWaveAmplitude = value }
             defaults.set(value, forKey: Key.waveAmplitude)
+        }
+    }
+
+    /// Стиль волн, по умолчанию «Волны». Хранится как JSON в `wf.waveStyle`; нечитаемое
+    /// значение (в том числе стиль из будущей версии) дает «Волны».
+    var look: WaveLook {
+        get {
+            access(keyPath: \.look)
+            return storedLook
+        }
+        set {
+            guard newValue != storedLook else { return }
+            withMutation(keyPath: \.look) { storedLook = newValue }
+            writeJSON(newValue, Key.waveStyle)
+        }
+    }
+
+    /// «Скорость переливания», 0...1; 0 выключает. По умолчанию 0: вид после обновления сам
+    /// не меняется.
+    var colorFlow: Double {
+        get {
+            access(keyPath: \.colorFlow)
+            return storedColorFlow
+        }
+        set {
+            let value = Self.clamp(newValue, Limits.colorFlow, fallback: Default.colorFlow)
+            guard value != storedColorFlow else { return }
+            withMutation(keyPath: \.colorFlow) { storedColorFlow = value }
+            defaults.set(value, forKey: Key.colorFlow)
+        }
+    }
+
+    /// «Цвет по частотам»: бас, середина и верх каждый своим цветом палитры. По умолчанию
+    /// выключен.
+    var colorByBand: Bool {
+        get {
+            access(keyPath: \.colorByBand)
+            return storedColorByBand
+        }
+        set {
+            guard newValue != storedColorByBand else { return }
+            withMutation(keyPath: \.colorByBand) { storedColorByBand = newValue }
+            defaults.set(newValue, forKey: Key.colorByBand)
         }
     }
 

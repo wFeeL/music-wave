@@ -333,6 +333,8 @@ enum SnapshotRenderer {
         let model = AppModel(defaults: defaults)
         // Снимки не зависят от режима энергосбережения машины: в нем остров облегчен.
         model.lowPower = false
+        // И от системных «Увеличить контраст» и «Уменьшить прозрачность»: вид как в настройках.
+        model.settings.followDisplayOptions = false
         model.settings.source = source
         var written: [URL] = []
         for scene in scenes {
@@ -379,12 +381,18 @@ enum SnapshotRenderer {
         settings.fill = appearance.fill
         settings.lineThickness = appearance.thickness
         settings.waveAmplitude = appearance.amplitude
+        settings.look = appearance.look
+        settings.colorFlow = appearance.colorFlow
+        settings.colorByBand = appearance.colorByBand
     }
 
     @MainActor
     private static func render(_ scene: SnapshotScene, model: AppModel, to url: URL) throws {
         let moment = scene.moment
         apply(scene.appearance, to: model.settings)
+        model.settings.progressLine = scene.progressLine
+        model.settings.artworkGlow = scene.artworkGlow
+        model.settings.softStop = scene.softStop
         model.showPreview(
             state: scene.state,
             track: scene.track,
@@ -564,12 +572,21 @@ private struct SnapshotScene {
     let appearance: WaveAppearance
     /// Открыт баннер нового трека с `track`.
     let banner: Bool
+    // Функции 1.2, в приложении включенные по умолчанию. В сценах они выключены, пока сцена
+    // не показывает именно их: так снимки 1.1 не меняются.
+    /// Полоса прогресса по нижней кромке свернутого острова.
+    let progressLine: Bool
+    /// Свечение обложки за раскрытой панелью.
+    let artworkGlow: Bool
+    /// Мягкая остановка на паузе.
+    let softStop: Bool
 
     init(
         name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor]?,
         backdrop: SnapshotBackdropAppearance = .dark, pill: Bool = false,
         track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true,
-        appearance: WaveAppearance = .standard, banner: Bool = false
+        appearance: WaveAppearance = .standard, banner: Bool = false,
+        progressLine: Bool = false, artworkGlow: Bool = false, softStop: Bool = false
     ) {
         self.name = name
         self.state = state
@@ -581,6 +598,9 @@ private struct SnapshotScene {
         self.nowPlaying = nowPlaying
         self.appearance = appearance
         self.banner = banner
+        self.progressLine = progressLine
+        self.artworkGlow = artworkGlow
+        self.softStop = softStop
     }
 }
 

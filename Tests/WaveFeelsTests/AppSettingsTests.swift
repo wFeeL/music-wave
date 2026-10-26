@@ -59,6 +59,17 @@ struct AppSettingsTests {
             #expect(settings.hideInFullscreen == true)
             #expect(settings.showTrackBanner == true)
             #expect(settings.paused == false)
+            #expect(settings.look == .waves)
+            #expect(settings.colorFlow == 0)
+            #expect(settings.colorByBand == false)
+            #expect(settings.softStop == true)
+            #expect(settings.artworkGlow == true)
+            #expect(settings.progressLine == true)
+            #expect(settings.autoSource == false)
+            #expect(settings.trackSwipe == true)
+            #expect(settings.expandDelay == IslandStateMachine.defaultExpandDelay)
+            #expect(settings.expandDelay == 0.15)
+            #expect(settings.followDisplayOptions == true)
         }
     }
 
@@ -83,6 +94,16 @@ struct AppSettingsTests {
             written.hideInFullscreen = false
             written.showTrackBanner = false
             written.paused = true
+            written.look = .spectrum
+            written.colorFlow = 0.4
+            written.colorByBand = true
+            written.softStop = false
+            written.artworkGlow = false
+            written.progressLine = false
+            written.autoSource = true
+            written.trackSwipe = false
+            written.expandDelay = 0.5
+            written.followDisplayOptions = false
 
             let read = AppSettings(defaults: defaults)
             #expect(read.source == source)
@@ -98,6 +119,16 @@ struct AppSettingsTests {
             #expect(read.hideInFullscreen == false)
             #expect(read.showTrackBanner == false)
             #expect(read.paused == true)
+            #expect(read.look == .spectrum)
+            #expect(read.colorFlow == 0.4)
+            #expect(read.colorByBand == true)
+            #expect(read.softStop == false)
+            #expect(read.artworkGlow == false)
+            #expect(read.progressLine == false)
+            #expect(read.autoSource == true)
+            #expect(read.trackSwipe == false)
+            #expect(read.expandDelay == 0.5)
+            #expect(read.followDisplayOptions == false)
 
             read.source = .systemWide
             read.source = .systemWide
@@ -123,11 +154,24 @@ struct AppSettingsTests {
             settings.hideInFullscreen = false
             settings.showTrackBanner = false
             settings.paused = true
+            settings.look = .minimal
+            settings.colorFlow = 0.7
+            settings.colorByBand = true
+            settings.softStop = false
+            settings.artworkGlow = false
+            settings.progressLine = false
+            settings.autoSource = true
+            settings.trackSwipe = false
+            settings.expandDelay = 0.3
+            settings.followDisplayOptions = false
 
             for key in [
                 "wf.source", "wf.sensitivity", "wf.levelMode", "wf.followSystemVolume",
                 "wf.latencyMode", "wf.wingWidth", "wf.glowIntensity", "wf.beatPulse", "wf.softPulse",
                 "wf.hideDelay", "wf.hideInFullscreen", "wf.showTrackBanner", "wf.paused",
+                "wf.waveStyle", "wf.colorFlow", "wf.colorByBand", "wf.softStop", "wf.artworkGlow",
+                "wf.progressLine", "wf.autoSource", "wf.trackSwipe", "wf.expandDelay",
+                "wf.followDisplayOptions",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
             }
@@ -138,6 +182,8 @@ struct AppSettingsTests {
             #expect(try decoder.decode(LatencyMode.self, from: latency) == .manual(milliseconds: 40))
             let source = try #require(defaults.data(forKey: "wf.source"))
             #expect(try decoder.decode(AudioSource.self, from: source) == .systemWide)
+            let look = try #require(defaults.data(forKey: "wf.waveStyle"))
+            #expect(try decoder.decode(WaveLook.self, from: look) == .minimal)
         }
     }
 
@@ -164,11 +210,27 @@ struct AppSettingsTests {
             #expect(settings.latencyMode == .manual(milliseconds: 500))
             settings.latencyMode = .manual(milliseconds: -20)
             #expect(settings.latencyMode == .manual(milliseconds: 0))
+            settings.colorFlow = 3
+            #expect(settings.colorFlow == 1)
+            settings.colorFlow = -0.5
+            #expect(settings.colorFlow == 0)
+            settings.expandDelay = 5
+            #expect(settings.expandDelay == IslandStateMachine.expandDelayRange.upperBound)
+            settings.expandDelay = -1
+            #expect(settings.expandDelay == IslandStateMachine.expandDelayRange.lowerBound)
 
             let read = AppSettings(defaults: defaults)
             #expect(read.sensitivity == 0.25)
             #expect(read.wingWidth == 40)
             #expect(read.latencyMode == .manual(milliseconds: 0))
+            #expect(read.colorFlow == 0)
+            #expect(read.expandDelay == 0)
+
+            defaults.set(9.0, forKey: "wf.colorFlow")
+            defaults.set(9.0, forKey: "wf.expandDelay")
+            let stored = AppSettings(defaults: defaults)
+            #expect(stored.colorFlow == 1)
+            #expect(stored.expandDelay == 1)
         }
     }
 
@@ -183,6 +245,18 @@ struct AppSettingsTests {
             #expect(settings.glowIntensity == 0.6)
             settings.hideDelay = .nan
             #expect(settings.hideDelay == 5)
+            settings.colorFlow = 0.5
+            settings.colorFlow = .nan
+            #expect(settings.colorFlow == 0)
+            settings.expandDelay = 0.6
+            settings.expandDelay = .infinity
+            #expect(settings.expandDelay == 0.15)
+
+            defaults.set(Double.nan, forKey: "wf.colorFlow")
+            defaults.set(Double.nan, forKey: "wf.expandDelay")
+            let read = AppSettings(defaults: defaults)
+            #expect(read.colorFlow == 0)
+            #expect(read.expandDelay == 0.15)
         }
     }
 
@@ -334,6 +408,63 @@ extension AppSettingsTests {
         }
     }
 
+    /// Обновление с 1.1: в домене ключи вида 1.1, новых ключей нет. Вид тот же, что был:
+    /// стиль «Волны», без переливания и цвета по частотам, поля из домена. Функции 1.2 со
+    /// значениями по умолчанию, ничего не дописывается.
+    @Test func upgradeFrom11KeepsLook() throws {
+        try Self.withSuite { defaults, suite in
+            let encoder = JSONEncoder()
+            defaults.set(150.0, forKey: "wf.wingWidth")
+            defaults.set(try encoder.encode(WaveColorMode.preset(.ocean)), forKey: "wf.colorMode")
+            defaults.set(2.0, forKey: "wf.glowRadius")
+            defaults.set(4, forKey: "wf.lineCount")
+            defaults.set(0.5, forKey: "wf.fill")
+            defaults.set(1.5, forKey: "wf.lineThickness")
+            defaults.set(0.75, forKey: "wf.waveAmplitude")
+            defaults.set(0.8, forKey: "wf.glowIntensity")
+            defaults.set(true, forKey: "wf.beatPulse")
+            defaults.set(10.0, forKey: "wf.hideDelay")
+            let before = Set((defaults.persistentDomain(forName: suite) ?? [:]).keys)
+            #expect(before.count == 10)
+
+            let settings = AppSettings(defaults: defaults)
+            var expected = WaveAppearance.standard
+            expected.wingWidth = 150
+            expected.colorMode = .preset(.ocean)
+            expected.glowRadius = 2
+            expected.lineCount = 4
+            expected.fill = 0.5
+            expected.thickness = 1.5
+            expected.amplitude = 0.75
+            #expect(settings.appearance == expected)
+            #expect(settings.appearance.look == .waves)
+            #expect(settings.appearance.colorFlow == 0)
+            #expect(settings.appearance.colorByBand == false)
+            #expect(settings.softStop == true)
+            #expect(settings.artworkGlow == true)
+            #expect(settings.progressLine == true)
+            #expect(settings.autoSource == false)
+            #expect(settings.trackSwipe == true)
+            #expect(settings.expandDelay == IslandStateMachine.defaultExpandDelay)
+            #expect(settings.followDisplayOptions == true)
+
+            let after = Set((defaults.persistentDomain(forName: suite) ?? [:]).keys)
+            #expect(after == before)
+        }
+    }
+
+    /// Испорченный или неизвестный (из будущей версии) стиль дает «Волны».
+    @Test func garbageLookFallsBackToWaves() {
+        Self.withDefaults { defaults in
+            defaults.set(Data("x".utf8), forKey: "wf.waveStyle")
+            #expect(AppSettings(defaults: defaults).look == .waves)
+            defaults.set(Data(#""hologram""#.utf8), forKey: "wf.waveStyle")
+            #expect(AppSettings(defaults: defaults).look == .waves)
+            defaults.set("spectrum", forKey: "wf.waveStyle")
+            #expect(AppSettings(defaults: defaults).look == .waves)
+        }
+    }
+
     /// Испорченный или неизвестный (палитра из будущей версии) режим цвета дает «Из обложки».
     @Test func garbageColorModeFallsBackToArtwork() {
         Self.withDefaults { defaults in
@@ -356,6 +487,9 @@ extension AppSettingsTests {
             written.fill = 0.4
             written.lineThickness = 1.5
             written.waveAmplitude = 0.75
+            written.look = .pulse
+            written.colorFlow = 0.25
+            written.colorByBand = true
 
             for key in [
                 "wf.colorMode", "wf.glowRadius", "wf.lineCount", "wf.fill", "wf.lineThickness", "wf.waveAmplitude",
@@ -375,7 +509,8 @@ extension AppSettingsTests {
             #expect(read.waveAmplitude == 0.75)
             #expect(read.appearance == WaveAppearance(
                 wingWidth: 180, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowRadius: 2.5,
-                lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.75
+                lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.75,
+                colorFlow: 0.25, colorByBand: true, look: .pulse
             ))
 
             read.colorMode = .preset(.ocean)
