@@ -88,6 +88,20 @@ public struct BeatTracker: Sendable {
         public var lockConfidence: Double
         /// Попаданий подряд для захвата.
         public var lockHits: Int
+        /// Проверка фазы при захвате: захвата нет, пока оценка гребенки у «и» сетки (доля ФАПЧ + T/2)
+        /// выше оценки у доли ФАПЧ больше чем в это число раз (0 выключает). Попадания не различают долю
+        /// и «и», когда онсеты есть на обеих восьмых, а акцент на доле видит только гребенка; без
+        /// захвата сетка светится по весу показа как прежде, но неверная фаза не получает защиты захвата
+        /// (гонка вместо скачка, приглушение бочки между долями). На GTZAN tune (steady) к доводам гонки:
+        /// вспышек с захватом мимо долей 576 -> 555, wrongLock 12 / 231 -> 12 / 215, точность захвата
+        /// 0.9409 -> 0.9429, а вспышки почти те же (всего мимо долей 2080 -> 2081, точность всех вспышек
+        /// 0.8675 -> 0.8674); доля времени с захватом 0.3506 -> 0.3490. При 1 wrongLock 9 / 181 и
+        /// вспышек с захватом мимо долей 512, но вспышек мимо долей всего 2104 и точность всех вспышек
+        /// 0.8661 (без захвата фаза прыгает по гребенке сразу, и прыжки чаще мимо); 1.2 хуже 1.5 по
+        /// всем числам; 1.35 и 1.75 почти как 1.5 (554 / 560 вспышек с захватом мимо долей, доля
+        /// времени с захватом 0.3482 / 0.3497). Отклонено: проверка только при онсетах на «и» (wrongLock
+        /// 12-13 / 245-257, вспышек с захватом мимо долей 574-592).
+        public var lockPhaseCheck: Double
         public var unlockConfidence: Double
         /// Расхождение гребенки и ФАПЧ (доля периода), после которого фаза прыгает.
         public var phaseJump: Double
@@ -279,6 +293,7 @@ public struct BeatTracker: Sendable {
             confidenceGain: Double = 0.25,
             lockConfidence: Double = 0.6,
             lockHits: Int = 5,
+            lockPhaseCheck: Double = 1.5,
             unlockConfidence: Double = 0.25,
             phaseJump: Double = 0.12,
             phaseJumpChecks: Int = 2,
@@ -319,6 +334,7 @@ public struct BeatTracker: Sendable {
             self.confidenceGain = confidenceGain
             self.lockConfidence = lockConfidence
             self.lockHits = lockHits
+            self.lockPhaseCheck = lockPhaseCheck
             self.unlockConfidence = unlockConfidence
             self.phaseJump = phaseJump
             self.phaseJumpChecks = phaseJumpChecks
@@ -1163,6 +1179,7 @@ public struct BeatTracker: Sendable {
                     if !locked { lastUnlockReason = .misses }
                 } else {
                     locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
+                        && phaseBeatsHalf(nextBeat, period: period)
                 }
                 // Атака при закрытом вороте сетку не подтверждает: решает доля с открытым воротом. После
                 // промаха на ней сетка остается скрытой до попадания или новой фазы: вес показа идет от
@@ -1177,6 +1194,13 @@ public struct BeatTracker: Sendable {
             committedAmplitude = nil
             beatCounter += 1
         }
+    }
+
+    /// Проверка фазы при захвате (`lockPhaseCheck`): гребенка у «и» доли `beat` не выше гребенки у
+    /// самой доли больше чем в `lockPhaseCheck` раз.
+    private func phaseBeatsHalf(_ beat: Double, period: Double) -> Bool {
+        guard parameters.lockPhaseCheck > 0 else { return true }
+        return phaseScore(at: beat + period / 2, period: period) <= parameters.lockPhaseCheck * phaseScore(at: beat, period: period)
     }
 
     // MARK: Ворот, вес и события

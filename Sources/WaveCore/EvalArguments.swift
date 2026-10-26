@@ -292,7 +292,7 @@ public struct EvalArguments: Sendable, Equatable {
 extension BeatTracker.Parameters {
     /// Имена полей, которые можно менять по имени (`--tracker name=value`).
     public static let names: [String] = [
-        "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
+        "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "lockPhaseCheck", "unlockConfidence",
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "weightLow",
         "weightHigh", "weightRiseBeats", "weightFallBeats", "weightHits", "kickConfirmFloor", "kickConfirmLow",
         "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceEvidenceChecks",
@@ -310,6 +310,7 @@ extension BeatTracker.Parameters {
         case "matchWindow": matchWindow = value
         case "confidenceGain": confidenceGain = value
         case "lockConfidence": lockConfidence = value
+        case "lockPhaseCheck": lockPhaseCheck = value
         case "unlockConfidence": unlockConfidence = value
         case "phaseJump": phaseJump = value
         case "phaseJumpMargin": phaseJumpMargin = value

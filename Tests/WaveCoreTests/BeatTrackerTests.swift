@@ -932,6 +932,44 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Проверка фазы при захвате (`lockPhaseCheck`): доли с онсетами (50), «и» без онсетов, но с
+    /// функцией 100 (ее видит только гребенка), скачки по гребенке выключены огромным запасом. Захват
+    /// нужен после 12 попаданий, чтобы «и» появилось, когда темп уже устоялся (смена темпа ставит фазу
+    /// по гребенке без запаса). Сетка на долях набирает попадания и уверенность, но не захватывает, пока
+    /// гребенка у «и» выше больше чем в 1.5 раза; без проверки (0) захват есть. «И» с функцией 60 (в 1.2
+    /// раза) захвату не мешает.
+    @Test(arguments: [(Float(100), 1.5, false), (Float(100), 0.0, true), (Float(60), 1.5, true)])
+    func lockWaitsWhileTheCombPrefersTheHalfBeat(offbeat: Float, check: Double, locks: Bool) throws {
+        #expect(BeatTracker.Parameters().lockPhaseCheck == 1.5)
+        var parameters = BeatTracker.Parameters()
+        parameters.lockPhaseCheck = check
+        parameters.phaseJumpMargin = 1e9
+        parameters.lockHits = 12
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 4)
+        try #require(tracker.nextBeat != nil && !tracker.locked)
+        hops.offbeatODF = offbeat
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var everLocked = false
+        var readyUnlocked = false
+        hops.feed(&tracker, until: 12) { tracker in
+            everLocked = everLocked || tracker.locked
+            if !tracker.locked, tracker.hits >= parameters.lockHits, tracker.confidence >= parameters.lockConfidence {
+                readyUnlocked = true
+            }
+        }
+        #expect(everLocked == locks)
+        // Захват без проверки потом уходит на «и» другими путями (PLP), это не предмет проверки.
+        if check > 0 {
+            let next = try #require(tracker.nextBeat)
+            #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.03, "next beat \(next)")
+        }
+        if !locks {
+            #expect(readyUnlocked, "hits and confidence alone never reached the lock rule")
+        }
+    }
+
     /// Захват с нуля на пятом попадании подряд (уверенность 0.76, после четырех 0.68 уже выше 0.6, но
     /// попаданий мало), отпускание, когда уверенность падает ниже 0.25.
     @Test func locksOnTheFifthHitAndReleasesBelowAQuarter() throws {
