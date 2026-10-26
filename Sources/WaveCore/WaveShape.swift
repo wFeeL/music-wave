@@ -507,6 +507,146 @@ public enum WavePaint {
         }
     }
 
+    /// Доля кольца палитры на половину линии «Спектра» (крыло или половина панели).
+    static let spectrumSpan = 0.67
+    /// Подсветка по высоте линии h: светлота + `spectrumLightnessLift × h`, насыщенность
+    /// × (`spectrumChromaBase` + `spectrumChromaLift × h`), прозрачность × (`spectrumOpacityBase` +
+    /// (1 − `spectrumOpacityBase`) × h).
+    static let spectrumLightnessLift: Float = 0.10
+    static let spectrumChromaBase: Float = 0.75
+    static let spectrumChromaLift: Float = 0.35
+    static let spectrumOpacityBase: Float = 0.7
+    /// Шаг точек градиента «Спектра» вдоль половины линии.
+    static let spectrumStep = 1.0 / 16
+
+    /// Расстояния от выреза (от середины панели), где стоят точки градиента «Спектра»: 17 точек с
+    /// шагом 1/16 (цвет меняется по положению), точки проявления у выреза и растворения у края.
+    private static let spectrumDistances: [Double] = {
+        let uniform = (0...16).map { Double($0) * spectrumStep }
+        let fades = fadeDistances.filter { $0 > fadeOutStart - 1e-9 }
+        return Array(Set(uniform + fades)).sorted()
+    }()
+
+    private static let spectrumWingLocations: [Double] = (spectrumDistances + notchDistances).sorted()
+    private static let spectrumPanelLocations: [Double] = {
+        let right = spectrumDistances.map { 0.5 + $0 / 2 }
+        let left = spectrumDistances.dropFirst().reversed().map { 0.5 - $0 / 2 }
+        return left + right
+    }()
+
+    /// Положения точек градиента линии «Спектра» (`spectrumStops`): в крыле от выреза к краю
+    /// (24 точки), в панели через всю ширину, симметрично от середины (41 точка).
+    public static func spectrumLocations(for profile: WaveProfile) -> [Double] {
+        switch profile {
+        case .wing: spectrumWingLocations
+        case .panel: spectrumPanelLocations
+        }
+    }
+
+    /// Точки градиента линии «Спектра» в положениях `spectrumLocations(for: profile)`.
+    ///
+    /// Цвет идет по частотам. Без «Цвета по частотам» цвета палитры (после `distinct`) стоят
+    /// кольцом c0 → c1 → c2 → c0, точка на расстоянии u от выреза (в панели от середины) берет
+    /// место кольца `0.67 × u − сдвиг`, где сдвиг это `flowSpeed × time` плюс фаза переливания
+    /// `options.flowPhase`: у выреза цвет баса, к краю цвета идут по кольцу и со временем плывут
+    /// наружу, все три цвета в деле. С «Цветом по частотам» сдвига нет и кольцо не замыкается:
+    /// цвет баса у выреза, середины в середине, верха у края (палитра после переливания, как у
+    /// `sectionStops`). Внутри каждого отрезка между двумя цветами смешение в OKLab по smoothstep
+    /// на весь отрезок, без резких краев.
+    ///
+    /// Подсветка по высоте линии в точке h (`heights`: точки линии, те же, что рисуются, линейно
+    /// между ними; плохие считаются нулем, ограничиваются 0...1): светлота + 0.10 h (не выше
+    /// `maxLightness`), насыщенность × (0.75 + 0.35 h) и затем в гамму sRGB, прозрачность ×
+    /// (0.7 + 0.3 h). Насыщенность и прозрачность всей линии от уровня `level`, как у
+    /// линии середины, проявление у выреза и растворение у края как у волн.
+    /// - Precondition: `output.count == spectrumLocations(for: profile).count`.
+    public static func spectrumStops(
+        palette: [RGBColor], heights: UnsafeBufferPointer<Float>, level: Float, time: Double, profile: WaveProfile,
+        options: Options = .standard, into output: UnsafeMutableBufferPointer<Stop>
+    ) {
+        let locations = spectrumLocations(for: profile)
+        precondition(output.count == locations.count, "output.count must equal spectrumLocations(for:).count")
+        let source = palette.isEmpty ? PaletteExtractor.fallback : palette
+        let colors = options.colorByBand ? flowingColors(source, phase: options.flowPhase) : distinct(source)
+        let paint = LevelPaint(level: level, options: options)
+        let opacity = paint.opacity * layerOpacity[WaveLayer.mid.rawValue]
+        let flow = options.flowPhase.isFinite ? options.flowPhase : 0
+        let shift = flowShift(time: time) + flow
+
+        for (index, raw) in locations.enumerated() {
+            let point = LinePoint(raw, profile: profile)
+            let base = options.colorByBand
+                ? pathColor(colors, position: point.u)
+                : ringColor(colors, position: spectrumSpan * point.u - shift)
+            let height = height(heights, at: point.location)
+            let chroma = paint.chroma * (spectrumChromaBase + spectrumChromaLift * height)
+            let lab = OKLab(
+                l: min(base.l + spectrumLightnessLift * height, maxLightness),
+                a: base.a * chroma,
+                b: base.b * chroma
+            ).fittedToSRGBGamut()
+            let tint = spectrumOpacityBase + (1 - spectrumOpacityBase) * height
+            output[index] = Stop(location: point.location, color: RGBColor(oklab: lab), opacity: opacity * tint * point.fade)
+        }
+    }
+
+    /// То же, что `spectrumStops(palette:heights:level:time:profile:options:into:)`, в новый массив.
+    public static func spectrumStops(
+        palette: [RGBColor], heights: [Float], level: Float, time: Double, profile: WaveProfile,
+        options: Options = .standard
+    ) -> [Stop] {
+        let placeholder = Stop(location: 0, color: RGBColor(r: 0, g: 0, b: 0), opacity: 0)
+        var output = [Stop](repeating: placeholder, count: spectrumLocations(for: profile).count)
+        heights.withUnsafeBufferPointer { heights in
+            output.withUnsafeMutableBufferPointer {
+                spectrumStops(
+                    palette: palette, heights: heights, level: level, time: time, profile: profile, options: options,
+                    into: $0
+                )
+            }
+        }
+        return output
+    }
+
+    /// Цвет кольца `colors` (c0 → c1 → ... → c0) на месте `position` (любое, берется по модулю 1):
+    /// smoothstep между соседними цветами на весь отрезок.
+    private static func ringColor(_ colors: [OKLab], position: Double) -> OKLab {
+        let count = colors.count
+        guard count > 1 else { return colors[0] }
+        let wrapped = position - position.rounded(.down)
+        let scaled = (wrapped < 1 ? wrapped : 0) * Double(count)
+        let segment = min(Int(scaled), count - 1)
+        let t = Float(smoothstep(0, 1, scaled - Double(segment)))
+        return mix(colors[segment], colors[(segment + 1) % count], t)
+    }
+
+    /// Цвет пути `colors` без замыкания на месте `position` 0...1 (первый цвет в 0, последний в
+    /// 1): smoothstep между соседними цветами на весь отрезок.
+    private static func pathColor(_ colors: [OKLab], position: Double) -> OKLab {
+        let count = colors.count
+        guard count > 1 else { return colors[0] }
+        let scaled = min(max(position, 0), 1) * Double(count - 1)
+        let segment = min(Int(scaled), count - 2)
+        let t = Float(smoothstep(0, 1, scaled - Double(segment)))
+        return mix(colors[segment], colors[segment + 1], t)
+    }
+
+    /// Высота линии `heights` в положении `location` 0...1 (точки линии через всю ее ширину),
+    /// линейно между точками; пустая дает 0, не конечная точка считается нулем.
+    private static func height(_ heights: UnsafeBufferPointer<Float>, at location: Double) -> Float {
+        guard let lastIndex = heights.indices.last else { return 0 }
+        let position = location * Double(lastIndex)
+        let lower = min(Int(position), lastIndex)
+        let upper = min(lower + 1, lastIndex)
+        let t = Float(position - Double(lower))
+        let value = unitHeight(heights[lower]) + (unitHeight(heights[upper]) - unitHeight(heights[lower])) * t
+        return min(max(value, 0), 1)
+    }
+
+    private static func unitHeight(_ value: Float) -> Float {
+        value.isFinite ? min(max(value, 0), 1) : 0
+    }
+
     /// Цвета слоев: палитра (пустая заменяется `PaletteExtractor.fallback`) после `distinct` и
     /// течения `PaletteFlow` на фазе `phase`. Течение идет после `distinct`: решение о повороте
     /// оттенка зависит только от палитры и не включается и не выключается от кадра к кадру, как

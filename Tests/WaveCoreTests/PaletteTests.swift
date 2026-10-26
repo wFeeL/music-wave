@@ -346,3 +346,198 @@ struct PaletteTests {
         #expect(ArtworkGlow.cornerRadius(body: 0) == 0)
     }
 }
+
+/// Цвет линии «Спектра» (`WavePaint.spectrumStops`): кольцо палитры вдоль частот, «Цвет по
+/// частотам» без резких краев и подсветка по высоте линии.
+struct SpectrumStopsTests {
+    private static func stops(
+        _ palette: [RGBColor], heights: [Float], level: Float = 1, time: Double = 0, profile: WaveProfile = .wing,
+        options: WavePaint.Options = .standard
+    ) -> [WavePaint.Stop] {
+        WavePaint.spectrumStops(
+            palette: palette, heights: heights, level: level, time: time, profile: profile, options: options
+        )
+    }
+
+    private static func flat(_ height: Float, count: Int = 64) -> [Float] {
+        [Float](repeating: height, count: count)
+    }
+
+    /// Расстояние от выреза (в панели от середины) для положения точки.
+    private static func distance(_ location: Double, _ profile: WaveProfile) -> Double {
+        profile == .wing ? location : abs(2 * location - 1)
+    }
+
+    /// Оттенок OKLab в градусах.
+    private static func hue(_ lab: OKLab) -> Float {
+        atan2(lab.b, lab.a) * 180 / .pi
+    }
+
+    private static func hueGap(_ x: Float, _ y: Float) -> Float {
+        let gap = abs(x - y).truncatingRemainder(dividingBy: 360)
+        return min(gap, 360 - gap)
+    }
+
+    /// 17 точек с шагом 1/16 и точки проявления у выреза и растворения у края; в панели то же от
+    /// середины к обоим краям.
+    @Test func locations() {
+        let wing = WavePaint.spectrumLocations(for: .wing)
+        #expect(wing == wing.sorted() && Set(wing).count == wing.count)
+        for k in 0...16 { #expect(wing.contains(Double(k) / 16)) }
+        for point in [0.01, 0.02, 0.04, 0.82, 0.86, 0.9, 0.95] { #expect(wing.contains(point)) }
+        #expect(wing.count == 24)
+        let panel = WavePaint.spectrumLocations(for: .panel)
+        #expect(panel == panel.sorted() && Set(panel).count == panel.count)
+        #expect(panel.count == 41)
+        for location in panel {
+            #expect(panel.contains { abs($0 - (1 - location)) < 1e-12 })
+        }
+        for k in 0...16 { #expect(panel.contains { abs($0 - (0.5 + Double(k) / 32)) < 1e-12 }) }
+        for profile in WaveProfile.allCases {
+            let result = Self.stops(PaletteExtractor.fallback, heights: Self.flat(0.5), profile: profile)
+            #expect(result.map(\.location) == WavePaint.spectrumLocations(for: profile))
+        }
+    }
+
+    /// Соседние точки близки в OKLab: на шаг цвет меняется не больше, чем позволяет smoothstep
+    /// (наклон до 1.5) на доле кольца `0.67 × Δu` между соседними цветами кольца, для любых
+    /// палитр, времени и обоих режимов.
+    @Test func colorsAreContinuous() {
+        let palettes = WavePreset.allCases.map(\.colors) + [PaletteExtractor.fallback]
+        for palette in palettes {
+            let ring = WavePaint.distinct(palette)
+            var widest: Float = 0
+            for index in ring.indices {
+                widest = max(widest, ring[index].distance(to: ring[(index + 1) % ring.count]))
+            }
+            for profile in WaveProfile.allCases {
+                for colorByBand in [false, true] {
+                    for time in [0.0, 3.7, 11.2] {
+                        let options = WavePaint.Options(colorByBand: colorByBand, flowPhase: colorByBand ? 0 : 0.3)
+                        let result = Self.stops(palette, heights: Self.flat(0.5), time: time, profile: profile, options: options)
+                        // «Цвет по частотам»: путь из двух отрезков на всю половину линии, без кольца.
+                        let rate = colorByBand ? Double(ring.count - 1) : 0.67 * Double(ring.count)
+                        for index in 1..<result.count {
+                            let step = abs(Self.distance(result[index].location, profile)
+                                - Self.distance(result[index - 1].location, profile))
+                            let bound = Float(1.5 * rate * step) * widest + 0.01
+                            let gap = result[index].color.oklab.distance(to: result[index - 1].color.oklab)
+                            #expect(gap <= bound, "\(palette) \(profile) \(colorByBand) t \(time) #\(index): \(gap) > \(bound)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Кольцо сдвигается на 0.05 в секунду плюс фаза переливания: через 20 с цвета те же, фаза
+    /// 0.25 равна 5 с времени.
+    @Test func ringShiftPeriod() {
+        let palette = WavePreset.rainbow.colors
+        for profile in WaveProfile.allCases {
+            let start = Self.stops(palette, heights: Self.flat(0.4), time: 2, profile: profile)
+            let later = Self.stops(palette, heights: Self.flat(0.4), time: 22, profile: profile)
+            let flowed = Self.stops(
+                palette, heights: Self.flat(0.4), time: 2, profile: profile, options: WavePaint.Options(flowPhase: 0.25)
+            )
+            let shifted = Self.stops(palette, heights: Self.flat(0.4), time: 7, profile: profile)
+            for index in start.indices {
+                #expect(start[index].color.oklab.distance(to: later[index].color.oklab) < 1e-3)
+                #expect(flowed[index].color.oklab.distance(to: shifted[index].color.oklab) < 1e-3)
+            }
+            // Через 5 с цвета другие: кольцо действительно плывет.
+            #expect(zip(start, shifted).contains { $0.color.oklab.distance(to: $1.color.oklab) > 0.05 })
+        }
+    }
+
+    /// Кольцо: у выреза (в панели в середине) в момент 0 первый цвет палитры, к краю цвета идут по
+    /// кольцу (0.67 кольца на половину линии), со временем плывут наружу.
+    @Test func ringStartsAtTheFirstColorAndFlowsOutward() {
+        let palette = WavePreset.rainbow.colors
+        let ring = WavePaint.distinct(palette)
+        let wing = Self.stops(palette, heights: Self.flat(0), time: 0)
+        #expect(Self.hueGap(Self.hue(wing[0].color.oklab), Self.hue(ring[0])) < 2)
+        // Точка u = 0.5: кольцо 0.335, чуть дальше второго цвета.
+        let middle = wing.first { $0.location == 0.5 }!
+        #expect(Self.hueGap(Self.hue(middle.color.oklab), Self.hue(ring[1])) < 15)
+        let panel = Self.stops(palette, heights: Self.flat(0, count: 224), time: 0, profile: .panel)
+        let center = panel.first { $0.location == 0.5 }!
+        #expect(Self.hueGap(Self.hue(center.color.oklab), Self.hue(ring[0])) < 2)
+        // Через секунду у выреза цвет, который был чуть внутрь кольца (u < 0): цвета плывут наружу,
+        // и точка u = 0.075 (0.05 кольца / 0.67) получает прежний цвет выреза.
+        let hue0 = Self.hue(wing[0].color.oklab)
+        let later = WavePaint.spectrumStops(
+            palette: palette, heights: Self.flat(0), level: 1, time: 1, profile: .wing, options: .standard
+        )
+        let moved = later.first { abs($0.location - 0.0625) < 1e-12 }!
+        #expect(Self.hueGap(Self.hue(moved.color.oklab), hue0) < 3, "\(Self.hue(moved.color.oklab)) vs \(hue0)")
+    }
+
+    /// «Цвет по частотам»: цвет баса у выреза, середины в середине, верха у края, от времени не
+    /// зависит, переходы на всю треть без краев.
+    @Test func colorByBandAnchors() {
+        let palette = WavePreset.rainbow.colors
+        let ring = WavePaint.distinct(palette)
+        let options = WavePaint.Options(colorByBand: true)
+        for time in [0.0, 6.3] {
+            let wing = Self.stops(palette, heights: Self.flat(0.3), time: time, options: options)
+            #expect(Self.hueGap(Self.hue(wing.first!.color.oklab), Self.hue(ring[0])) < 2)
+            #expect(Self.hueGap(Self.hue(wing.first { $0.location == 0.5 }!.color.oklab), Self.hue(ring[1])) < 2)
+            #expect(Self.hueGap(Self.hue(wing.last!.color.oklab), Self.hue(ring[2])) < 2)
+            let panel = Self.stops(palette, heights: Self.flat(0.3, count: 224), time: time, profile: .panel, options: options)
+            #expect(Self.hueGap(Self.hue(panel.first { $0.location == 0.5 }!.color.oklab), Self.hue(ring[0])) < 2)
+            #expect(Self.hueGap(Self.hue(panel.first!.color.oklab), Self.hue(ring[2])) < 2)
+            #expect(Self.hueGap(Self.hue(panel.last!.color.oklab), Self.hue(ring[2])) < 2)
+        }
+        let first = Self.stops(palette, heights: Self.flat(0.3), time: 0, options: options)
+        let second = Self.stops(palette, heights: Self.flat(0.3), time: 6.3, options: options)
+        #expect(first == second)
+    }
+
+    /// Подсветка по высоте: выше линия, тем светлее, насыщеннее и непрозрачнее точка; в тишине
+    /// прозрачность × 0.7, на полной высоте × 1.
+    @Test func levelTintIsMonotone() {
+        // Приглушенная палитра: подсветка не упирается в гамму sRGB.
+        let muted = [RGBColor(hex: 0x8A7F96), RGBColor(hex: 0x7F8F96), RGBColor(hex: 0x96887F)]
+        for palette in [muted, WavePreset.neon.colors, WavePreset.mono.colors] {
+            var previous: [WavePaint.Stop]?
+            for height in stride(from: Float(0), through: 1, by: 0.125) {
+                let result = Self.stops(palette, heights: Self.flat(height), time: 1.5)
+                if let previous {
+                    for index in result.indices {
+                        let now = result[index].color.oklab, before = previous[index].color.oklab
+                        #expect(now.l >= before.l - 1e-4, "\(height) #\(index)")
+                        #expect(result[index].opacity >= previous[index].opacity)
+                        if palette == muted {
+                            #expect(now.chroma >= before.chroma - 1e-4, "\(height) #\(index)")
+                        }
+                    }
+                }
+                previous = result
+            }
+        }
+        let low = Self.stops(muted, heights: Self.flat(0)), high = Self.stops(muted, heights: Self.flat(1))
+        for index in low.indices where low[index].opacity > 0 {
+            #expect(abs(high[index].opacity / low[index].opacity - 1 / 0.7) < 1e-4)
+        }
+        // Высота берется в своей точке: горб в середине крыла светлее краев.
+        let hump = (0..<64).map { Float(sin(Double.pi * Double($0) / 63)) }
+        let humped = Self.stops(muted, heights: hump)
+        let middle = humped.first { $0.location == 0.5 }!
+        let notch = humped.first!
+        #expect(middle.opacity > notch.opacity)
+    }
+
+    /// Плохой вход: пустая палитра дает запасную, пустые и не конечные высоты считаются нулем,
+    /// не конечное время дает сдвиг 0.
+    @Test func badInput() {
+        let fallback = Self.stops(PaletteExtractor.fallback, heights: Self.flat(0))
+        #expect(Self.stops([], heights: Self.flat(0)) == fallback)
+        #expect(Self.stops(PaletteExtractor.fallback, heights: []) == fallback)
+        #expect(Self.stops(PaletteExtractor.fallback, heights: Self.flat(.nan)) == fallback)
+        #expect(Self.stops(PaletteExtractor.fallback, heights: Self.flat(-3)) == fallback)
+        #expect(Self.stops(PaletteExtractor.fallback, heights: Self.flat(0), time: .nan) == fallback)
+        let single = Self.stops([RGBColor(hex: 0x40C0FF)], heights: Self.flat(0.5))
+        #expect(single.allSatisfy { $0.color.isFinite && $0.opacity.isFinite })
+    }
+}
