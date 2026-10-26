@@ -629,15 +629,24 @@ struct BeatTrackerTests {
 
     /// Близкая смена темпа, пока ФАПЧ отстала от долей (журнал 2: доли на 0.18 периода позже ФАПЧ,
     /// потом смена 77.9 -> 73.5 BPM): уверенность и захват остаются, фаза переходит к гребенке. Те же
-    /// доли на «и» (полпериода) это другая сетка, захват сбрасывается.
-    @Test(arguments: [(0.09, true), (0.25, false)])
-    func nearTempoMoveFollowsTheComb(shift: Double, carries: Bool) throws {
+    /// доли на «и» (полпериода) это другая сетка, захват сбрасывается. Если гребенка у старой фазы не
+    /// слабее с запасом (там осталась функция онсетов без онсетов), фаза не прыгает: захват остается на
+    /// ФАПЧ.
+    @Test(arguments: [(0.09, true, false), (0.25, false, false), (0.09, true, true)])
+    func nearTempoMoveFollowsTheComb(shift: Double, carries: Bool, oldPhaseStaysStrong: Bool) throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var hops = SyntheticBeats(bpm: 120)
         hops.feed(&tracker, until: 10)
         try #require(tracker.locked)
         // Доли сдвигаются позже окна совпадения (0.075 с): ФАПЧ их не видит, три промаха подряд.
+        let oldNext = hops.nextBeatTime
         hops.nextBeatTime += shift
+        if oldPhaseStaysStrong {
+            // Функция онсетов на старых долях (60, онсетов нет): гребенка у новой фазы сильнее, но без
+            // запаса `phaseJumpMargin`.
+            hops.offbeatODF = 60
+            hops.nextOffbeatTime = oldNext
+        }
         hops.feed(&tracker, until: 11.5)
         try #require(tracker.locked)
         let period = try #require(tracker.period)
@@ -645,6 +654,13 @@ struct BeatTrackerTests {
         tracker.updateTempo(TempoEstimate(period: period * 1.06, switched: true))
         let next = try #require(tracker.nextBeat)
         let newPeriod = try #require(tracker.period)
+        if oldPhaseStaysStrong {
+            // Фаза ФАПЧ осталась на старых долях 0.25 + k · 0.5 с.
+            let offset = BeatTracker.circularDifference(next - 0.25, period: 0.5)
+            #expect(abs(offset) < 0.03, "next beat \(next) left the PLL phase by \(offset)")
+            #expect(tracker.locked && tracker.confidence == confidence)
+            return
+        }
         // Доли сцены теперь на 0.25 + shift + k · 0.5 с. Сетка ставится от последней доли гребенки
         // с новым периодом, поэтому на долю сцены ложится доля перед `next`.
         let offset = BeatTracker.circularDifference(next - newPeriod - 0.25 - shift, period: 0.5)

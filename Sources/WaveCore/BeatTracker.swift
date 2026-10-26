@@ -396,10 +396,17 @@ public struct BeatTracker: Sendable {
         // заменять его (`beat-sync.md` 2.5).
         let previous = period
         period = estimate.period
-        let comb = phaseCandidate(period: estimate.period, current: estimate.switched ? nil : nextBeat)
+        // Оценка гребенки у фазы ФАПЧ нужна и при смене темпа (перенос с новой фазой, `carry`). Тогда
+        // она берется от последней прошедшей доли ФАПЧ: от будущей доли зубцы нового периода уходят
+        // назад мимо прошлых атак старого.
+        var current = nextBeat
+        if estimate.switched, let next = nextBeat, let previous, next > now {
+            current = next - previous
+        }
+        let comb = phaseCandidate(period: estimate.period, current: current)
         guard let nextBeat, !estimate.switched else {
             dropShadow()
-            if let nextBeat, let previous, let comb, carry(from: previous, next: nextBeat, comb: comb.time) { return }
+            if let nextBeat, let previous, let comb, carry(from: previous, next: nextBeat, comb: comb) { return }
             if nextBeat != nil { resetConfidence(.tempoSwitch) }
             if let comb { rephase(to: comb.time) }
             return
@@ -437,9 +444,13 @@ public struct BeatTracker: Sendable {
     /// 0.8456 -> 0.8462, вспышек с захватом мимо долей 863 -> 836. При половинном темпе гребенка
     /// выбирает, какая из двух долей остается; если не
     /// `nextBeat`, сетка начинается со следующей. При близком темпе гребенка дальше `phaseJump`, но
-    /// не дальше `carryPhase` периода, дает новую фазу с той же уверенностью. `true`, если смена
+    /// не дальше `carryPhase` периода, дает новую фазу с той же уверенностью, если оценка гребенки выше
+    /// оценки у фазы ФАПЧ больше чем на `phaseJumpMargin` (иначе фаза остается). `true`, если смена
     /// перенесена.
-    private mutating func carry(from previous: Double, next: Double, comb: Double) -> Bool {
+    private mutating func carry(
+        from previous: Double, next: Double, comb candidate: (time: Double, score: Double, currentScore: Double)
+    ) -> Bool {
+        let comb = candidate.time
         guard let period else { return false }
         let ratio = period / previous
         let tolerance = parameters.carryTolerance
@@ -449,7 +460,10 @@ public struct BeatTracker: Sendable {
         let modulus = min(period, previous)
         let offset = Self.circularDifference(comb - next, period: modulus)
         if near, abs(offset) > parameters.phaseJump * modulus, abs(offset) <= parameters.carryPhase * modulus {
-            rephase(to: comb)
+            // Новая фаза только с тем же запасом гребенки, что и обычный скачок; иначе фаза остается.
+            if candidate.score > (1 + parameters.phaseJumpMargin) * candidate.currentScore {
+                rephase(to: comb)
+            }
             disagreements = 0
             return true
         }
