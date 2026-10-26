@@ -43,14 +43,14 @@ public struct NotchLayout: Sendable, Equatable {
     /// Ширина крыла из настроек сейчас (ограничивается в `collapsedIsland`). По ней панель
     /// ровно такой ширины, какая нужна, а не под самое широкое крыло.
     public var wingWidth: CGFloat
-    /// «Радиус свечения» из настроек сейчас: по нему запас панели под свечение.
-    public var glowRadius: Double
+    /// «Размер свечения» из настроек сейчас: по нему запас панели под свечение.
+    public var glowSize: Double
 
     public init(
         screenID: UInt32, screenFrame: CGRect, hasNotch: Bool, notch: CGRect,
         wingLimit: CGFloat = NotchGeometry.maxWingWidth,
         wingWidth: CGFloat = CGFloat(WaveAppearance.standard.wingWidth),
-        glowRadius: Double = WaveAppearance.standard.glowRadius
+        glowSize: Double = WaveAppearance.standard.glowSize
     ) {
         self.screenID = screenID
         self.screenFrame = screenFrame
@@ -58,7 +58,7 @@ public struct NotchLayout: Sendable, Equatable {
         self.notch = notch
         self.wingLimit = wingLimit
         self.wingWidth = wingWidth
-        self.glowRadius = glowRadius
+        self.glowSize = glowSize
     }
 
     /// Свернутый остров: вырез плюс крылья по бокам, крыло не шире `wingLimit` и
@@ -159,7 +159,7 @@ public struct NotchLayout: Sendable, Equatable {
     }
 
     /// Рамка панели: раскрытый и свернутый остров с текущим крылом плюс запас снизу под
-    /// свечение текущего радиуса (`NotchGeometry.glowMargin(radius:)`), по бокам под тень и
+    /// свечение текущего размера (`NotchGeometry.glowMargin(size:)`), по бокам под тень и
     /// «вздох» и сверху под свечение обложки (`NotchGeometry.panelTopMargin`), не выходит за
     /// экран по горизонтали и за его верх. Баннер (`bannerFrame`) в объединении для надежности:
     /// он и так внутри раскрытого острова. Окно не больше, чем нужно сейчас: прозрачная площадь
@@ -167,7 +167,7 @@ public struct NotchLayout: Sendable, Equatable {
     /// и при настройках по умолчанию рамка та же, что в 0.9.0; у капсулы она выше на поле сверху.
     public var panelFrame: CGRect {
         let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth)).union(bannerFrame)
-        let glow = NotchGeometry.glowMargin(radius: glowRadius)
+        let glow = NotchGeometry.glowMargin(size: glowSize)
         let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
         let maxX = min(union.maxX + NotchGeometry.panelSideMargin, screenFrame.maxX)
         let minY = union.minY - glow
@@ -357,16 +357,16 @@ public enum NotchGeometry {
     /// Остров, верх которого не ниже верха экрана на эту величину, висит от верха экрана
     /// (`NotchLayout.swipeArea`). Капсула ниже на строку меню и зазор, много больше.
     static let screenTopTolerance: CGFloat = 0.5
-    /// Запас под панелью для свечения при «Радиусе свечения» 1× (как в 0.9.0): свечение
+    /// Запас под панелью для свечения при «Размере свечения» 1× (как в 0.9.0): свечение
     /// размыто на 14 pt и уходит ниже острова примерно на три радиуса размытия.
     public static let glowMargin: CGFloat = 40
 
-    /// Запас под свечение радиуса `radius`: `glowMargin × radius`, радиус в 1...3 (меньший
-    /// радиус окно не сужает, не конечный считается 1×). При 3× размытие 42 pt, свечение
+    /// Запас под свечение размера `size`: `glowMargin × size`, размер в 1...3 (меньший
+    /// размер окно не сужает, не конечный считается 1×). При 3× размытие 42 pt, свечение
     /// уходит ниже острова на 3 × 42 - 6 = 120 pt.
-    public static func glowMargin(radius: Double) -> CGFloat {
-        let radius = radius.isFinite ? min(max(radius, 1), WaveAppearance.Limits.glowRadius.upperBound) : 1
-        return glowMargin * CGFloat(radius)
+    public static func glowMargin(size: Double) -> CGFloat {
+        let size = size.isFinite ? min(max(size, 1), WaveAppearance.Limits.glowSize.upperBound) : 1
+        return glowMargin * CGFloat(size)
     }
     /// Запас панели по бокам: тень раскрытого острова и «вздох» не обрезаются краем окна.
     public static let panelSideMargin: CGFloat = 24

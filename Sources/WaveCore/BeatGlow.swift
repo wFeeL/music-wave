@@ -164,10 +164,22 @@ public struct BeatGlow: Sendable {
         return min(max(0.3 * period, 0.08), 0.18)
     }
 
+    /// Пределы «Длительности вспышки» (`decayScale`).
+    public static let decayScaleRange: ClosedRange<Double> = 0.5...2
+
+    /// Постоянная спада с множителем показа `scale` («Длительность вспышки»): `decay(period:) × scale`.
+    /// Множитель вне `decayScaleRange` ограничивается, нечисловой считается 1. Только показ: офлайн-цепочка,
+    /// проигрывание журнала и wave-eval зовут функции без множителя (1).
+    public static func decay(period: Double?, scale: Double) -> Double {
+        let scale = scale.isFinite ? min(max(scale, decayScaleRange.lowerBound), decayScaleRange.upperBound) : 1
+        return decay(period: period) * scale
+    }
+
     /// Свечение без памяти: только расписание и время кадра.
-    public static func value(at t: Double, schedule: BeatSchedule, refreshPeriod: Double) -> Float {
+    /// `decayScale`: множитель спада для показа (`decay(period:scale:)`), 1 это расчет без него.
+    public static func value(at t: Double, schedule: BeatSchedule, refreshPeriod: Double, decayScale: Double = 1) -> Float {
         guard t.isFinite else { return 0 }
-        let decay = decay(period: schedule.period)
+        let decay = decay(period: schedule.period, scale: decayScale)
         var glow: Float = 0
         for event in schedule.events where isValid(event) {
             let a = t - scheduledOrigin(of: event, refreshPeriod: refreshPeriod)
@@ -177,9 +189,10 @@ public struct BeatGlow: Sendable {
     }
 
     /// Свечение на кадре, показанном в момент `t`, с памятью о событиях прошлых кадров.
-    public mutating func value(at t: Double, schedule: BeatSchedule, refreshPeriod: Double) -> Float {
+    /// `decayScale`: множитель спада для показа (`decay(period:scale:)`), 1 это расчет без него.
+    public mutating func value(at t: Double, schedule: BeatSchedule, refreshPeriod: Double, decayScale: Double = 1) -> Float {
         guard t.isFinite else { return 0 }
-        let decay = Self.decay(period: schedule.period)
+        let decay = Self.decay(period: schedule.period, scale: decayScale)
         var glow: Float = 0
         for event in schedule.events where Self.isValid(event) {
             let scheduled = Self.scheduledOrigin(of: event, refreshPeriod: refreshPeriod)

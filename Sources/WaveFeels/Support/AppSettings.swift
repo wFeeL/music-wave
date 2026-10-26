@@ -30,7 +30,11 @@ final class AppSettings {
         static let showTrackBanner = "wf.showTrackBanner"
         static let paused = "wf.paused"
         static let colorMode = "wf.colorMode"
-        static let glowRadius = "wf.glowRadius"
+        static let glowSize = "wf.glowSize"
+        /// Ключ 1.2 («Радиус свечения»): только читается, пока нет `wf.glowSize`.
+        static let legacyGlowRadius = "wf.glowRadius"
+        static let glowSharpness = "wf.glowSharpness"
+        static let flashLength = "wf.flashLength"
         static let lineCount = "wf.lineCount"
         static let fill = "wf.fill"
         static let lineThickness = "wf.lineThickness"
@@ -56,6 +60,7 @@ final class AppSettings {
         static let glowIntensity: ClosedRange<Double> = 0...1
         static let hideDelay: ClosedRange<Double> = 1...30
         static let colorFlow = WaveAppearance.Limits.colorFlow
+        static let flashLength = BeatGlow.decayScaleRange
         static let expandDelay = IslandStateMachine.expandDelayRange
     }
 
@@ -73,7 +78,9 @@ final class AppSettings {
         static let showTrackBanner = true
         static let paused = false
         static let colorMode = WaveAppearance.standard.colorMode
-        static let glowRadius = WaveAppearance.standard.glowRadius
+        static let glowSize = WaveAppearance.standard.glowSize
+        static let glowSharpness = WaveAppearance.standard.glowSharpness
+        static let flashLength = 1.0
         static let lineCount = WaveAppearance.standard.lineCount
         static let fill = WaveAppearance.standard.fill
         static let lineThickness = WaveAppearance.standard.thickness
@@ -107,7 +114,9 @@ final class AppSettings {
     @ObservationIgnored private var storedShowTrackBanner: Bool
     @ObservationIgnored private var storedPaused: Bool
     @ObservationIgnored private var storedColorMode: WaveColorMode
-    @ObservationIgnored private var storedGlowRadius: Double
+    @ObservationIgnored private var storedGlowSize: Double
+    @ObservationIgnored private var storedGlowSharpness: Double
+    @ObservationIgnored private var storedFlashLength: Double
     @ObservationIgnored private var storedLineCount: Int
     @ObservationIgnored private var storedFill: Double
     @ObservationIgnored private var storedLineThickness: Double
@@ -159,10 +168,21 @@ final class AppSettings {
         storedColorMode = Self.sanitized(
             Self.readJSON(WaveColorMode.self, defaults, Key.colorMode) ?? Default.colorMode
         )
-        storedGlowRadius = Self.clamp(
-            Self.readDouble(defaults, Key.glowRadius) ?? Default.glowRadius,
-            WaveAppearance.Limits.glowRadius,
-            fallback: Default.glowRadius
+        // Размер берет сохраненный в 1.2 «Радиус свечения», пока своего значения нет.
+        storedGlowSize = Self.clamp(
+            Self.readDouble(defaults, Key.glowSize) ?? Self.readDouble(defaults, Key.legacyGlowRadius) ?? Default.glowSize,
+            WaveAppearance.Limits.glowSize,
+            fallback: Default.glowSize
+        )
+        storedGlowSharpness = Self.clamp(
+            Self.readDouble(defaults, Key.glowSharpness) ?? Default.glowSharpness,
+            WaveAppearance.Limits.glowSharpness,
+            fallback: Default.glowSharpness
+        )
+        storedFlashLength = Self.clamp(
+            Self.readDouble(defaults, Key.flashLength) ?? Default.flashLength,
+            Limits.flashLength,
+            fallback: Default.flashLength
         )
         storedLineCount = Self.clampLineCount(Self.readInt(defaults, Key.lineCount) ?? Default.lineCount)
         storedFill = Self.clamp(
@@ -499,9 +519,10 @@ final class AppSettings {
     /// Вид волн целиком из сохраненных значений (вкладка «Вид»). Только читает.
     var appearance: WaveAppearance {
         WaveAppearance(
-            wingWidth: wingWidth, colorMode: colorMode, glowRadius: glowRadius, lineCount: lineCount,
+            wingWidth: wingWidth, colorMode: colorMode, glowSize: glowSize, lineCount: lineCount,
             fill: fill, thickness: lineThickness, amplitude: waveAmplitude,
-            colorFlow: colorFlow, colorByBand: colorByBand, look: look
+            colorFlow: colorFlow, colorByBand: colorByBand, look: look,
+            glowSharpness: glowSharpness
         )
     }
 
@@ -521,17 +542,46 @@ final class AppSettings {
         }
     }
 
-    /// «Радиус свечения», множитель 0.5...3.
-    var glowRadius: Double {
+    /// «Размер свечения», множитель 0.5...3 (в 1.2 «Радиус свечения»: его сохраненное значение читается как размер).
+    var glowSize: Double {
         get {
-            access(keyPath: \.glowRadius)
-            return storedGlowRadius
+            access(keyPath: \.glowSize)
+            return storedGlowSize
         }
         set {
-            let value = Self.clamp(newValue, WaveAppearance.Limits.glowRadius, fallback: Default.glowRadius)
-            guard value != storedGlowRadius else { return }
-            withMutation(keyPath: \.glowRadius) { storedGlowRadius = value }
-            defaults.set(value, forKey: Key.glowRadius)
+            let value = Self.clamp(newValue, WaveAppearance.Limits.glowSize, fallback: Default.glowSize)
+            guard value != storedGlowSize else { return }
+            withMutation(keyPath: \.glowSize) { storedGlowSize = value }
+            defaults.set(value, forKey: Key.glowSize)
+        }
+    }
+
+    /// «Четкость свечения», доля 0...1 (размытие `WaveAppearance.glowBlurScale`).
+    var glowSharpness: Double {
+        get {
+            access(keyPath: \.glowSharpness)
+            return storedGlowSharpness
+        }
+        set {
+            let value = Self.clamp(newValue, WaveAppearance.Limits.glowSharpness, fallback: Default.glowSharpness)
+            guard value != storedGlowSharpness else { return }
+            withMutation(keyPath: \.glowSharpness) { storedGlowSharpness = value }
+            defaults.set(value, forKey: Key.glowSharpness)
+        }
+    }
+
+    /// «Длительность вспышки», множитель спада свечения 0.5...2 (`BeatGlow.decay(period:scale:)`).
+    /// Только показ: ритм и его журнал считаются со спадом 1×.
+    var flashLength: Double {
+        get {
+            access(keyPath: \.flashLength)
+            return storedFlashLength
+        }
+        set {
+            let value = Self.clamp(newValue, Limits.flashLength, fallback: Default.flashLength)
+            guard value != storedFlashLength else { return }
+            withMutation(keyPath: \.flashLength) { storedFlashLength = value }
+            defaults.set(value, forKey: Key.flashLength)
         }
     }
 

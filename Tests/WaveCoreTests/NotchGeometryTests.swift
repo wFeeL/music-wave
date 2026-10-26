@@ -257,7 +257,7 @@ struct NotchGeometryTests {
         #expect(NotchGeometry.glowMargin == 40)
         let layout = try #require(NotchGeometry.layout(for: [notched()]))
         #expect(layout.wingWidth == 64)
-        #expect(layout.glowRadius == 1)
+        #expect(layout.glowSize == 1)
         let panel = layout.panelFrame
         #expect(panel.size == CGSize(width: 534, height: 210))
         #expect(panel.midX == layout.notch.midX)
@@ -266,7 +266,7 @@ struct NotchGeometryTests {
         // Узкий радиус окно не сужает, мусор считается 1×.
         for radius in [0.5, -1, .nan, .infinity] {
             var other = layout
-            other.glowRadius = radius
+            other.glowSize = radius
             #expect(other.panelFrame == panel, "радиус \(radius)")
         }
         // Крыло до 150 pt уже раскрытого острова: ширина та же.
@@ -287,7 +287,7 @@ struct NotchGeometryTests {
                 for radius in [1.0, 3.0] {
                     var layout = try #require(NotchGeometry.layout(for: [screen]))
                     layout.wingWidth = wing
-                    layout.glowRadius = radius
+                    layout.glowSize = radius
                     let blur = CGFloat(2 * ArtworkGlow.blur)
                     let extent = ArtworkGlow.halo(around: layout.expandedClickArea).insetBy(dx: -blur, dy: -blur)
                     #expect(
@@ -307,14 +307,14 @@ struct NotchGeometryTests {
     /// три радиуса минус подъем 6 pt.
     @Test func panelFrameFitsTripleGlow() throws {
         var layout = try #require(NotchGeometry.layout(for: [notched()]))
-        layout.glowRadius = 3
+        layout.glowSize = 3
         let panel = layout.panelFrame
         let blur: CGFloat = 14 * 3
         #expect(layout.expandedIsland.minY - panel.minY >= 3 * blur - 6)
         #expect(panel.minY == layout.expandedIsland.minY - 120)
         #expect(panel.maxY == 956)
         #expect(panel.width == 534)
-        layout.glowRadius = 9
+        layout.glowSize = 9
         #expect(layout.panelFrame == panel)
     }
 

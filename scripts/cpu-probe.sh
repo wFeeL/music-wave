@@ -8,9 +8,9 @@
 # com.wfeels.wavefeels.benchmark (--settings-suite), поэтому числа сравнимы между маками и
 # коммитами. Перед замером набор удаляется целиком и заполняется заново через `defaults write`
 # (настройки кэширует cfprefsd, поэтому файл plist напрямую не правится):
-#   default: вид 1.1 по умолчанию (линий 3, заливка 0, радиус свечения 1, свечение 0.6, крылья 64,
+#   default: вид 1.1 по умолчанию (линий 3, заливка 0, размер свечения 1, свечение 0.6, крылья 64,
 #            толщина 1, амплитуда 1); предел play 15 %, итог в cpu.txt;
-#   max:     верхние границы диапазонов (линий 6, заливка 1, радиус свечения 3, свечение 1, крылья
+#   max:     верхние границы диапазонов (линий 6, заливка 1, размер свечения 3, свечение 1, крылья
 #            200, толщина 2, амплитуда 2, переливание 1); предел play 20 %, итог в cpu-max.txt;
 #   user:    настройки владельца: все ключи wf.* из com.wfeels.wavefeels (`defaults export`, из
 #            словаря остаются только они, затем `defaults import`), пауза выключается
@@ -249,19 +249,19 @@ fi
 # возвращает ошибку. Числа пишутся как -float и -int: AppSettings читает их через
 # `double(forKey:)` и NSNumber и ограничивает теми же диапазонами, что и ползунки.
 write_preset() {
-    local lines fill radius glow wings thickness amplitude flow
+    local lines fill size glow wings thickness amplitude flow
     if [[ $PRESET == user ]]; then
         copy_user_settings || return 1
     else
         if [[ $PRESET == max ]]; then
-            lines=6 fill=1 radius=3 glow=1 wings=200 thickness=2 amplitude=2 flow=1
+            lines=6 fill=1 size=3 glow=1 wings=200 thickness=2 amplitude=2 flow=1
         else
-            lines=3 fill=0 radius=1 glow=0.6 wings=64 thickness=1 amplitude=1 flow=0
+            lines=3 fill=0 size=1 glow=0.6 wings=64 thickness=1 amplitude=1 flow=0
         fi
         defaults delete "$SUITE" > /dev/null 2>&1
         defaults write "$SUITE" wf.lineCount -int "$lines" &&
             defaults write "$SUITE" wf.fill -float "$fill" &&
-            defaults write "$SUITE" wf.glowRadius -float "$radius" &&
+            defaults write "$SUITE" wf.glowSize -float "$size" &&
             defaults write "$SUITE" wf.glowIntensity -float "$glow" &&
             defaults write "$SUITE" wf.wingWidth -float "$wings" &&
             defaults write "$SUITE" wf.lineThickness -float "$thickness" &&

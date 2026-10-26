@@ -16,7 +16,7 @@ struct SettingsTextTests {
     @Test func hiddenRowsMatchDrawing() {
         for look in WaveLook.allCases {
             let two = WaveAppearance(
-                wingWidth: 64, colorMode: .artwork, glowRadius: 1, lineCount: 2, fill: 0.5, thickness: 1,
+                wingWidth: 64, colorMode: .artwork, glowSize: 1, lineCount: 2, fill: 0.5, thickness: 1,
                 amplitude: 1, look: look
             )
             var five = two
@@ -24,7 +24,12 @@ struct SettingsTextTests {
             let countMatters = two.lines(for: .wing) != five.lines(for: .wing)
                 || two.lines(for: .panel) != five.lines(for: .panel)
             #expect(look.usesLineCount == countMatters, "\(look): количество волн")
-            #expect(two.fill > 0, "\(look): заливка")
+            // Заливка рисуется у обоих стилей: она добавляет работу кадру и на острове, и на панели.
+            var unfilled = two
+            unfilled.fill = 0
+            for profile in [WaveProfile.wing, .panel] {
+                #expect(two.renderCost(for: profile) > unfilled.renderCost(for: profile), "\(look) \(profile): заливка")
+            }
         }
     }
 
@@ -70,6 +75,16 @@ struct SettingsTextTests {
         #expect(SettingsText.seconds(.nan) == "0 с")
     }
 
+    @Test func flashLengthHintNamesShortAndLong() {
+        #expect(SettingsText.flashLengthHint(scale: 0.5) == "Короткие вспышки")
+        #expect(SettingsText.flashLengthHint(scale: 0.9) == "Короткие вспышки")
+        #expect(SettingsText.flashLengthHint(scale: 1) == "Обычные вспышки")
+        #expect(SettingsText.flashLengthHint(scale: 0.96) == "Обычные вспышки")
+        #expect(SettingsText.flashLengthHint(scale: 1.1) == "Длинные вспышки")
+        #expect(SettingsText.flashLengthHint(scale: 2) == "Длинные вспышки")
+        #expect(SettingsText.flashLengthHint(scale: .nan) == "Обычные вспышки")
+    }
+
     @Test func autoSourceCaption() {
         #expect(SettingsText.autoSource(enabled: false, current: "Safari")
             == "Волны переходят к приложению, которое начало играть")
@@ -81,6 +96,8 @@ struct SettingsTextTests {
     @Test func textsAvoidForbiddenCharacters() {
         let texts = [
             SettingsText.colorFlow(speed: 0), SettingsText.colorFlow(speed: 0.5), SettingsText.seconds(0.15),
+            SettingsText.flashLengthHint(scale: 0.5), SettingsText.flashLengthHint(scale: 1),
+            SettingsText.flashLengthHint(scale: 2),
             SettingsText.autoSource(enabled: false, current: "X"), SettingsText.autoSource(enabled: true, current: "X"),
         ]
         for text in texts {

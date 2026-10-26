@@ -8,7 +8,7 @@ import WaveCore
 ///
 /// Экраны. Вырез пересчитывается при смене параметров экранов и после пробуждения экранов,
 /// заодно модель получает период кадра экрана острова (`AppModel.refreshPeriod`). Рамка панели
-/// идет от текущих ширины крыла и «Радиуса свечения» (`NotchLayout.panelFrame`), а не от самых
+/// идет от текущих ширины крыла и «Размера свечения» (`NotchLayout.panelFrame`), а не от самых
 /// больших: прозрачная площадь окна тоже стоит времени композитору. Смена любой из двух
 /// настроек сразу переставляет панель.
 /// Остров стоит только на встроенном экране с вырезом; если его нет (внешний монитор при
@@ -69,7 +69,7 @@ final class NotchWindowController {
     /// Первая прокрутка над островом с показа панели уже записана в лог: по монитору.
     private var loggedGlobalScroll = false
     private var loggedLocalScroll = false
-    /// Номер подписки на ширину крыла, радиус свечения и свайп; `stop()` его меняет, и старая
+    /// Номер подписки на ширину крыла, размер свечения и свайп; `stop()` его меняет, и старая
     /// подписка больше не продлевается.
     private var settingsGeneration = 0
 
@@ -144,7 +144,7 @@ final class NotchWindowController {
         }
 
         newLayout.wingWidth = CGFloat(model.settings.wingWidth)
-        newLayout.glowRadius = model.settings.glowRadius
+        newLayout.glowSize = model.settings.glowSize
         // Период до нового острова: вид с новой рамкой сразу берет частоту кадров нового экрана.
         // Без смены рамки (у экрана сменилась частота) остров пересчитывается по наблюдению
         // за `AppModel.refreshPeriod`.
@@ -213,7 +213,7 @@ final class NotchWindowController {
         }
     }
 
-    /// Следит за шириной крыла, радиусом свечения и свайпом. `onChange` приходит до записи
+    /// Следит за шириной крыла, размером свечения и свайпом. `onChange` приходит до записи
     /// нового значения, поэтому панель переставляется (и мониторы прокрутки ставятся или
     /// снимаются) в следующем шаге главного актора; там же подписка продлевается, пока
     /// `generation` не устарел.
@@ -222,7 +222,7 @@ final class NotchWindowController {
         let settings = model.settings
         withObservationTracking {
             _ = settings.wingWidth
-            _ = settings.glowRadius
+            _ = settings.glowSize
             _ = settings.trackSwipe
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -235,7 +235,7 @@ final class NotchWindowController {
         guard isShown, generation == settingsGeneration else { return }
         if var updated = layout {
             updated.wingWidth = CGFloat(model.settings.wingWidth)
-            updated.glowRadius = model.settings.glowRadius
+            updated.glowSize = model.settings.glowSize
             if updated != layout {
                 place(updated)
                 updatePointer()

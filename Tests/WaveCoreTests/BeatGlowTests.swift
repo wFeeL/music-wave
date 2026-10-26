@@ -20,6 +20,51 @@ struct BeatGlowTests {
         #expect(BeatGlow.decay(period: nil) == 0.12)
     }
 
+    /// «Длительность вспышки»: множитель 2 дает вдвое больший спад на том же периоде, предел 0.5...2,
+    /// нечисловой считается 1.
+    @Test func decayScaleStretchesTheDecay() {
+        for period in [0.2, 0.5, 1.0] as [Double] {
+            #expect(abs(BeatGlow.decay(period: period, scale: 2) - 2 * BeatGlow.decay(period: period)) < 1e-12)
+            #expect(abs(BeatGlow.decay(period: period, scale: 0.5) - 0.5 * BeatGlow.decay(period: period)) < 1e-12)
+            #expect(BeatGlow.decay(period: period, scale: 1) == BeatGlow.decay(period: period))
+        }
+        #expect(BeatGlow.decay(period: nil, scale: 9) == 2 * BeatGlow.decay(period: nil))
+        #expect(BeatGlow.decay(period: 0.5, scale: 0.01) == 0.5 * BeatGlow.decay(period: 0.5))
+        #expect(BeatGlow.decay(period: 0.5, scale: .nan) == BeatGlow.decay(period: 0.5))
+    }
+
+    /// Через одну двойную постоянную спада яркость падает в e раз; без множителя расчет прежний.
+    @Test func decayScaleOnlyChangesTheTail() {
+        let schedule = Self.schedule([Self.event(id: 1, time: 10)])
+        let start = 10.0 - 0.015 - Self.refresh / 2
+        let slow = BeatGlow.value(at: start + 0.3, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 2)
+        #expect(abs(slow - Float(exp(-1.0))) < 1e-4)
+        for offset in [-0.01, 0, 0.05, 0.15, 0.4] as [Double] {
+            let plain = BeatGlow.value(at: start + offset, schedule: schedule, refreshPeriod: Self.refresh)
+            let one = BeatGlow.value(at: start + offset, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 1)
+            #expect(plain == one)
+        }
+        var memory = BeatGlow()
+        _ = memory.value(at: start - 0.05, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 2)
+        let mutating = memory.value(at: start + 0.3, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 2)
+        #expect(abs(mutating - Float(exp(-1.0))) < 1e-4)
+    }
+
+    /// Расчет со стандартным множителем (то, что считают офлайн-цепочка, прогон журнала и wave-eval)
+    /// не отличается от расчета без аргумента на последовательности кадров с памятью.
+    @Test func defaultDecayScaleKeepsReplayFlashes() {
+        let events = (0..<6).map { Self.event(id: UInt64($0), time: 10 + 0.5 * Double($0)) }
+        var plain = BeatGlow()
+        var explicit = BeatGlow()
+        for frame in 0..<240 {
+            let t = 9.9 + Double(frame) * Self.refresh
+            let schedule = Self.schedule(events)
+            let first = plain.value(at: t, schedule: schedule, refreshPeriod: Self.refresh)
+            let second = explicit.value(at: t, schedule: schedule, refreshPeriod: Self.refresh, decayScale: 1)
+            #expect(first == second)
+        }
+    }
+
     @Test func peaksAtLeadTime() {
         let schedule = Self.schedule([Self.event(id: 1, time: 10)])
         let peak = BeatGlow.value(at: 10.0 - 0.015 - Self.refresh / 2, schedule: schedule, refreshPeriod: Self.refresh)

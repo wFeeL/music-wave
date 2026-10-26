@@ -214,6 +214,8 @@ final class AppModel {
     /// Пружина «вздоха» и свечение доли с памятью о вспышках прошлых кадров.
     @ObservationIgnored private var pulse = BeatPulse()
     @ObservationIgnored private var glowState = BeatGlow()
+    /// То же свечение со спадом 1× («Длительность вспышки» не влияет): его видят запись ритма и «вздох».
+    @ObservationIgnored private var steadyGlowState = BeatGlow()
     /// Снимки: свечение и «вздох», заданные `showPreview`.
     @ObservationIgnored private var previewGlow: Float = 0
     @ObservationIgnored private var previewPulse: Float = 0
@@ -1551,16 +1553,23 @@ final class AppModel {
         paletteFlow.advance(dt: dt, speed: flowSpeed)
 
         var glow: Float = 0
+        var steadyGlow: Float = 0
         var breath: Float = 0
         var ambient: Float = 0
         var shownSchedule: BeatSchedule?
         if !reduceMotion {
             let schedule = store.schedule
             shownSchedule = schedule
-            glow = glowState.value(at: presented, schedule: schedule, refreshPeriod: period)
+            // «Длительность вспышки» растягивает только показанное свечение. Запись ритма и «вздох»
+            // идут от свечения со спадом 1× (второе состояние с памятью, оба считаются на каждом кадре,
+            // чтобы смена настройки не начинала память с нуля).
+            steadyGlow = steadyGlowState.value(at: presented, schedule: schedule, refreshPeriod: period)
+            glow = glowState.value(
+                at: presented, schedule: schedule, refreshPeriod: period, decayScale: settings.flashLength
+            )
             let early = BeatGlow.value(at: presented + Self.breathLead, schedule: schedule, refreshPeriod: period)
             let spring = pulse.step(beat: early, dt: dt)
-            breath = BeatPulse.breath(spring: spring, glow: glow, weight: schedule.weight)
+            breath = BeatPulse.breath(spring: spring, glow: steadyGlow, weight: schedule.weight)
             if settings.softPulse {
                 // Энергия из кадра на момент показа (слышимая ось), сетка из расписания.
                 ambient = BeatGlow.ambient(at: presented, info: schedule.ambient, frame: sampled)
@@ -1568,7 +1577,7 @@ final class AppModel {
         }
         // Свечение и пульс расписания до мягкой остановки: их пишет запись ритма, чтобы сверка
         // синхронизации видела цепочку ритма, а не угасание на паузе.
-        let beatGlow = glow
+        let beatGlow = steadyGlow
         let beatAmbient = ambient
         // Полосы кадра анализа: `SoftStop` пишет в массив, только когда значение меняется (кадры
         // угасания, где пол выше входа), тогда массив копируется один раз на кадр. Пока звук идет и
@@ -1892,6 +1901,7 @@ extension AppModel {
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
             glowIntensity: settings.glowIntensity,
             beatPulse: settings.beatPulse,
+            flashLength: settings.flashLength,
             softPulse: settings.softPulse,
             lowPower: lowPower
         )

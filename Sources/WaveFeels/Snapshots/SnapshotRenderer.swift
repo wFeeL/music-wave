@@ -32,7 +32,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// предпросмотр вкладки «Вид» (`PreviewPlayer.seed`), поэтому и на ее снимке идут волны.
 /// Тишина получается так же: после 6 с звук обнуляется, и волны затихают 2 с.
 /// Снимки 14-19 показывают вид волн из вкладки «Вид»: широкие крылья, готовые палитры, свой
-/// цвет, полную заливку (обычную и с толщиной и размахом), одну и шесть волн, свечение радиусом 3×.
+/// цвет, полную заливку (обычную и с толщиной и размахом), одну и шесть волн, свечение размером 3×.
 /// Снимки 21 показывают открытый баннер нового трека: у выреза темный и светлый, с длинным
 /// названием, без обложки, на капсуле и с крыльями 200 pt (свернутый остров 585 pt шире баннера
 /// 400 pt).
@@ -45,7 +45,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// обложки и мягкая остановка выключены, опции экрана обычные, фаза переливания 0.
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
-    /// Размер экрана снимка, pt: панель с крыльями 200 pt и свечением радиусом 3× целиком.
+    /// Размер экрана снимка, pt: панель с крыльями 200 pt и свечением размером 3× целиком.
     static let screenSize = CGSize(width: 760, height: 300)
     static let notchSize = CGSize(width: 185, height: 32)
     /// Строка меню внешнего монитора без выреза.
@@ -156,7 +156,7 @@ enum SnapshotRenderer {
     /// «Высокая нагрузка на процессор») и крыло шире предела экрана `tallWingLimit` (подпись
     /// «ограничено до 160 pt»).
     static let tallAppearance = WaveAppearance(
-        wingWidth: 200, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowRadius: 2,
+        wingWidth: 200, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowSize: 2,
         lineCount: 6, fill: 0.5, thickness: 1.5, amplitude: 1.5
     )
     /// Предел крыла экрана на снимке самого высокого «Вида», pt: уже `tallAppearance.wingWidth`.
@@ -306,7 +306,7 @@ enum SnapshotRenderer {
             ),
             SnapshotScene(
                 name: "19-glow-radius-3x", state: .collapsed, moment: loudBeat, palette: fallback,
-                appearance: look { $0.glowRadius = 3 }
+                appearance: look { $0.glowSize = 3 }
             ),
         ]
         let scenes: [SnapshotScene] = [
@@ -464,7 +464,8 @@ enum SnapshotRenderer {
     private static func apply(_ appearance: WaveAppearance, to settings: AppSettings) {
         settings.wingWidth = appearance.wingWidth
         settings.colorMode = appearance.colorMode
-        settings.glowRadius = appearance.glowRadius
+        settings.glowSize = appearance.glowSize
+        settings.glowSharpness = appearance.glowSharpness
         settings.lineCount = appearance.lineCount
         settings.fill = appearance.fill
         settings.lineThickness = appearance.thickness
@@ -506,10 +507,10 @@ enum SnapshotRenderer {
             displayOptions: scene.displayOptions,
             flowPhase: scene.flowPhase
         )
-        // Рамка панели по крылу и радиусу свечения сцены, как у окна в работе.
+        // Рамка панели по крылу и размеру свечения сцены, как у окна в работе.
         var sized = scene.pill ? pillLayout : notchLayout
         sized.wingWidth = CGFloat(scene.appearance.wingWidth)
-        sized.glowRadius = scene.appearance.glowRadius
+        sized.glowSize = scene.appearance.glowSize
         let layout = sized
         let time = moment.time
         let content = SnapshotBackdrop(

@@ -292,7 +292,7 @@ struct IslandView: View {
             ) {
                 BeatGlowView(
                     geometry: geometry, state: state, scale: scale, glow: breath.glow, ambient: visuals.ambient,
-                    intensity: glow, radius: appearance.glowRadius,
+                    intensity: glow, size: appearance.glowSize, blurScale: appearance.glowBlurScale,
                     color: visuals.glowSourceColor, banner: bannerVisible
                 )
             }

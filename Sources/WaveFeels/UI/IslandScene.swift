@@ -98,9 +98,9 @@ struct IslandBodyView: View, Equatable {
 /// текстура): по ней маска продолжает идти за формой, и входящий слой открывается ее краем, как
 /// если бы стоял целиком. Холсты входят в живой слой без перехода, их проявляет прозрачность
 /// оболочки под той же пружиной. Каждый прямоугольник волн рисуется своей
-/// текстурой (`drawingGroup`) с полем `glowMargin` × «Радиус свечения» (не меньше 1×) под
+/// текстурой (`drawingGroup`) с полем `glowMargin` × «Размер свечения» (не меньше 1×) под
 /// размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
-/// Число линий, заливка, толщина, размах и радиус свечения линий берутся из `appearance`; без
+/// Число линий, заливка, толщина, размах, размер и четкость свечения линий берутся из `appearance`; без
 /// прохода свечения (`WaveAppearance.glowPass`, режим энергосбережения) размытой копии линий нет.
 ///
 /// На паузе полоса панели сначала затихает в линию (около секунды), затем гаснет до 15 %.
@@ -111,8 +111,9 @@ struct IslandBodyView: View, Equatable {
 /// `bannerLayer`). Без «Уменьшения движения» все слои обрезаются текущей формой (она перетекает
 /// из свернутой в баннер), с ним у каждого слоя своя форма и меняется только прозрачность.
 struct IslandWavesView: View {
-    /// Свечение линий: размытая копия основных волн, радиус размытия × «Радиус свечения».
-    /// Выше 1× яркость умножается на корень из радиуса: иначе широкий ореол тусклее, чем при 1×.
+    /// Свечение линий: размытая копия основных волн, радиус размытия × «Размер свечения» ×
+    /// `WaveAppearance.glowBlurScale` («Четкость свечения»). Выше 1× яркость умножается на корень из
+    /// размера: иначе широкий ореол тусклее, чем при 1×.
     static let glowBlur: CGFloat = 2
     static let glowOpacity = 0.25
     /// Поле текстуры вокруг прямоугольника волн: под размытую копию линий и точку удара.
@@ -243,8 +244,9 @@ struct IslandWavesView: View {
     private func waveLayer(
         _ waves: WaveSet?, rect: CGRect, mirrored: Bool, maskBanner: Bool, accent: CGPoint? = nil
     ) -> some View {
-        let radius = CGFloat(appearance.glowRadius)
-        let margin = Self.glowMargin * max(radius, 1)
+        let size = CGFloat(appearance.glowSize)
+        let blurScale = CGFloat(appearance.glowBlurScale)
+        let margin = Self.glowMargin * max(size, 1)
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
         return ZStack(alignment: .topLeading) {
             ZStack {
@@ -253,8 +255,8 @@ struct IslandWavesView: View {
                 if let waves {
                     if glow > 0 && appearance.glowPass {
                         WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
-                            .blur(radius: Self.glowBlur * radius)
-                            .opacity(min(Self.glowOpacity * glow * Double(max(radius, 1)).squareRoot(), 1))
+                            .blur(radius: Self.glowBlur * size * blurScale)
+                            .opacity(min(Self.glowOpacity * glow * Double(max(size, 1)).squareRoot(), 1))
                             .blendMode(.plusLighter)
                             .transition(.identity)
                     }
@@ -300,13 +302,12 @@ struct IslandWavesView: View {
 /// Мягкое свечение цвета `color`, поднятого до светлого и насыщенного, под нижним краем
 /// острова. Яркость по большему из свечения доли `glow` и мягкого пульса `ambient` (`brightness`)
 /// с пиком 0.45 на темной строке меню и 0.25 на светлой при яркости по умолчанию, у раскрытой
-/// панели и баннера втрое слабее. Размытие и высота эллипса растут с «Радиусом свечения».
+/// панели и баннера втрое слабее. Высота и ширина эллипса растут с «Размером свечения», размытие с размером и растет при меньшей «Четкости свечения».
 /// Рисуется поверх строки меню само, вне текстур волн; когда его почти не видно (`isVisible` по
 /// `brightness`), его не строят.
 struct BeatGlowView: View {
-    /// Размытие и высота эллипса при радиусе 1×.
+    /// Размытие и высота эллипса при размере 1× и четкости по умолчанию (размытие как в 1.2).
     static let blur: CGFloat = 14
-    static let widthFraction: CGFloat = 0.7
     static let height: CGFloat = 16
     /// На сколько центр свечения выше нижнего края острова.
     static let lift: CGFloat = 6
@@ -328,8 +329,10 @@ struct BeatGlowView: View {
     var ambient: Float = 0
     /// Яркость свечения из настроек.
     let intensity: Double
-    /// «Радиус свечения» из настроек, множитель.
-    let radius: Double
+    /// «Размер свечения» из настроек, множитель.
+    let size: Double
+    /// Множитель размытия по «Четкости свечения» (`WaveAppearance.glowBlurScale`), 1 при четкости по умолчанию.
+    let blurScale: Double
     let color: PaletteColor
     /// Свернутый остров показывает баннер нового трека.
     var banner = false
@@ -353,13 +356,13 @@ struct BeatGlowView: View {
         let panelLike = state == .expanded || (banner && state == .collapsed)
         let expanded = panelLike ? Self.expandedFactor : 1
         let opacity = min(Double(Self.brightness(glow: glow, ambient: ambient)) * peak * relative * expanded, 1)
-        let width = rect.width * Self.widthFraction
-        let height = Self.height * CGFloat(radius)
+        let width = rect.width * CGFloat(WaveAppearance.glowSpotWidthFraction(size: size))
+        let height = Self.height * CGFloat(size)
         let bottom = anchorY + (rect.maxY - anchorY) * scale
         Ellipse()
             .fill(Color(palette: WavePaint.glowColor(color)))
             .frame(width: width, height: height)
-            .blur(radius: Self.blur * CGFloat(radius))
+            .blur(radius: Self.blur * CGFloat(size) * CGFloat(blurScale))
             .opacity(opacity)
             .offset(x: rect.midX - width / 2, y: bottom - Self.lift - height / 2)
     }

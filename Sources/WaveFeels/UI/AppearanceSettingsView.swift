@@ -188,10 +188,23 @@ struct AppearanceSettingsView: View {
             text: "\(Int((settings.glowIntensity * 100).rounded())) %"
         )
         SettingsSliderRow(
-            "Радиус свечения",
-            value: Binding(get: { settings.glowRadius }, set: { settings.glowRadius = ($0 * 10).rounded() / 10 }),
-            in: WaveAppearance.Limits.glowRadius,
-            text: SettingsView.multiplier(Float(settings.glowRadius))
+            "Размер свечения",
+            value: Binding(get: { settings.glowSize }, set: { settings.glowSize = ($0 * 10).rounded() / 10 }),
+            in: WaveAppearance.Limits.glowSize,
+            text: SettingsView.multiplier(Float(settings.glowSize))
+        )
+        SettingsSliderRow(
+            "Четкость свечения",
+            value: Binding(get: { settings.glowSharpness }, set: { settings.glowSharpness = ($0 * 20).rounded() / 20 }),
+            in: WaveAppearance.Limits.glowSharpness,
+            text: "\(Int((settings.glowSharpness * 100).rounded())) %"
+        )
+        SettingsSliderRow(
+            "Длительность вспышки",
+            subtitle: SettingsText.flashLengthHint(scale: settings.flashLength),
+            value: Binding(get: { settings.flashLength }, set: { settings.flashLength = ($0 * 10).rounded() / 10 }),
+            in: AppSettings.Limits.flashLength,
+            text: SettingsView.multiplier(Float(settings.flashLength))
         )
     }
 

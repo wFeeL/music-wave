@@ -83,6 +83,9 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var glowIntensity: Double
         /// «Вздох» острова в такт доле включен.
         public var beatPulse: Bool
+        /// «Длительность вспышки» (множитель спада показа, `BeatGlow.decay(period:scale:)`): только показ,
+        /// вспышки записи и прогон журнала считаются со спадом 1×. В журналах до 1.3 поля нет (`nil`, то есть 1).
+        public var flashLength: Double?
         /// «Мягкий пульс» включен; в журналах до 1.2 поля нет (`nil`).
         public var softPulse: Bool?
         /// Режим энергосбережения в начале записи (рендер до 30 кадров в секунду, облегченный вид).
@@ -121,6 +124,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             reduceMotion: Bool = false,
             glowIntensity: Double = 1,
             beatPulse: Bool = true,
+            flashLength: Double? = nil,
             softPulse: Bool? = nil,
             lowPower: Bool = false,
             clippedSamples: Int = 0,
@@ -147,6 +151,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.reduceMotion = reduceMotion
             self.glowIntensity = glowIntensity
             self.beatPulse = beatPulse
+            self.flashLength = flashLength
             self.softPulse = softPulse
             self.lowPower = lowPower
             self.clippedSamples = clippedSamples

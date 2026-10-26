@@ -60,6 +60,9 @@ struct AppSettingsTests {
             #expect(settings.showTrackBanner == true)
             #expect(settings.paused == false)
             #expect(settings.look == .waves)
+            #expect(settings.glowSize == 1)
+            #expect(settings.glowSharpness == 0.4)
+            #expect(settings.flashLength == 1)
             #expect(settings.colorFlow == 0)
             #expect(settings.colorByBand == false)
             #expect(settings.softStop == true)
@@ -431,7 +434,7 @@ extension AppSettingsTests {
             var expected = WaveAppearance.standard
             expected.wingWidth = 150
             expected.colorMode = .preset(.ocean)
-            expected.glowRadius = 2
+            expected.glowSize = 2
             expected.lineCount = 4
             expected.fill = 0.5
             expected.thickness = 1.5
@@ -496,7 +499,9 @@ extension AppSettingsTests {
             let written = AppSettings(defaults: defaults)
             written.wingWidth = 180
             written.colorMode = .custom(PaletteColor(hex: 0x7A5CFF))
-            written.glowRadius = 2.5
+            written.glowSize = 2.5
+            written.glowSharpness = 0.7
+            written.flashLength = 1.5
             written.lineCount = 5
             written.fill = 0.4
             written.lineThickness = 1.5
@@ -506,7 +511,7 @@ extension AppSettingsTests {
             written.colorByBand = true
 
             for key in [
-                "wf.colorMode", "wf.glowRadius", "wf.lineCount", "wf.fill", "wf.lineThickness", "wf.waveAmplitude",
+                "wf.colorMode", "wf.glowSize", "wf.glowSharpness", "wf.flashLength", "wf.lineCount", "wf.fill", "wf.lineThickness", "wf.waveAmplitude",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
             }
@@ -516,19 +521,59 @@ extension AppSettingsTests {
             let read = AppSettings(defaults: defaults)
             #expect(read.wingWidth == 180)
             #expect(read.colorMode == .custom(PaletteColor(hex: 0x7A5CFF)))
-            #expect(read.glowRadius == 2.5)
+            #expect(read.glowSize == 2.5)
+            #expect(read.glowSharpness == 0.7)
+            #expect(read.flashLength == 1.5)
             #expect(read.lineCount == 5)
             #expect(read.fill == 0.4)
             #expect(read.lineThickness == 1.5)
             #expect(read.waveAmplitude == 0.75)
             #expect(read.appearance == WaveAppearance(
-                wingWidth: 180, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowRadius: 2.5,
+                wingWidth: 180, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowSize: 2.5,
                 lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.75,
-                colorFlow: 0.25, colorByBand: true, look: .spectrum
+                colorFlow: 0.25, colorByBand: true, look: .spectrum, glowSharpness: 0.7
             ))
 
             read.colorMode = .preset(.ocean)
             #expect(AppSettings(defaults: defaults).colorMode == .preset(.ocean))
+        }
+    }
+
+    /// Сохраненный в 1.2 «Радиус свечения» становится «Размером свечения» с тем же значением и
+    /// четкостью по умолчанию (размытие как в 1.2); читается без записи; свой ключ главнее старого.
+    @Test(arguments: [0.5, 1.0, 2.0, 3.0])
+    func glowRadiusFrom12BecomesSize(radius: Double) {
+        Self.withSuite { defaults, suite in
+            defaults.set(radius, forKey: "wf.glowRadius")
+            let before = Set((defaults.persistentDomain(forName: suite) ?? [:]).keys)
+            let settings = AppSettings(defaults: defaults)
+            #expect(settings.glowSize == radius)
+            #expect(settings.glowSharpness == 0.4)
+            #expect(settings.appearance.glowSize == radius)
+            #expect(settings.appearance.glowBlurScale == 1)
+            #expect(Set((defaults.persistentDomain(forName: suite) ?? [:]).keys) == before)
+
+            defaults.set(1.5, forKey: "wf.glowSize")
+            #expect(AppSettings(defaults: defaults).glowSize == 1.5)
+        }
+    }
+
+    /// Четкость и длительность вспышки держатся в диапазонах, не конечное значение заменяется стандартным.
+    @Test func glowSharpnessAndFlashLengthClamp() {
+        Self.withDefaults { defaults in
+            let settings = AppSettings(defaults: defaults)
+            settings.glowSharpness = 4
+            #expect(settings.glowSharpness == 1)
+            settings.glowSharpness = -1
+            #expect(settings.glowSharpness == 0)
+            settings.glowSharpness = .nan
+            #expect(settings.glowSharpness == 0.4)
+            settings.flashLength = 9
+            #expect(settings.flashLength == 2)
+            settings.flashLength = 0.1
+            #expect(settings.flashLength == 0.5)
+            settings.flashLength = .infinity
+            #expect(settings.flashLength == 1)
         }
     }
 
@@ -538,10 +583,10 @@ extension AppSettingsTests {
         Self.withDefaults { defaults in
             let settings = AppSettings(defaults: defaults)
             #expect(settings.appearance == .standard)
-            settings.glowRadius = 9
-            #expect(settings.glowRadius == 3)
-            settings.glowRadius = .nan
-            #expect(settings.glowRadius == 1)
+            settings.glowSize = 9
+            #expect(settings.glowSize == 3)
+            settings.glowSize = .nan
+            #expect(settings.glowSize == 1)
             settings.lineCount = 0
             #expect(settings.lineCount == 1)
             settings.lineCount = 40

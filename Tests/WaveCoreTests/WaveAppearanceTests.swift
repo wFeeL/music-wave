@@ -5,10 +5,12 @@ import Testing
 struct WaveAppearanceTests {
     @Test func defaultsMatchSpec() {
         #expect(WaveAppearance.standard == WaveAppearance(
-            wingWidth: 64, colorMode: .artwork, glowRadius: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1
+            wingWidth: 64, colorMode: .artwork, glowSize: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1
         ))
         #expect(WaveAppearance.Limits.wingWidth == 40...200)
-        #expect(WaveAppearance.Limits.glowRadius == 0.5...3)
+        #expect(WaveAppearance.Limits.glowSize == 0.5...3)
+        #expect(WaveAppearance.Limits.glowSharpness == 0...1)
+        #expect(WaveAppearance.standard.glowSharpness == 0.4)
         #expect(WaveAppearance.Limits.lineCount == 1...6)
         #expect(WaveAppearance.Limits.fill == 0...1)
         #expect(WaveAppearance.Limits.thickness == 0.5...2)
@@ -17,14 +19,14 @@ struct WaveAppearanceTests {
 
     @Test func clampsRanges() {
         let high = WaveAppearance(
-            wingWidth: 300, colorMode: .artwork, glowRadius: 5, lineCount: 9, fill: 2, thickness: 3, amplitude: 9
+            wingWidth: 300, colorMode: .artwork, glowSize: 5, lineCount: 9, fill: 2, thickness: 3, amplitude: 9
         )
-        #expect(high.wingWidth == 200 && high.glowRadius == 3 && high.lineCount == 6)
+        #expect(high.wingWidth == 200 && high.glowSize == 3 && high.lineCount == 6)
         #expect(high.fill == 1 && high.thickness == 2 && high.amplitude == 2)
         let low = WaveAppearance(
-            wingWidth: 10, colorMode: .artwork, glowRadius: 0, lineCount: 0, fill: -1, thickness: .nan, amplitude: -.infinity
+            wingWidth: 10, colorMode: .artwork, glowSize: 0, lineCount: 0, fill: -1, thickness: .nan, amplitude: -.infinity
         )
-        #expect(low.wingWidth == 40 && low.glowRadius == 0.5 && low.lineCount == 1)
+        #expect(low.wingWidth == 40 && low.glowSize == 0.5 && low.lineCount == 1)
         #expect(low.fill == 0 && low.thickness == 1 && low.amplitude == 1)
         // Запись в свойство ограничивается так же.
         var edited = WaveAppearance.standard
@@ -38,16 +40,16 @@ struct WaveAppearanceTests {
         let samples = [
             WaveAppearance.standard,
             WaveAppearance(
-                wingWidth: 180, colorMode: .custom(RGBColor(hex: 0x123456)), glowRadius: 2.5,
+                wingWidth: 180, colorMode: .custom(RGBColor(hex: 0x123456)), glowSize: 2.5,
                 lineCount: 6, fill: 0.7, thickness: 1.5, amplitude: 0.5
             ),
-            WaveAppearance(wingWidth: 40, colorMode: .preset(.neon), glowRadius: 0.5, lineCount: 1, fill: 1, thickness: 2, amplitude: 2),
+            WaveAppearance(wingWidth: 40, colorMode: .preset(.neon), glowSize: 0.5, lineCount: 1, fill: 1, thickness: 2, amplitude: 2),
             WaveAppearance(
-                wingWidth: 90, colorMode: .preset(.rainbow), glowRadius: 1.5, lineCount: 1, fill: 0.2, thickness: 1,
+                wingWidth: 90, colorMode: .preset(.rainbow), glowSize: 1.5, lineCount: 1, fill: 0.2, thickness: 1,
                 amplitude: 1.2, colorFlow: 0.35, colorByBand: true
             ),
             WaveAppearance(
-                wingWidth: 72, colorMode: .preset(.ice), glowRadius: 1, lineCount: 4, fill: 0.5, thickness: 1,
+                wingWidth: 72, colorMode: .preset(.ice), glowSize: 1, lineCount: 4, fill: 0.5, thickness: 1,
                 amplitude: 1, look: .spectrum
             ),
         ]
@@ -59,7 +61,7 @@ struct WaveAppearanceTests {
         let stored = Data(#"{"wingWidth": 900, "lineCount": 4}"#.utf8)
         let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
         #expect(decoded.wingWidth == 200 && decoded.lineCount == 4)
-        #expect(decoded.colorMode == .artwork && decoded.glowRadius == 1 && decoded.fill == 0)
+        #expect(decoded.colorMode == .artwork && decoded.glowSize == 1 && decoded.fill == 0)
     }
 
     /// Настройки 1.1 без новых полей дают прежний вид: без переливания и без цвета по частотам.
@@ -69,7 +71,7 @@ struct WaveAppearanceTests {
         let stored = Data(json.utf8)
         let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
         #expect(decoded == WaveAppearance(
-            wingWidth: 120, colorMode: .preset(.neon), glowRadius: 2, lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.8
+            wingWidth: 120, colorMode: .preset(.neon), glowSize: 2, lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.8
         ))
         #expect(decoded.colorFlow == 0)
         #expect(decoded.colorByBand == false)
@@ -80,11 +82,56 @@ struct WaveAppearanceTests {
         #expect(fallback.colorFlow == 0 && !fallback.colorByBand)
     }
 
+    /// Четкость 0, 0.4 и 1 дают размытие 1.5, 1 (как в 1.2) и 0.25; вне 0...1 берется граница.
+    @Test func blurScaleFollowsSharpness() {
+        func scale(_ sharpness: Double) -> Double {
+            WaveAppearance(
+                wingWidth: 64, colorMode: .artwork, glowSize: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1,
+                glowSharpness: sharpness
+            ).glowBlurScale
+        }
+        #expect(abs(scale(0) - 1.5) < 1e-12)
+        #expect(abs(scale(0.4) - 1.0) < 1e-12)
+        #expect(abs(scale(1) - 0.25) < 1e-12)
+        #expect(abs(scale(7) - 0.25) < 1e-12)
+        #expect(abs(scale(-1) - 1.5) < 1e-12)
+        #expect(abs(WaveAppearance.standard.glowBlurScale - 1) < 1e-12)
+        var edited = WaveAppearance.standard
+        edited.glowSharpness = .nan
+        #expect(edited.glowSharpness == 0.4)
+    }
+
+    /// Пятно под островом: ширина `min(0.7 × √размер, 1)`, при размере 1 как в 1.2 (0.7).
+    @Test func glowSpotWidthGrowsWithSize() {
+        #expect(abs(WaveAppearance.glowSpotWidthFraction(size: 1) - 0.7) < 1e-12)
+        #expect(abs(WaveAppearance.glowSpotWidthFraction(size: 2) - 0.7 * 2.0.squareRoot()) < 1e-12)
+        #expect(WaveAppearance.glowSpotWidthFraction(size: 3) == 1)
+        #expect(abs(WaveAppearance.glowSpotWidthFraction(size: 0.5) - 0.7 * 0.5.squareRoot()) < 1e-12)
+        #expect(WaveAppearance.glowSpotWidthFraction(size: .nan) == WaveAppearance.glowSpotWidthFraction(size: 1))
+        #expect(WaveAppearance.glowSpotWidthFraction(size: 9) == 1)
+    }
+
+    /// Вид 1.2 с ключом `glowRadius` читается как размер; новый ключ главнее старого; пишется только новый.
+    @Test func legacyGlowRadiusBecomesSize() throws {
+        let old = try JSONDecoder().decode(WaveAppearance.self, from: Data(#"{"glowRadius": 2}"#.utf8))
+        #expect(old.glowSize == 2 && old.glowSharpness == 0.4)
+        let both = try JSONDecoder().decode(WaveAppearance.self, from: Data(#"{"glowRadius": 2, "glowSize": 1.5}"#.utf8))
+        #expect(both.glowSize == 1.5)
+        let clamped = try JSONDecoder().decode(WaveAppearance.self, from: Data(#"{"glowRadius": 9}"#.utf8))
+        #expect(clamped.glowSize == 3)
+        var sharp = WaveAppearance.standard
+        sharp.glowSize = 2
+        sharp.glowSharpness = 0.9
+        let json = String(decoding: try JSONEncoder().encode(sharp), as: UTF8.self)
+        #expect(json.contains("glowSize") && json.contains("glowSharpness") && !json.contains("glowRadius"))
+        #expect(try JSONDecoder().decode(WaveAppearance.self, from: Data(json.utf8)) == sharp)
+    }
+
     @Test func clampsColorFlow() throws {
         #expect(WaveAppearance.Limits.colorFlow == 0...1)
         func flow(_ value: Double) -> Double {
             WaveAppearance(
-                wingWidth: 64, colorMode: .artwork, glowRadius: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1,
+                wingWidth: 64, colorMode: .artwork, glowSize: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1,
                 colorFlow: value
             ).colorFlow
         }
@@ -106,7 +153,7 @@ struct WaveAppearanceTests {
     /// Неизвестная готовая палитра дает «Из обложки», остальные поля сохраняются.
     @Test func unknownPresetFallsBackToArtwork() throws {
         let appearance = WaveAppearance(
-            wingWidth: 120, colorMode: .preset(.neon), glowRadius: 2, lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.8
+            wingWidth: 120, colorMode: .preset(.neon), glowSize: 2, lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.8
         )
         let json = String(decoding: try JSONEncoder().encode(appearance), as: UTF8.self)
         #expect(json.contains("\"neon\""))
@@ -122,7 +169,7 @@ struct WaveAppearanceTests {
         let stored = Data(#"{"wingWidth": "wide", "lineCount": 5, "fill": 0.4, "glowRadius": [2]}"#.utf8)
         let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
         #expect(decoded.wingWidth == WaveAppearance.standard.wingWidth)
-        #expect(decoded.glowRadius == WaveAppearance.standard.glowRadius)
+        #expect(decoded.glowSize == WaveAppearance.standard.glowSize)
         #expect(decoded.lineCount == 5)
         #expect(decoded.fill == 0.4)
     }
@@ -192,7 +239,7 @@ struct WaveAppearanceTests {
     /// Стиль из будущей сборки дает «Волны», остальные поля сохраняются.
     @Test func unknownLookFallsBackToWaves() throws {
         let appearance = WaveAppearance(
-            wingWidth: 120, colorMode: .preset(.neon), glowRadius: 2, lineCount: 5, fill: 0.4, thickness: 1.5,
+            wingWidth: 120, colorMode: .preset(.neon), glowSize: 2, lineCount: 5, fill: 0.4, thickness: 1.5,
             amplitude: 0.8, colorFlow: 0.3, colorByBand: true, look: .spectrum
         )
         let json = String(decoding: try JSONEncoder().encode(appearance), as: UTF8.self)

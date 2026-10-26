@@ -191,8 +191,10 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     public enum Limits {
         /// Ширина крыла, pt. На экране с вырезом ее еще ограничивает `NotchLayout.wingLimit`.
         public static let wingWidth: ClosedRange<Double> = 40...200
-        /// «Радиус свечения», множитель.
-        public static let glowRadius: ClosedRange<Double> = 0.5...3
+        /// «Размер свечения», множитель (в 1.2 это был «Радиус свечения»).
+        public static let glowSize: ClosedRange<Double> = 0.5...3
+        /// «Четкость свечения», доля.
+        public static let glowSharpness: ClosedRange<Double> = 0...1
         /// «Количество волн».
         public static let lineCount: ClosedRange<Int> = 1...6
         /// «Заливка», доля.
@@ -207,7 +209,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
 
     private enum Defaults {
         static let wingWidth = 64.0
-        static let glowRadius = 1.0
+        static let glowSize = 1.0
+        static let glowSharpness = 0.4
         static let lineCount = 3
         static let fill = 0.0
         static let thickness = 1.0
@@ -216,7 +219,7 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     }
 
     public static let standard = WaveAppearance(
-        wingWidth: Defaults.wingWidth, colorMode: .artwork, glowRadius: Defaults.glowRadius,
+        wingWidth: Defaults.wingWidth, colorMode: .artwork, glowSize: Defaults.glowSize,
         lineCount: Defaults.lineCount, fill: Defaults.fill, thickness: Defaults.thickness,
         amplitude: Defaults.amplitude
     )
@@ -225,8 +228,14 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         didSet { wingWidth = Self.clamped(wingWidth, Limits.wingWidth, Defaults.wingWidth) }
     }
     public var colorMode: WaveColorMode
-    public var glowRadius: Double {
-        didSet { glowRadius = Self.clamped(glowRadius, Limits.glowRadius, Defaults.glowRadius) }
+    /// «Размер свечения»: высота пятна под островом (16 pt × размер), его ширина и поле свечения линий.
+    public var glowSize: Double {
+        didSet { glowSize = Self.clamped(glowSize, Limits.glowSize, Defaults.glowSize) }
+    }
+    /// «Четкость свечения»: только размытие пятна и свечения линий (`glowBlurScale`). По умолчанию 0.4,
+    /// при нем размытие как в 1.2.
+    public var glowSharpness: Double {
+        didSet { glowSharpness = Self.clamped(glowSharpness, Limits.glowSharpness, Defaults.glowSharpness) }
     }
     public var lineCount: Int {
         didSet { lineCount = Self.clamped(lineCount) }
@@ -255,14 +264,32 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     /// `lookGeometry`) и ярче (`WavePaint.Options.highContrast`). Не настройка и не сохраняется.
     public private(set) var highContrast = false
 
+    /// Множитель размытия свечения по четкости: `1.5 − 1.25 × четкость` (0 → 1.5, 0.4 → 1, 1 → 0.25).
+    public var glowBlurScale: Double {
+        Self.blurScale(sharpness: glowSharpness)
+    }
+
+    /// `glowBlurScale` для четкости `sharpness` (вне 0...1 или не конечная берется границей или значением по умолчанию).
+    public static func blurScale(sharpness: Double) -> Double {
+        1.5 - 1.25 * clamped(sharpness, Limits.glowSharpness, Defaults.glowSharpness)
+    }
+
+    /// Ширина пятна свечения под островом, доля ширины острова: `min(0.7 × √размер, 1)`
+    /// (при размере 1 это 0.7, как в 1.2). Размер вне 0.5...3 ограничивается, не конечный считается 1.
+    public static func glowSpotWidthFraction(size: Double) -> Double {
+        min(0.7 * clamped(size, Limits.glowSize, Defaults.glowSize).squareRoot(), 1)
+    }
+
     public init(
-        wingWidth: Double, colorMode: WaveColorMode, glowRadius: Double,
+        wingWidth: Double, colorMode: WaveColorMode, glowSize: Double,
         lineCount: Int, fill: Double, thickness: Double, amplitude: Double,
-        colorFlow: Double = 0, colorByBand: Bool = false, look: WaveLook = .waves
+        colorFlow: Double = 0, colorByBand: Bool = false, look: WaveLook = .waves,
+        glowSharpness: Double = 0.4
     ) {
         self.wingWidth = Self.clamped(wingWidth, Limits.wingWidth, Defaults.wingWidth)
         self.colorMode = colorMode
-        self.glowRadius = Self.clamped(glowRadius, Limits.glowRadius, Defaults.glowRadius)
+        self.glowSize = Self.clamped(glowSize, Limits.glowSize, Defaults.glowSize)
+        self.glowSharpness = Self.clamped(glowSharpness, Limits.glowSharpness, Defaults.glowSharpness)
         self.lineCount = Self.clamped(lineCount)
         self.fill = Self.clamped(fill, Limits.fill, Defaults.fill)
         self.thickness = Self.clamped(thickness, Limits.thickness, Defaults.thickness)
@@ -273,27 +300,36 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case wingWidth, colorMode, glowRadius, lineCount, fill, thickness, amplitude, colorFlow, colorByBand, look
+        case wingWidth, colorMode, glowSize, glowSharpness, lineCount, fill, thickness, amplitude, colorFlow, colorByBand, look
+    }
+
+    /// Ключ 1.2: «Радиус свечения» читается как размер (запись его больше не пишет).
+    private enum LegacyKeys: String, CodingKey {
+        case glowRadius
     }
 
     /// Пропущенное или нечитаемое поле берется из `standard`, значения вне диапазона ограничиваются.
+    /// Размер без ключа `glowSize` берется из старого `glowRadius`.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let standard = Self.standard
         func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
             (try? container.decodeIfPresent(T.self, forKey: key)) ?? fallback
         }
+        let legacy = (try? decoder.container(keyedBy: LegacyKeys.self))
+            .flatMap { try? $0.decodeIfPresent(Double.self, forKey: .glowRadius) }
         self.init(
             wingWidth: value(.wingWidth, standard.wingWidth),
             colorMode: value(.colorMode, standard.colorMode),
-            glowRadius: value(.glowRadius, standard.glowRadius),
+            glowSize: value(.glowSize, legacy ?? standard.glowSize),
             lineCount: value(.lineCount, standard.lineCount),
             fill: value(.fill, standard.fill),
             thickness: value(.thickness, standard.thickness),
             amplitude: value(.amplitude, standard.amplitude),
             colorFlow: value(.colorFlow, standard.colorFlow),
             colorByBand: value(.colorByBand, standard.colorByBand),
-            look: value(.look, standard.look)
+            look: value(.look, standard.look),
+            glowSharpness: value(.glowSharpness, standard.glowSharpness)
         )
     }
 
@@ -383,7 +419,7 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     ///   одинаково, с толщиной растет только закрашиваемая полоса.
     /// - Заливка (любая больше 0): еще `0.5` на линию. Путь общий с обводкой, но маска и цвет это
     ///   две закраски площади.
-    /// - Свечение (основные бас и середина, `WaveLine.glows`): обводка × «Радиус свечения».
+    /// - Свечение (основные бас и середина, `WaveLine.glows`): обводка × «Размер свечения».
     ///   Размытие разделимое, его цена на пиксель растет линейно с радиусом (поле текстуры тоже).
     ///   Без прохода свечения (`lightened()`) ноль.
     /// - Ширина крыла: множитель `0.75 + 0.25 × ширина / 64`. Число точек от ширины не зависит,
@@ -411,7 +447,7 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         let strokes = Double(lines.count) * stroke
         let fills = appearance.fill > 0 ? 0.5 * Double(lines.count) : 0
         let glows = appearance.glowPass
-            ? Double(lines.filter(\.glows).count) * stroke * appearance.glowRadius
+            ? Double(lines.filter(\.glows).count) * stroke * appearance.glowSize
             : 0
         let span = switch profile {
         case .wing: 0.75 + 0.25 * appearance.wingWidth / Defaults.wingWidth

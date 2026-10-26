@@ -208,7 +208,7 @@ struct IslandPreview: View {
         return NotchLayout(
             screenID: 0, screenFrame: CGRect(origin: .zero, size: stripSize), hasNotch: true, notch: notch,
             wingLimit: min(free, wingLimit ?? NotchGeometry.maxWingWidth, NotchGeometry.maxWingWidth),
-            wingWidth: CGFloat(appearance.wingWidth), glowRadius: appearance.glowRadius
+            wingWidth: CGFloat(appearance.wingWidth), glowSize: appearance.glowSize
         )
     }
 
@@ -296,7 +296,7 @@ private struct PreviewScene: View {
             ) {
                 BeatGlowView(
                     geometry: geometry, state: state, scale: scale, glow: beatGlow, ambient: visuals.ambient,
-                    intensity: glow, radius: appearance.glowRadius,
+                    intensity: glow, size: appearance.glowSize, blurScale: appearance.glowBlurScale,
                     color: visuals.glowSourceColor
                 )
             }

@@ -310,6 +310,16 @@ struct RhythmLogTests {
         #expect(schedules[2]["unlockReason"] as? String == "reset")
     }
 
+    /// «Длительность вспышки» пишется в meta и читается назад; в журналах до 1.3 поля нет, версия схемы та же.
+    @Test func flashLengthRoundTrips() throws {
+        var meta = Self.meta()
+        meta.flashLength = 1.5
+        let log = RhythmLog(meta: meta, kicks: [], onsets: [], schedules: [], flashes: [])
+        let decoded = try RhythmLog.decode(try log.encoded())
+        #expect(decoded.meta.flashLength == 1.5)
+        #expect(Self.meta().flashLength == nil)
+    }
+
     /// Вес показа пишется в расписания (новое расписание, когда вес сменился на 0.02 и больше), мягкий
     /// пульс кадров в итог записи (кадров с пульсом от `ambientVisible` и пик), выключатель пульса в
     /// meta. Журнал без этих полей (1.1 и B4) читается с `nil`, ключи `nil` не пишутся.
@@ -329,6 +339,7 @@ struct RhythmLogTests {
         let decodedOld = try RhythmLog.decode(old)
         #expect(decodedOld.schedules.map(\.weight) == [nil])
         #expect(decodedOld.meta.softPulse == nil)
+        #expect(decodedOld.meta.flashLength == nil)
         #expect(decodedOld.meta.ambientFrames == nil && decodedOld.meta.ambientPeak == nil)
 
         var meta = Self.meta()
