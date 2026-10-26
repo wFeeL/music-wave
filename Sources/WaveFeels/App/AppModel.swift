@@ -1498,10 +1498,10 @@ final class AppModel {
     ///
     /// «Мягкая остановка» (`SoftStop`): показанные копии слоев, полос и уровня, свечение, «вздох» и
     /// пульс угасают за 0.6 с, когда звука нет: уровень кадра не выше порога шума волн
-    /// (`LevelProcessor.noiseFloorDB`) или источник-приложение на паузе по Now Playing
-    /// (`sourcePaused`). Пока тихо, новых вспышек, вздохов и горбов пульса нет, после угасания пульс
-    /// стоит на нуле: слабое свечение без музыки выглядело бы случайной вспышкой. Пружины не
-    /// трогаются. Затем к басу показанных слоев прибавляется акцент доли от большего из свечения и
+    /// (`LevelProcessor.noiseFloorDB`, тишина кончается на 3 дБ выше, `SoftStop.belowNoiseFloor`)
+    /// или источник-приложение на паузе по Now Playing (`sourcePaused`). Пока тихо, новых вспышек,
+    /// вздохов и горбов пульса нет, после угасания пульс стоит на нуле: слабое свечение без музыки
+    /// выглядело бы случайной вспышкой. Пружины не трогаются. Затем к басу показанных слоев прибавляется акцент доли от большего из свечения и
     /// пульса (`BeatGlow.accented`), уже после пружин, чтобы он оставался четким.
     ///
     /// Переливание (`PaletteFlow`) двигается на тот же ограниченный шаг, что и пружины («Уменьшение
@@ -1575,7 +1575,9 @@ final class AppModel {
         // после угасания записей нет, и копий тоже.
         var bands = sampled.bands
         if settings.softStop {
-            let silent = sampled.rawLevelDB <= LevelProcessor.noiseFloorDB || sourcePaused
+            // Порог шума с запасом на выход (`SoftStop.belowNoiseFloor`): шум у самого порога не
+            // начинает угасание заново на каждом кадре.
+            let silent = softStop.belowNoiseFloor(levelDB: sampled.rawLevelDB) || sourcePaused
             softStop.apply(
                 layers: &layers, bands: &bands, level: &level, glow: &glow, pulse: &breath,
                 ambient: &ambient, silent: silent, now: now

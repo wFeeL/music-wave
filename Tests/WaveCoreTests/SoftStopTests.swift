@@ -355,4 +355,46 @@ struct SoftStopTests {
         // У всего звука системы пауза по Now Playing не считается.
         #expect(!SoftStop.sourcePaused(source: .systemWide, current: paused, nowPlayingAvailable: true))
     }
+    /// Тишина по уровню с запасом на выход: тишина наступает, когда сырой уровень не выше порога
+    /// шума волн, и кончается, только когда он поднялся выше порога плюс `returnMarginDB`. Пока
+    /// звука нет, уровень у самого порога тишину не прерывает.
+    @Test func noiseFloorHasReturnMargin() {
+        #expect(SoftStop.returnMarginDB == 3)
+        let floor = LevelProcessor.noiseFloorDB
+        var stop = SoftStop()
+        let levels: [Float] = [floor + 10, floor + 1, floor, floor + 1, floor + 3, floor + 3.5, floor + 1, floor - 1, -.infinity, floor + 20]
+        let answers = levels.map { stop.belowNoiseFloor(levelDB: $0) }
+        #expect(answers == [false, false, true, true, true, false, false, true, true, false])
+    }
+
+    /// Звук пропал, а уровень шума ходит вокруг порога (на кадре ниже, на следующем выше): угасание
+    /// идет обычные 0,6 с и кончается, остров может уйти в простой. Без запаса каждый кадр выше
+    /// порога начинал угасание заново, и оно не кончалось.
+    @Test func noiseAroundFloorStillEndsFade() {
+        let floor = LevelProcessor.noiseFloorDB
+        var stop = Self.playing()
+        _ = stop.belowNoiseFloor(levelDB: -20)
+        var last = Shown(layers: [], bands: [], level: 0, glow: 0)
+        for step in 1...60 {
+            let levelDB = step.isMultiple(of: 2) ? floor + 1 : floor - 1
+            let silent = stop.belowNoiseFloor(levelDB: levelDB)
+            #expect(silent)
+            last = Self.frame(
+                &stop, layers: [0, 0, 0], level: 0, glow: 0, silent: silent, now: Self.start + Double(step) / 60
+            )
+        }
+        #expect(last.layers == [0, 0, 0])
+        #expect(last.level == 0)
+        #expect(!stop.isFading)
+
+        // Тот же шум без запаса: угасание тянется и через секунду еще идет.
+        var raw = Self.playing()
+        for step in 1...60 {
+            let levelDB = step.isMultiple(of: 2) ? floor + 1 : floor - 1
+            _ = Self.frame(
+                &raw, layers: [0, 0, 0], level: 0, glow: 0, silent: levelDB <= floor, now: Self.start + Double(step) / 60
+            )
+        }
+        #expect(raw.isFading)
+    }
 }

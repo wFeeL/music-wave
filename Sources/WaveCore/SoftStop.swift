@@ -29,8 +29,25 @@ public struct SoftStop: Sendable {
     private var lastSound: Double?
     /// Начало угасания; `nil`, пока угасания нет или когда оно кончилось.
     private var fadeStart: Double?
+    /// Последний ответ `belowNoiseFloor(levelDB:)`.
+    private var belowFloor = false
+
+    /// Запас над порогом шума волн, дБ: тишина по уровню кончается, только когда сырой уровень
+    /// поднялся выше `LevelProcessor.noiseFloorDB + returnMarginDB`.
+    public static let returnMarginDB: Float = 3
 
     public init() {}
+
+    /// Тишина по сырому уровню кадра `levelDB` (dBFS, первый повод для `silent` в `apply`): уровень не
+    /// выше порога шума волн `LevelProcessor.noiseFloorDB`. Наступает сразу, а кончается, только
+    /// когда уровень поднялся выше порога на `returnMarginDB`. Без запаса шум у самого порога
+    /// (кадр ниже, кадр выше) каждый раз начинал угасание заново от показанного: волны затихали
+    /// много дольше `duration`, а угасание не кончалось и держало полную частоту кадров.
+    public mutating func belowNoiseFloor(levelDB: Float) -> Bool {
+        let threshold = belowFloor ? LevelProcessor.noiseFloorDB + Self.returnMarginDB : LevelProcessor.noiseFloorDB
+        belowFloor = levelDB <= threshold
+        return belowFloor
+    }
 
     /// Источник на паузе по Now Playing (второй повод для тишины, кроме уровня звука): источник
     /// `source` приложение, Now Playing работает (`nowPlayingAvailable`), и его текущая запись
