@@ -304,7 +304,7 @@ public final class StreamAnalyzer {
     }
 
     private static func makeLevelProcessor(for mapper: BandMapper) -> LevelProcessor {
-        LevelProcessor(layerBands: makeLayerRanges(for: mapper))
+        LevelProcessor(layerBands: makeLayerRanges(for: mapper), tiltDB: mapper.tiltDB())
     }
 
     private static func makeSmoothers() -> [AttackRelease] {

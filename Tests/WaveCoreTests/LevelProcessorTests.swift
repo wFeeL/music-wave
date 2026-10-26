@@ -180,6 +180,29 @@ import Testing
         #expect(agc.referenceDB <= -27.2)
     }
 
+    /// Наклон в режиме `auto`: верх на -60 dB с наклоном +5.77 dB поднимается заметно выше, бас на
+    /// пике слоя остается полным.
+    @Test func tiltLiftsQuietHighs() {
+        let tilt = BandMapper(fftSize: 1024, sampleRate: 48_000).tiltDB()
+        let input = Self.levels([3: -10, 20: -60])
+        var tilted = LevelProcessor(layerBands: Self.layers, tiltDB: tilt)
+        var flat = LevelProcessor(layerBands: Self.layers, tiltDB: [])
+        let withTilt = Self.run(&tilted, input, seconds: 1)
+        let withoutTilt = Self.run(&flat, input, seconds: 1)
+        #expect(withTilt[20] > 0.38)
+        #expect(withoutTilt[20] < 0.25)
+        #expect(withTilt[3] == 1)
+        #expect(withoutTilt[3] == 1)
+    }
+
+    /// Порог шума проверяется по dB без наклона: шипение -72 dB остается нулем и на верхах.
+    @Test func tiltIgnoresHissFloor() {
+        let tilt = BandMapper(fftSize: 1024, sampleRate: 48_000).tiltDB()
+        var processor = LevelProcessor(layerBands: Self.layers, tiltDB: tilt)
+        let output = Self.run(&processor, Self.levels([:], floor: -72), seconds: 1)
+        #expect(output.allSatisfy { $0 == 0 })
+    }
+
     @Test func absoluteModeFollowsLoudness() {
         var processor = Self.makeProcessor()
         let settings = LevelSettings(mode: .absolute, followSystemVolume: false)

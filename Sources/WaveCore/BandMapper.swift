@@ -118,6 +118,22 @@ public struct BandMapper: Sendable {
         }
     }
 
+    /// Показатель наклона спектра для волн: уровень полосы поднимается как `(center / tiltReferenceHz)^0.35`.
+    ///
+    /// В cava `f^0.85` множит среднюю амплитуду бина. У нас мощность в логарифмической полосе
+    /// суммируется, а ширина полосы растет пропорционально f, то есть уровень полосы уже несет
+    /// множитель `f^0.5` по амплитуде. Поэтому эквивалент у нас `f^(0.85 - 0.5) = f^0.35`, около
+    /// +2.1 дБ на октаву. Прямой перенос `f^0.85` дал бы примерно 44 дБ разницы между краями диапазона.
+    public static let tiltExponent = 0.35
+    /// Частота, на которой наклон равен 0 дБ.
+    public static let tiltReferenceHz = 1000.0
+
+    /// Наклон каждой полосы в дБ: `20 × tiltExponent × log10(center / tiltReferenceHz)`. Ниже 1 кГц
+    /// отрицательный, выше положительный. Прибавляется к уровням только для волн в режиме `auto`.
+    public func tiltDB() -> [Float] {
+        centers.map { Float(20 * Self.tiltExponent * log10($0 / Self.tiltReferenceHz)) }
+    }
+
     /// Полосы слоя (по центру полосы), подряд идущий диапазон индексов.
     public func bands(for layer: WaveLayer) -> Range<Int> {
         layerRanges[layer.rawValue]

@@ -89,6 +89,10 @@ public struct DeadBandAGC: Sendable {
 /// опора `DeadBandAGC`, которая идет за пиком с мертвой зоной, поэтому тихий куплет остается
 /// ниже громкого припева. Слой не опускается ниже наибольшей опоры минус `layerPeakSpreadDB`,
 /// поэтому тихий слой не раздувается до полной высоты рядом с громким.
+///
+/// Наклон спектра `tiltDB` (дБ на полосу, `BandMapper.tiltDB()`) прибавляется к уровням только в
+/// режиме `auto`, до трекеров пика, чтобы верхи двигались на хэтах. Порог шума `noiseFloorDB`
+/// проверяется по уровню без наклона: шипение не поднимается.
 public struct LevelProcessor: Sendable {
     public static let noiseFloorDB: Float = -70
     public static let autoRangeDB: Float = 33
@@ -124,12 +128,16 @@ public struct LevelProcessor: Sendable {
     private let bandLayers: [Int]
     private var trackers: [PeakTracker]
     private var agcs: [DeadBandAGC]
+    /// Наклон по полосам, дБ; полосы за концом массива без наклона.
+    private let tiltDB: [Float]
 
     /// Опоры автоуровня по слоям, dB (для тестов).
     var layerReferencesDB: [Float] { agcs.map(\.referenceDB) }
 
-    public init(layerBands: [Range<Int>]) {
+    /// - Parameter tiltDB: наклон спектра по полосам в дБ для режима `auto`, пустой массив без наклона.
+    public init(layerBands: [Range<Int>], tiltDB: [Float] = []) {
         self.layerBands = layerBands
+        self.tiltDB = tiltDB.map { $0.isFinite ? $0 : 0 }
         self.trackers = [PeakTracker](repeating: PeakTracker(), count: layerBands.count)
         self.agcs = [DeadBandAGC](repeating: DeadBandAGC(), count: layerBands.count)
         var bandLayers = [Int](repeating: -1, count: layerBands.map(\.upperBound).max().map { max($0, 0) } ?? 0)
@@ -161,19 +169,19 @@ public struct LevelProcessor: Sendable {
         let dt = dt.isFinite ? max(dt, 0) : 0
         let count = levelsDB.count
 
-        var globalPeak = Self.floorDB
+        var globalReference = Self.floorDB
         if settings.mode == .auto {
             for layer in layerBands.indices {
                 var layerMax = Self.floorDB
                 for band in layerBands[layer] where band >= 0 && band < count {
                     // +inf это испорченный вход: он ограничивается на выходе, но пик не двигает.
                     if levelsDB[band] != .infinity {
-                        layerMax = max(layerMax, Self.clamped(levelsDB[band]))
+                        layerMax = max(layerMax, Self.clamped(levelsDB[band]) + tilt(band))
                     }
                 }
                 trackers[layer].update(with: layerMax, dt: dt)
                 agcs[layer].update(heldPeakDB: trackers[layer].peak, currentDB: layerMax, dt: dt)
-                globalPeak = max(globalPeak, agcs[layer].referenceDB)
+                globalReference = max(globalReference, agcs[layer].referenceDB)
             }
         }
 
@@ -188,10 +196,10 @@ public struct LevelProcessor: Sendable {
             switch settings.mode {
             case .auto:
                 let layer = band < bandLayers.count ? bandLayers[band] : -1
-                let layerPeak = layer >= 0 ? agcs[layer].referenceDB : Self.floorDB
-                let effectivePeak = max(layerPeak, globalPeak - Self.layerPeakSpreadDB, Self.minPeakDB)
+                let layerReference = layer >= 0 ? agcs[layer].referenceDB : Self.floorDB
+                let effectivePeak = max(layerReference, globalReference - Self.layerPeakSpreadDB, Self.minPeakDB)
                 let lo = max(effectivePeak - Self.autoRangeDB, Self.noiseFloorDB)
-                x = (db - lo) / max(effectivePeak - lo, 1)
+                x = (db + tilt(band) - lo) / max(effectivePeak - lo, 1)
             case .absolute:
                 x = (db + Self.absoluteRangeDB) / Self.absoluteRangeDB
             }
@@ -199,6 +207,10 @@ public struct LevelProcessor: Sendable {
             x = pow(x, Self.curveExponent) * sensitivity * volumeGain
             output[band] = min(max(x, 0), 1)
         }
+    }
+
+    private func tilt(_ band: Int) -> Float {
+        band < tiltDB.count ? tiltDB[band] : 0
     }
 
     /// Значения выше +6 dB ограничиваются, NaN и -inf становятся -120.

@@ -17,6 +17,18 @@ struct BandMapperTests {
         }
     }
 
+    /// Наклон `f^0.35`: 20 × 0.35 × log10(2) = 2.107 dB на октаву между любыми соседними полосами.
+    @Test func tiltRisesAboutTwoDecibelsPerOctave() {
+        let m = BandMapper(fftSize: 1024, sampleRate: 48_000)
+        let tilt = m.tiltDB()
+        #expect(tilt.count == BandMapper.bandCount)
+        let expected = 20 * 0.35 * log10(2.0)
+        for i in 0..<(BandMapper.bandCount - 1) {
+            let slope = Double(tilt[i + 1] - tilt[i]) / log2(m.centers[i + 1] / m.centers[i])
+            #expect(abs(slope - expected) < 0.01)
+        }
+    }
+
     @Test func layersPartitionAllBands() {
         for rate in [44_100.0, 48_000.0] {
             let m = BandMapper(fftSize: 2048, sampleRate: rate)
