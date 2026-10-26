@@ -220,11 +220,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return defaults
     }
 
-    /// Действующие настройки вида из набора `--settings-suite` (после ограничения диапазонов) и
-    /// то, что еще меняет нагрузку: крыло, которое рисуется на самом деле (по раскладке панели,
-    /// не шире предела экрана; у капсулы без выреза крыльев нет), режим энергосбережения
-    /// (30 кадров в секунду) и «Уменьшение движения» (без «вздоха», пульса и свечения). По этой строке
-    /// cpu-probe.sh проверяет, на чем шел замер, и переносит ее в шапку отчета.
+    /// Действующие настройки вида из набора `--settings-suite` (после ограничения диапазонов,
+    /// стиль словом `WaveLook.rawValue`, как в `cpu-probe.sh --style`) и то, что еще меняет
+    /// нагрузку: крыло, которое рисуется на самом деле (по раскладке панели, не шире предела
+    /// экрана; у капсулы без выреза крыльев нет), режим энергосбережения (30 кадров в секунду)
+    /// и «Уменьшение движения» (без «вздоха», пульса и свечения). По этой строке cpu-probe.sh
+    /// проверяет, на чем шел замер, и переносит ее в шапку отчета.
     private static func logSettings(_ settings: AppSettings, suite: String, layout: NotchLayout?) {
         func number(_ value: Double) -> String { String(format: "%g", value) }
         func yesNo(_ value: Bool) -> String { value ? "да" : "нет" }
@@ -238,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             drawnWing = "неизвестно, экрана нет"
         }
         let values: [String] = [
+            "стиль \(settings.look.rawValue)",
             "линий \(settings.lineCount)",
             "заливка \(number(settings.fill))",
             "радиус свечения \(number(settings.glowRadius))",
@@ -246,6 +248,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "рисуется крыло \(drawnWing)",
             "толщина \(number(settings.lineThickness))",
             "амплитуда \(number(settings.waveAmplitude))",
+            "переливание \(number(settings.colorFlow))",
+            "цвет по частотам \(yesNo(settings.colorByBand))",
             "вздох \(yesNo(settings.beatPulse))",
             "мягкий пульс \(yesNo(settings.softPulse))",
             "пауза \(yesNo(settings.paused))",

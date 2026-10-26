@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Замер CPU и памяти собранного приложения. Использование:
-#   scripts/cpu-probe.sh [--preset default|max|user] [--island collapsed|expanded|banner] [--sample]
-#                        <WaveFeels.app> [секунды]
+#   scripts/cpu-probe.sh [--preset default|max|user] [--style waves|spectrum|minimal|pulse]
+#                        [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [секунды]
 #   scripts/cpu-probe.sh --help
 #
 # Приложение читает настройки не из настроек пользователя, а из отдельного набора
@@ -16,12 +16,20 @@
 #            словаря остаются только они, затем `defaults import`), пауза выключается
 #            принудительно (wf.paused = 0); предел play 20 %, как у max (диапазоны те же), итог
 #            в cpu-user.txt. Так замер видит настоящий вид владельца на демо-звуке.
-# В наборах default и max «вздох» и мягкий пульс включены, пауза выключена. Содержимое набора
-# (`defaults read`) пишется в начало отчета, а действующие значения приложение пишет в свой лог
-# строкой «настройки из набора ...»: вид, крыло, которое рисуется на самом деле, энергосбережение и
+# В наборах default и max «вздох» и мягкий пульс включены, пауза выключена, стиль не задан
+# («Волны» по умолчанию). Содержимое набора (`defaults read`) пишется в начало отчета, а
+# действующие значения приложение пишет в свой лог строкой «настройки из набора ...»: стиль, вид,
+# переливание и цвет по частотам, крыло, которое рисуется на самом деле, энергосбережение и
 # «Уменьшение движения».
 # Строка из прогона play попадает в шапку отчета (applied settings). Прогон без этой строки
 # считается проваленным: сборка без --settings-suite мерила бы настройки пользователя.
+#
+# --style <стиль> пишет поверх набора (и поверх настроек владельца в user) стиль волн:
+# wf.waveStyle как JSON-данные, строка "spectrum" в кавычках (AppSettings хранит стиль через
+# JSONEncoder). Остальные значения набора не меняются, поэтому стили сравниваются на одних и тех же
+# настройках. Приложение подтверждает стиль строкой «стиль <стиль>» в «настройках из набора»; без
+# нее прогон считается проваленным. К имени итога добавляется стиль (cpu-max-pulse.txt,
+# cpu-spectrum-expanded.txt), в шапке отчета строка «style:».
 #
 # --island <режим> передается приложению только в прогоне play (прогон silence ждет скрытый
 # остров) и держит остров через его же машину состояний:
@@ -67,7 +75,7 @@
 # Рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 
-USAGE="usage: $0 [--preset default|max|user] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
+USAGE="usage: $0 [--preset default|max|user] [--style waves|spectrum|minimal|pulse] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
 
 usage() {
     echo "$USAGE" >&2
@@ -87,6 +95,11 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
   --preset max      upper bound of every look slider; play limit 20 %; report cpu-max.txt
   --preset user     the owner's wf.* keys copied from com.wfeels.wavefeels, wf.paused forced
                     to 0; play limit 20 %; report cpu-user.txt
+  --style STYLE     wave style written over the preset (also over the owner's settings with
+                    --preset user): waves, spectrum, minimal or pulse; stored as JSON data in
+                    wf.waveStyle, checked by "стиль STYLE" in the app's settings line; report
+                    and sample files get the style suffix (cpu-max-pulse-expanded.txt); without
+                    it the preset's own style is kept (waves for default and max)
   --island MODE     play run only, the island's state machine still drives it:
                       collapsed  the pointer never expands the island
                       expanded   held open as if hovered; checked by "остров: ... -> раскрыт"
@@ -105,6 +118,7 @@ EOF
 }
 
 PRESET=default
+STYLE=""
 ISLAND=""
 SAMPLE=0
 APP_ARG=""
@@ -117,6 +131,11 @@ while [[ $# -gt 0 ]]; do
         --preset)
             [[ $# -ge 2 ]] || usage
             PRESET=$2
+            shift 2
+            ;;
+        --style)
+            [[ $# -ge 2 ]] || usage
+            STYLE=$2
             shift 2
             ;;
         --island)
@@ -160,6 +179,17 @@ case "$PRESET" in
         ;;
     *)
         echo "cpu-probe: unknown preset $PRESET (expected default, max or user)" >&2
+        usage
+        ;;
+esac
+
+case "$STYLE" in
+    "") ;;
+    waves | spectrum | minimal | pulse)
+        PREFIX="$PREFIX-$STYLE"
+        ;;
+    *)
+        echo "cpu-probe: unknown style $STYLE (expected waves, spectrum, minimal or pulse)" >&2
         usage
         ;;
 esac
@@ -240,6 +270,10 @@ write_preset() {
             defaults write "$SUITE" wf.beatPulse -bool true &&
             defaults write "$SUITE" wf.softPulse -bool true &&
             defaults write "$SUITE" wf.paused -bool false || return 1
+    fi
+    # Стиль волн: JSON-строка в кавычках как данные, так ее пишет AppSettings (JSONEncoder).
+    if [[ -n $STYLE ]]; then
+        defaults write "$SUITE" wf.waveStyle -data "$(printf '"%s"' "$STYLE" | xxd -p | tr -d '\n')" || return 1
     fi
     # Баннер нового трека может быть выключен у владельца, а режим banner мерит именно его.
     if [[ $ISLAND == banner ]]; then
@@ -547,6 +581,10 @@ probe() {
         if [[ -z "$APPLIED" ]]; then
             APPLIED=${settings_line#*"$SETTINGS_MARK"}
         fi
+        # --style: приложение должно было прочитать стиль из набора (строка «стиль <стиль>,»).
+        if [[ -n $STYLE && $settings_line != *"стиль $STYLE,"* ]]; then
+            reasons="$reasons; app did not report style $STYLE (wf.waveStyle not applied, build before 1.2?)"
+        fi
     else
         report "effective settings: not reported"
         reasons="$reasons; app did not report settings from $SUITE (build without --settings-suite?), the run may have used personal settings"
@@ -629,6 +667,7 @@ report "preset: $PRESET (play: at most $PLAY_LIMIT %, silence: below $SILENCE_LI
 if [[ $PRESET == user ]]; then
     report "user settings: $USER_KEYS wf.* keys copied from $USER_DOMAIN, wf.paused forced to 0"
 fi
+report "style: ${STYLE:-not forced} (--style)"
 report "island: ${ISLAND:-not forced} (--island, play run only)"
 report "method: cumulative CPU time from ps over a ${DURATION} s window after ${WARMUP} s warm-up, % of one core"
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"

@@ -341,6 +341,12 @@ bash scripts/cpu-probe.sh --preset max dist/WaveFeels.app
 bash scripts/cpu-probe.sh --preset user --island expanded dist/WaveFeels.app
 ```
 
+Ключ `--style` меряет один стиль волн на тех же настройках: `waves` («Волны»), `spectrum` («Спектр»), `minimal` («Минимал») или `pulse` («Пульс»). Он работает с любым `--preset` и `--island`. Стиль добавляется к имени итога, например эта команда пишет ci-out/cpu-max-pulse-expanded.txt:
+
+```
+bash scripts/cpu-probe.sh --preset max --style pulse --island expanded dist/WaveFeels.app
+```
+
 Строка «render» в начале итога показывает, сколько кадров в секунду рисовал остров с музыкой и медиану интервала между кадрами (p50), для раскрытого острова с `--island expanded`, иначе для свернутого. Все ключи описывает `bash scripts/cpu-probe.sh --help`.
 
 Итог печатается в Терминал и сохраняется в ci-out/cpu-max.txt (для вида по умолчанию в ci-out/cpu.txt). Строка «result: success» значит, что нагрузка в пределах: с музыкой не больше 20 % одного ядра для max и 15 % для вида по умолчанию, в тишине меньше 1 %. С `--sample` скрипт еще записывает, чем заняты потоки приложения (ci-out/cpu-max-sample.txt), этот файл стоит прислать вместе с итогом. Старые сборки отдельный набор настроек не понимают, на них скрипт отметит замер как проваленный.
