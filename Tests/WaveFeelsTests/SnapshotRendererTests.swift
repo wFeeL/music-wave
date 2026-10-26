@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import Synchronization
 import Testing
+import WaveCore
 @testable import WaveFeels
 
 @MainActor
@@ -15,17 +16,52 @@ struct SnapshotRendererTests {
         "15-preset-fire", "15-preset-mono", "16-custom-color", "17-fill-thick-tall", "17-fill-normal", "18-one-line",
         "18-six-lines", "19-glow-radius-3x", "21-banner", "21-banner-light", "21-banner-long-title",
         "21-banner-pill", "21-banner-no-artwork", "21-banner-wide-wings",
+        "13-settings-appearance-tall", "13-settings-features", "13-settings-features-dark",
+        "22-style-spectrum", "22-style-minimal", "22-style-pulse", "22-style-pulse-pill",
+        "22-style-spectrum-expanded", "22-style-pulse-expanded", "23-color-by-band", "23-color-by-band-spectrum",
+        "23-color-flow", "24-progress-line", "24-progress-line-pill", "25-artwork-glow", "26-high-contrast",
+        "26-reduce-transparency", "05-expanded-stale-progress",
     ]
 
-    /// Вкладка «Вид» снимается светлой и темной, прежние снимки «Основных» на месте.
+    /// Раскрытые панели сцен 1.2: обложка и кнопки на тех же местах, что в 1.1.
+    static let expandedFeatureNames = [
+        "05-expanded-stale-progress", "22-style-spectrum-expanded", "22-style-pulse-expanded", "25-artwork-glow",
+        "26-reduce-transparency",
+    ]
+
+    /// Вкладки «Вид» и «Функции» снимаются светлыми и темными, «Вид» еще и в самом высоком
+    /// состоянии, прежние снимки «Основных» на месте.
     @Test func settingsScenesIncludeAppearanceTab() {
         let scenes = SnapshotRenderer.settingsScenes
         let names = scenes.map(\.name)
         #expect(names.contains("13-settings-appearance"))
         #expect(names.contains("13-settings-appearance-dark"))
-        #expect(scenes.filter { $0.tab == .appearance }.map(\.name) == ["13-settings-appearance", "13-settings-appearance-dark"])
+        #expect(scenes.filter { $0.tab == .appearance }.map(\.name) == [
+            "13-settings-appearance", "13-settings-appearance-dark", "13-settings-appearance-tall",
+        ])
         #expect(scenes.filter { $0.tab == .general }.map(\.name) == ["13-settings", "13-settings-dark", "13-settings-tall"])
+        #expect(scenes.filter { $0.tab == .features }.map(\.name) == ["13-settings-features", "13-settings-features-dark"])
         #expect(scenes.first { $0.name == "13-settings-appearance-dark" }?.dark == true)
+        #expect(scenes.first { $0.name == "13-settings-appearance-tall" }?.tall == true)
+        #expect(scenes.first { $0.name == "13-settings-features-dark" }?.dark == true)
+    }
+
+    /// Самый высокий «Вид» показывает все необязательные строки: «Свой цвет», строку о нагрузке
+    /// и подпись под крылом. Стиль «Волны» (все строки линий, без подписи «Пульса», которая
+    /// зависит от «Уменьшения движения» машины).
+    @Test func tallAppearanceShowsEveryOptionalRow() {
+        let appearance = SnapshotRenderer.tallAppearance
+        #expect(appearance.look == .waves)
+        var custom = false
+        if case .custom = appearance.colorMode {
+            custom = true
+        }
+        #expect(custom)
+        #expect(AppearanceSettingsView.costHint(for: appearance) != nil)
+        let caption = AppearanceSettingsView.wingCaption(
+            wing: appearance.wingWidth, limit: SnapshotRenderer.tallWingLimit, hasNotch: true
+        )
+        #expect(caption == "ограничено до 160 pt")
     }
 
     @Test func rendersAllSnapshotsWithVisibleWaves() async throws {
@@ -69,10 +105,11 @@ struct SnapshotRendererTests {
 
         await Task.yield()
         // Раскрытая панель показывает обложку (или градиент вместо нее) на своем месте: длинный
-        // текст не сдвигает ее, середина обложки цветная, не черная.
+        // текст, стиль, свечение обложки и скрытая полоса прогресса не сдвигают ее, середина
+        // обложки цветная, не черная.
         let artwork = SnapshotRenderer.artworkSampleRect()
         let artworkArea = Int(artwork.width * artwork.height * SnapshotRenderer.scale * SnapshotRenderer.scale)
-        for name in ["04-expanded", "05-expanded-paused", "06-long-title"] {
+        for name in ["04-expanded", "05-expanded-paused", "06-long-title"] + Self.expandedFeatureNames {
             let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
             let artworkCount = expanded.saturatedPixels(in: artwork, scale: SnapshotRenderer.scale)
             #expect(artworkCount > artworkArea / 2, "\(name): цветных пикселей обложки \(artworkCount) из \(artworkArea)")
@@ -89,7 +126,7 @@ struct SnapshotRendererTests {
         await Task.yield()
         // Кнопки на своем месте: в середине средней кнопки белый значок «пауза» или «играть».
         let transport = SnapshotRenderer.transportSampleRects()
-        for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork"] {
+        for name in ["04-expanded", "05-expanded-paused", "06-long-title", "10-expanded-no-artwork"] + Self.expandedFeatureNames {
             let expanded = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
             let bright = expanded.brightPixels(in: transport.play, scale: SnapshotRenderer.scale)
             #expect(bright > 100, "\(name): светлых пикселей в кнопке «пауза/играть» \(bright)")
@@ -165,7 +202,7 @@ struct SnapshotRendererTests {
         for scene in SnapshotRenderer.settingsScenes where scene.tab == .appearance {
             let unseeded = directory.appendingPathComponent("\(scene.name)-unseeded.png")
             try SnapshotRenderer.renderSettings(
-                name: scene.name, dark: scene.dark, tall: false, tab: .appearance, model: control, to: unseeded
+                name: scene.name, dark: scene.dark, tall: scene.tall, tab: .appearance, model: control, to: unseeded
             )
             let shot = try Bitmap(url: directory.appendingPathComponent("\(scene.name).png"))
             let silent = try Bitmap(url: unseeded)

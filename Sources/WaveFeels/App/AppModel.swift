@@ -1745,6 +1745,11 @@ final class AppModel {
         permissionHint = shown
     }
 
+    /// Снимки окна настроек: опции экрана для предпросмотра заданы, а не взяты у машины.
+    func previewDisplayOptions(_ options: DisplayOptions) {
+        displayOptions = options
+    }
+
     private func log(_ message: String) {
         Log.app.info("\(message, privacy: .public)")
         Log.file(message)

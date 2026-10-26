@@ -19,9 +19,13 @@ enum SnapshotError: Error, CustomStringConvertible {
 
 /// Снимки острова для CI: PNG в масштабе 2 на фоне строки меню macOS. После них снимки окна
 /// настроек в размере настоящего окна: вкладка «Основные» светлая, темная и самая высокая (ручная
-/// задержка и подсказка о доступе к звуку), на которой видно, если содержимое не помещается, и
-/// вкладка «Вид» с предпросмотром острова, светлая и темная. Все, что зависит от машины (список
-/// источников, запуск при входе, экран острова), у снимков настроек задано.
+/// задержка и подсказка о доступе к звуку), на которой видно, если содержимое не помещается,
+/// вкладка «Вид» с предпросмотром острова, светлая, темная и самая высокая («Свой цвет», строка
+/// о нагрузке, подпись под крылом), и вкладка «Функции», светлая и темная. Все, что зависит от
+/// машины (список источников, запуск при входе, экран острова), у снимков настроек задано.
+/// «Пульс» на снимках настроек не выбран: подпись под «Стилем» зависит от «Уменьшения движения»
+/// машины. Перед ними функции 1.2 стоят в своих значениях по умолчанию, а не в значениях
+/// последней сцены.
 ///
 /// Кадры анализа не задаются руками: `demo.wav` прогоняется по шагам через `StreamAnalyzer` и
 /// `BeatTracker` вне реального времени до нужного момента (`DemoTimeline`), с шагом 1/60 с вместе
@@ -33,6 +37,14 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// Снимки 21 показывают открытый баннер нового трека: у выреза темный и светлый, с длинным
 /// названием, без обложки, на капсуле и с крыльями 200 pt (свернутый остров 585 pt шире баннера
 /// 400 pt).
+///
+/// Снимки 1.2 рисуются после окна настроек, чтобы снимки 1.1 и окно настроек получали ту же
+/// модель, что и раньше. Снимки 22 показывают стили «Спектр», «Минимал» и «Пульс» (у выреза,
+/// на капсуле и в раскрытой панели), 23 цвет по частотам и переливание с фазой 0.4, 24 полосу
+/// прогресса у выреза и на капсуле, 25 свечение обложки, 26 «Увеличить контраст» и «Уменьшить
+/// прозрачность» (свечения обложки нет). `05-expanded-stale-progress`: позиция 150 с при
+/// длительности 133 с, полосы прогресса в панели нет. В сценах 1.1 полоса прогресса, свечение
+/// обложки и мягкая остановка выключены, опции экрана обычные, фаза переливания 0.
 enum SnapshotRenderer {
     static let scale: CGFloat = 2
     /// Размер экрана снимка, pt: панель с крыльями 200 pt и свечением радиусом 3× целиком.
@@ -129,13 +141,28 @@ enum SnapshotRenderer {
     }
 
     /// Снимки окна настроек: имя, темное ли оформление, самое ли высокое состояние и вкладка.
+    /// Самое высокое состояние есть у «Основных» и «Вида» (`renderSettings`).
     static let settingsScenes: [(name: String, dark: Bool, tall: Bool, tab: SettingsView.Tab)] = [
         ("13-settings", false, false, .general),
         ("13-settings-dark", true, false, .general),
         ("13-settings-tall", false, true, .general),
         ("13-settings-appearance", false, false, .appearance),
         ("13-settings-appearance-dark", true, false, .appearance),
+        ("13-settings-appearance-tall", false, true, .appearance),
+        ("13-settings-features", false, false, .features),
+        ("13-settings-features-dark", true, false, .features),
     ]
+
+    /// Вид самого высокого состояния вкладки «Вид»: «Волны» со всеми строками, «Свой цвет»
+    /// (строка выбора цвета), цена выше порога (`WaveAppearance.isRenderCostHigh`, строка
+    /// «Высокая нагрузка на процессор») и крыло шире предела экрана `tallWingLimit` (подпись
+    /// «ограничено до 160 pt»).
+    static let tallAppearance = WaveAppearance(
+        wingWidth: 200, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowRadius: 2,
+        lineCount: 6, fill: 0.5, thickness: 1.5, amplitude: 1.5
+    )
+    /// Предел крыла экрана на снимке самого высокого «Вида», pt: уже `tallAppearance.wingWidth`.
+    static let tallWingLimit: CGFloat = 160
 
     /// Внешний монитор без выреза: капсула под строкой меню.
     static var pillLayout: NotchLayout {
@@ -324,9 +351,77 @@ enum SnapshotRenderer {
                 appearance: look { $0.wingWidth = 200 }, banner: true
             ),
         ]
+        // Сцены 1.2: стили, цвета и функции острова. Каждая включает только то, что показывает.
+        var staleProgress = track
+        staleProgress.elapsedTime = 150
+        staleProgress.duration = 133
+        let featureScenes: [SnapshotScene] = [
+            SnapshotScene(
+                name: "22-style-spectrum", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.look = .spectrum }
+            ),
+            SnapshotScene(
+                name: "22-style-minimal", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.look = .minimal }
+            ),
+            SnapshotScene(
+                name: "22-style-pulse", state: .collapsed, moment: loudBeat, palette: fallback,
+                appearance: look { $0.look = .pulse }
+            ),
+            SnapshotScene(
+                name: "22-style-pulse-pill", state: .collapsed, moment: loudBeat, palette: fallback, pill: true,
+                appearance: look { $0.look = .pulse }
+            ),
+            SnapshotScene(
+                name: "22-style-spectrum-expanded", state: .expanded, moment: loudBeat, palette: fromModel,
+                appearance: look { $0.look = .spectrum }
+            ),
+            SnapshotScene(
+                name: "22-style-pulse-expanded", state: .expanded, moment: loudBeat, palette: fromModel,
+                appearance: look { $0.look = .pulse }
+            ),
+            SnapshotScene(
+                name: "23-color-by-band", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.colorByBand = true }
+            ),
+            SnapshotScene(
+                name: "23-color-by-band-spectrum", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look {
+                    $0.look = .spectrum
+                    $0.colorByBand = true
+                }
+            ),
+            SnapshotScene(
+                name: "23-color-flow", state: .collapsed, moment: groove, palette: fallback,
+                appearance: look { $0.colorFlow = 0.5 }, flowPhase: 0.4
+            ),
+            SnapshotScene(
+                name: "24-progress-line", state: .collapsed, moment: groove, palette: fallback, progressLine: true
+            ),
+            SnapshotScene(
+                name: "24-progress-line-pill", state: .collapsed, moment: groove, palette: fallback, pill: true,
+                progressLine: true
+            ),
+            SnapshotScene(
+                name: "25-artwork-glow", state: .expanded, moment: loudBeat, palette: fromModel, artworkGlow: true
+            ),
+            SnapshotScene(
+                name: "26-high-contrast", state: .collapsed, moment: groove, palette: fallback,
+                displayOptions: DisplayOptions(increaseContrast: true)
+            ),
+            SnapshotScene(
+                name: "26-reduce-transparency", state: .expanded, moment: loudBeat, palette: fromModel,
+                artworkGlow: true, displayOptions: DisplayOptions(reduceTransparency: true)
+            ),
+            SnapshotScene(
+                name: "05-expanded-stale-progress", state: .expanded, moment: loudCalm, palette: fromModel,
+                track: staleProgress
+            ),
+        ]
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let names = scenes.map(\.name) + settingsScenes.map(\.name)
+        // В порядке отрисовки: сцены 1.1, окно настроек, сцены 1.2.
+        let names = scenes.map(\.name) + settingsScenes.map(\.name) + featureScenes.map(\.name)
         let manifest = names.map { "\($0).png\n" }.joined()
         try Data(manifest.utf8).write(to: directory.appendingPathComponent(manifestName), options: .atomic)
         let defaults = snapshotDefaults()
@@ -334,6 +429,7 @@ enum SnapshotRenderer {
         // Снимки не зависят от режима энергосбережения машины: в нем остров облегчен.
         model.lowPower = false
         // И от системных «Увеличить контраст» и «Уменьшить прозрачность»: вид как в настройках.
+        // Сцены задают опции экрана сами (`SnapshotScene.displayOptions`).
         model.settings.followDisplayOptions = false
         model.settings.source = source
         var written: [URL] = []
@@ -343,13 +439,23 @@ enum SnapshotRenderer {
             written.append(url)
             await Task.yield()
         }
+        // Окно настроек показывает настройки по умолчанию, а не значения последней сцены.
         apply(.standard, to: model.settings)
+        applyDefaultFeatures(to: model.settings)
+        model.previewDisplayOptions(.standard)
         PreviewPlayer.seed(moments.preview)
         for scene in settingsScenes {
             let url = directory.appendingPathComponent("\(scene.name).png")
             try renderSettings(
                 name: scene.name, dark: scene.dark, tall: scene.tall, tab: scene.tab, model: model, to: url
             )
+            written.append(url)
+            await Task.yield()
+        }
+        model.settings.followDisplayOptions = false
+        for scene in featureScenes {
+            let url = directory.appendingPathComponent("\(scene.name).png")
+            try render(scene, model: model, to: url)
             written.append(url)
             await Task.yield()
         }
@@ -384,6 +490,17 @@ enum SnapshotRenderer {
         settings.look = appearance.look
         settings.colorFlow = appearance.colorFlow
         settings.colorByBand = appearance.colorByBand
+    }
+
+    /// Функции 1.2 в значениях по умолчанию приложения: сцены их выключают, а окно настроек
+    /// должно показывать то, что видит пользователь после установки.
+    @MainActor
+    private static func applyDefaultFeatures(to settings: AppSettings) {
+        settings.progressLine = AppSettings.Default.progressLine
+        settings.artworkGlow = AppSettings.Default.artworkGlow
+        settings.softStop = AppSettings.Default.softStop
+        settings.softPulse = AppSettings.Default.softPulse
+        settings.followDisplayOptions = AppSettings.Default.followDisplayOptions
     }
 
     @MainActor
@@ -457,10 +574,12 @@ extension SnapshotRenderer {
     /// Окно настроек через `NSHostingView` в невидимом окне: `ImageRenderer` не рисует
     /// элементы `Form`, за которыми стоят AppKit-контролы. Окно не выводится на экран,
     /// `cacheDisplay` рисует его содержимое в битмап в масштабе экрана. Размер тот же, что у окна
-    /// настроек. Устройство вывода задано (`settingsDevice`), а не берется у машины. `tall`:
-    /// ручная задержка 120 мс, подсказка о доступе к звуку и свой сдвиг синхронизации устройства
-    /// (видна «Сбросить»), самое высокое состояние «Основных». Окно считается закрытым, поэтому
-    /// предпросмотр вкладки «Вид» рисует один кадр и стоит.
+    /// настроек. Устройство вывода задано (`settingsDevice`), а не берется у машины. `tall`
+    /// у «Основных»: ручная задержка 120 мс, подсказка о доступе к звуку и свой сдвиг
+    /// синхронизации устройства (видна «Сбросить»), самое высокое их состояние. `tall` у «Вида»:
+    /// вид `tallAppearance` на экране с пределом крыла `tallWingLimit`. После снимка все
+    /// возвращается как было. Окно считается закрытым, поэтому предпросмотр вкладки «Вид» рисует
+    /// один кадр и стоит.
     ///
     /// Переключатель вкладок `cacheDisplay` кладет в битмап полупрозрачным (альфа около 0.1 у
     /// подложки), а не поверх фона окна. Просмотрщик кладет такой PNG на белое, и в темном
@@ -476,16 +595,29 @@ extension SnapshotRenderer {
         to url: URL
     ) throws {
         let device = settingsDevice
-        if tall {
+        let tallGeneral = tall && tab == .general
+        let tallLook = tall && tab == .appearance
+        if tallGeneral {
             model.settings.latencyMode = .manual(milliseconds: 120)
             model.previewPermissionHint(true)
             model.settings.syncOffsets.set(-15, deviceUID: device.uid, name: device.name)
         }
         defer {
-            if tall {
+            if tallGeneral {
                 model.settings.latencyMode = .auto
                 model.previewPermissionHint(false)
                 model.settings.syncOffsets.reset(deviceUID: device.uid)
+            }
+        }
+        let shownAppearance = model.settings.appearance
+        var screen = notchLayout
+        if tallLook {
+            apply(tallAppearance, to: model.settings)
+            screen.wingLimit = tallWingLimit
+        }
+        defer {
+            if tallLook {
+                apply(shownAppearance, to: model.settings)
             }
         }
         guard let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) else {
@@ -495,7 +627,7 @@ extension SnapshotRenderer {
         let frame = NSRect(origin: .zero, size: size)
         let content = SettingsView(
             model: model, presence: WindowPresence(), catalog: settingsCatalog,
-            login: (status: .notRegistered, inApplications: false), screen: notchLayout, device: device,
+            login: (status: .notRegistered, inApplications: false), screen: screen, device: device,
             tab: tab
         ) {}
             .frame(width: size.width, height: size.height)
