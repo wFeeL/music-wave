@@ -27,8 +27,9 @@ enum WavePass: Sendable {
 /// Волны одного кадра: точки и цвета считаются один раз и общие для всех холстов кадра
 /// (два крыла, линии и свечение). Точки всех линий лежат в одном массиве, точки градиента всех
 /// наборов в другом, линии держат свои срезы: на кадр два выделения памяти, а не по паре на линию.
-/// Градиенты обводки и заливки (`Gradient` из цветов `Color`) тоже строятся здесь один раз, холст
-/// только ставит их между своими краями. Стиль (`WaveLook`) доходит до холста только через
+/// Градиенты обводки и заливки (`Gradient` из цветов `Color`) тоже строятся здесь один раз, по
+/// одному на набор точек градиента (основная линия и ее эхо делят оба), холст только ставит их
+/// между своими краями. Стиль (`WaveLook`) доходит до холста только через
 /// линии, заливку и `geometry`.
 nonisolated struct WaveSet: Sendable {
     /// Одна линия (`WaveLine`).
@@ -52,9 +53,12 @@ nonisolated struct WaveSet: Sendable {
         /// Номер набора `baseStops`: у основной линии и ее эха один, по нему холст строит градиент
         /// заливки один раз на набор.
         let stopSet: Int
-        /// Множитель прозрачности линии (`WaveLine.opacity`).
+        /// Множитель прозрачности линии (`WaveLine.opacity`): холст рисует линию градиентом
+        /// набора с этой прозрачностью (`GraphicsContext.opacity`).
         let opacity: Float
-        /// Градиент обводки линии и ее свечения: `stops` цветами `Color`.
+        /// Градиент обводки линии и ее свечения: `baseStops` цветами `Color`, без прозрачности
+        /// линии. Один на набор точек градиента: основная линия и ее эхо (у спектра и призрак
+        /// пика) рисуются одним и тем же, эхо с меньшей `opacity`.
         let gradient: Gradient
         /// Тот же градиент со смешением цветов в перцептивном пространстве
         /// (`Gradient.colorSpace(.perceptual)`), только у линий «Спектра»; холст тогда рисует его.
@@ -317,12 +321,15 @@ nonisolated struct WaveSet: Sendable {
             }
         }
 
+        // Градиенты обводки по набору точек градиента с прозрачностью самих точек: основная линия
+        // и ее эхо делят один, прозрачность линии холст накладывает при обводке.
+        let lineGradients = stopRanges.map { range in
+            Self.gradient(stops[range]) { Double($0) }
+        }
+        let perceptualLineGradients = keys.indices.map { Self.perceptual(lineGradients[$0], source: keys[$0].source) }
         layers = lines.indices.map { index in
             let line = lines[index]
             let set = stopSets[index]
-            let baseStops = stops[stopRanges[set]]
-            let opacity = line.opacity
-            let gradient = Self.gradient(baseStops) { Double($0 * opacity) }
             return Layer(
                 shape: line.shape,
                 level: levels[index],
@@ -330,11 +337,11 @@ nonisolated struct WaveSet: Sendable {
                 fills: line.fills,
                 widthScale: CGFloat(line.widthScale),
                 samples: samples[ranges[index]],
-                baseStops: baseStops,
+                baseStops: stops[stopRanges[set]],
                 stopSet: set,
-                opacity: opacity,
-                gradient: gradient,
-                perceptualGradient: Self.perceptual(gradient, source: line.source)
+                opacity: line.opacity,
+                gradient: lineGradients[set],
+                perceptualGradient: perceptualLineGradients[set]
             )
         }
         if fillAmount > 0 {
@@ -471,6 +478,9 @@ nonisolated struct WaveDrawing: Sendable {
             } else {
                 .linearGradient(line.layer.gradient, startPoint: startPoint, endPoint: endPoint)
             }
+            // Градиент общий с основной линией, эхо и призрак пика тише на свою прозрачность. У
+            // основных линий 1: обводка та же, что с прозрачностью в самих точках.
+            context.opacity = Double(line.layer.opacity)
             context.stroke(
                 line.path,
                 with: shading,

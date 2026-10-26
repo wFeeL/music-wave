@@ -94,9 +94,10 @@ struct WaveSetTests {
         }
     }
 
-    /// Градиенты строятся в наборе, один на кадр для всех холстов: обводка у каждой линии из ее
-    /// `stops`, заливка по набору точек градиента с прозрачностью `fillTopOpacity × fill` (у
-    /// основной линии и эха один). Без заливки градиентов заливки нет.
+    /// Градиенты строятся в наборе, один на кадр для всех холстов и один на набор точек
+    /// градиента: обводка из `baseStops` без прозрачности линии (основная линия и эхо делят ее,
+    /// прозрачность эха холст накладывает при обводке), заливка с прозрачностью
+    /// `fillTopOpacity × fill`. Без заливки градиентов заливки нет.
     @Test func gradientsAreBuiltOncePerSet() {
         for style in Self.styles {
             let waves = Self.waves({
@@ -106,12 +107,15 @@ struct WaveSetTests {
             let top = min(Double(WavePaint.fillTopOpacity) * 0.5, 1)
             #expect(waves.fillGradients.count == 3)
             for layer in waves.layers {
-                let opacity = layer.opacity
-                let stroke = WaveSet.gradient(layer.baseStops) { Double($0 * opacity) }
+                let stroke = WaveSet.gradient(layer.baseStops) { Double($0) }
                 let fill = WaveSet.gradient(layer.baseStops) { _ in top }
                 #expect(layer.gradient == stroke)
                 #expect(layer.gradient.stops.map(\.location) == layer.stops.map { CGFloat($0.location) })
                 #expect(waves.fillGradients[layer.stopSet] == fill)
+            }
+            for index in 0..<3 {
+                #expect(waves.layers[index].opacity == 1)
+                #expect(waves.layers[index].gradient == waves.layers[index + 3].gradient)
             }
             #expect(Self.waves({ $0.lineCount = 6 }, style: style).fillGradients.isEmpty)
             #expect(WaveSet(empty: style).fillGradients.isEmpty)
@@ -219,6 +223,7 @@ struct WaveSetTests {
             #expect(line.opacity == 1 && peak.opacity == 0.35)
             #expect(line.stopSet == peak.stopSet)
             #expect(line.baseStops == peak.baseStops)
+            #expect(line.gradient == peak.gradient)
             #expect(line.perceptualGradient != nil && peak.perceptualGradient != nil)
             let count = style == .wing ? WaveSet.wingPoints : WaveSet.panelPoints
             let peakCount = style == .wing ? WaveSet.wingEchoPoints : WaveSet.panelPoints
