@@ -6,7 +6,7 @@ import WaveCore
 /// Вкладка «Вид»: живой предпросмотр острова и все настройки вида волн. Изменения применяются
 /// сразу, и к острову, и к предпросмотру; значения проходят через `AppSettings`, который держит
 /// их в пределах и заменяет не конечные. Строки, которые выбранный стиль не рисует, скрыты
-/// (`WaveLook.usesLineCount`, `usesStroke`, `usesFill`); сохраненные значения при этом не меняются.
+/// (`WaveLook.usesLineCount`); сохраненные значения при этом не меняются.
 struct AppearanceSettingsView: View {
     let model: AppModel
     /// Игрок предпросмотра; живет в `SettingsView`, а не создается на каждом пересчете вкладки.
@@ -18,8 +18,6 @@ struct AppearanceSettingsView: View {
 
     /// Экран острова, как его видит `NotchWindowController`: по нему предел крыла.
     @State private var screen: NotchLayout?
-    /// Системное «Уменьшение движения»: при нем «Пульс» не дышит, под «Стилем» об этом подпись.
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel, player: PreviewPlayer, active: Bool, fixedScreen: NotchLayout? = nil) {
         self.model = model
@@ -199,9 +197,7 @@ struct AppearanceSettingsView: View {
 
     // MARK: - Волны
 
-    /// «Стиль»: «Волны», «Спектр», «Минимал», «Пульс». Подпись только у «Пульса» при
-    /// «Уменьшении движения» (`SettingsText.lookCaption`), отдельной строкой под выбором:
-    /// второй `Text` в метке сегментного `Picker` в `.grouped` форме может не показываться.
+    /// «Стиль»: «Волны», «Спектр».
     @ViewBuilder
     private var lookRow: some View {
         let settings = model.settings
@@ -211,15 +207,9 @@ struct AppearanceSettingsView: View {
             }
         }
         .pickerStyle(.segmented)
-        if let caption = SettingsText.lookCaption(settings.look, reduceMotion: reduceMotion) {
-            Text(caption)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
     }
 
-    /// Строки, которые нужны выбранному стилю: у «Пульса» ни одной, у «Минимала» толщина и
-    /// размах, у «Спектра» все, кроме количества.
+    /// Строки, которые нужны выбранному стилю: у «Спектра» все, кроме количества.
     @ViewBuilder
     private var waveRows: some View {
         let settings = model.settings
@@ -232,28 +222,24 @@ struct AppearanceSettingsView: View {
             }
             .pickerStyle(.segmented)
         }
-        if look.usesStroke {
-            SettingsSliderRow(
-                "Толщина линий",
-                value: Binding(get: { settings.lineThickness }, set: { settings.lineThickness = ($0 * 20).rounded() / 20 }),
-                in: WaveAppearance.Limits.thickness,
-                text: SettingsView.multiplier(Float(settings.lineThickness))
-            )
-            SettingsSliderRow(
-                "Размах",
-                value: Binding(get: { settings.waveAmplitude }, set: { settings.waveAmplitude = ($0 * 20).rounded() / 20 }),
-                in: WaveAppearance.Limits.amplitude,
-                text: SettingsView.multiplier(Float(settings.waveAmplitude))
-            )
-        }
-        if look.usesFill {
-            SettingsSliderRow(
-                "Заливка",
-                value: Binding(get: { settings.fill }, set: { settings.fill = ($0 * 20).rounded() / 20 }),
-                in: WaveAppearance.Limits.fill,
-                text: "\(Int((settings.fill * 100).rounded())) %"
-            )
-        }
+        SettingsSliderRow(
+            "Толщина линий",
+            value: Binding(get: { settings.lineThickness }, set: { settings.lineThickness = ($0 * 20).rounded() / 20 }),
+            in: WaveAppearance.Limits.thickness,
+            text: SettingsView.multiplier(Float(settings.lineThickness))
+        )
+        SettingsSliderRow(
+            "Размах",
+            value: Binding(get: { settings.waveAmplitude }, set: { settings.waveAmplitude = ($0 * 20).rounded() / 20 }),
+            in: WaveAppearance.Limits.amplitude,
+            text: SettingsView.multiplier(Float(settings.waveAmplitude))
+        )
+        SettingsSliderRow(
+            "Заливка",
+            value: Binding(get: { settings.fill }, set: { settings.fill = ($0 * 20).rounded() / 20 }),
+            in: WaveAppearance.Limits.fill,
+            text: "\(Int((settings.fill * 100).rounded())) %"
+        )
     }
 
     // MARK: - Экран

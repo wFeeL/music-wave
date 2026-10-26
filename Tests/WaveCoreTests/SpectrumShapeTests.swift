@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import WaveCore
 
-/// Линия «Спектра» через 24 полосы и «вздох» со свечением «Пульса».
+/// Линия «Спектра» через 24 полосы.
 struct SpectrumShapeTests {
     private func samples(
         _ bands: [Float], count: Int, profile: WaveProfile = .wing, gain: Double = 1
@@ -115,59 +115,5 @@ struct SpectrumShapeTests {
         // Пустой буфер и одна точка не падают.
         #expect(samples(bands, count: 0).isEmpty)
         #expect(samples(bands, count: 1) == [0])
-    }
-
-    @Test func pulseSilentIsStill() {
-        #expect(PulseLook.breath(pulse: 0, ambient: 0, level: 0) == 0)
-        #expect(PulseLook.glow(glow: 0, ambient: 0, level: 0) == 0)
-        // Шум ниже нижнего края громкости остров не качает.
-        #expect(PulseLook.breath(pulse: 0, ambient: 0, level: 0.05) == 0)
-        #expect(PulseLook.glow(glow: 0, ambient: 0, level: 0.05) == 0)
-        // Не конечные и отрицательные входы считаются нулем.
-        #expect(PulseLook.breath(pulse: .nan, ambient: -1, level: .infinity) == 0)
-        #expect(PulseLook.glow(glow: .nan, ambient: -.infinity, level: -1) == 0)
-        #expect(PulseLook.breathDepth == 0.04)
-    }
-
-    @Test func pulseBreathesWithLoudness() {
-        let expected = 0.35 * WavePaint.smoothstep(Float(0.05), 0.8, 0.8)
-        #expect(abs(PulseLook.breath(pulse: 0, ambient: 0, level: 0.8) - expected) <= 1e-6)
-        #expect(abs(PulseLook.breath(pulse: 0, ambient: 0, level: 0.8) - 0.35) <= 1e-6)
-        let levels = stride(from: Float(0), through: 1, by: 0.05).map {
-            PulseLook.breath(pulse: 0, ambient: 0, level: $0)
-        }
-        #expect(zip(levels, levels.dropFirst()).allSatisfy { $0 <= $1 })
-        #expect(levels.last! > levels.first!)
-        // Мягкий пульс тоже дышит, когда он больше вклада громкости.
-        #expect(PulseLook.breath(pulse: 0, ambient: 0.15, level: 0) == 0.15)
-    }
-
-    @Test func pulseBeatDominates() {
-        #expect(PulseLook.breath(pulse: 1, ambient: 0, level: 0) == 1)
-        #expect(PulseLook.breath(pulse: 1, ambient: 0.18, level: 1) == 1)
-        #expect(PulseLook.breath(pulse: 0.6, ambient: 0.1, level: 0.3) == 0.6)
-        #expect(PulseLook.breath(pulse: 3, ambient: 0, level: 0) == 1)
-    }
-
-    /// Громкость в одиночку не дает вспышки: ни ее значение, ни рост за кадр не выше порога.
-    @Test func pulseLoudnessAloneStaysBelowFlash() {
-        #expect(PulseLook.glow(glow: 0, ambient: 0, level: 1) < OfflineBeatChain.eventRise)
-        let glows = stride(from: Float(0), through: 1, by: 0.01).map {
-            PulseLook.glow(glow: 0, ambient: 0, level: $0)
-        }
-        #expect(glows.allSatisfy { $0 < OfflineBeatChain.eventRise })
-        #expect(zip(glows, glows.dropFirst()).allSatisfy { $0 <= $1 })
-        #expect(glows.last! > 0)
-    }
-
-    /// Вспышка удара проходит как есть и поверх громкости все так же выше порога.
-    @Test func pulseKeepsFlash() {
-        #expect(PulseLook.glow(glow: 1, ambient: 0, level: 0) == 1)
-        #expect(PulseLook.glow(glow: 1, ambient: 0.18, level: 1) == 1)
-        #expect(PulseLook.glow(glow: 0.7, ambient: 0.1, level: 0.5) == 0.7)
-        let rise = PulseLook.glow(glow: 1, ambient: 0, level: 1) - PulseLook.glow(glow: 0, ambient: 0, level: 1)
-        #expect(rise > OfflineBeatChain.eventRise)
-        // Мягкий пульс тоже проходит.
-        #expect(PulseLook.glow(glow: 0, ambient: 0.15, level: 0) == 0.15)
     }
 }

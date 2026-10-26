@@ -154,7 +154,7 @@ struct AppSettingsTests {
             settings.hideInFullscreen = false
             settings.showTrackBanner = false
             settings.paused = true
-            settings.look = .minimal
+            settings.look = .spectrum
             settings.colorFlow = 0.7
             settings.colorByBand = true
             settings.softStop = false
@@ -183,7 +183,7 @@ struct AppSettingsTests {
             let source = try #require(defaults.data(forKey: "wf.source"))
             #expect(try decoder.decode(AudioSource.self, from: source) == .systemWide)
             let look = try #require(defaults.data(forKey: "wf.waveStyle"))
-            #expect(try decoder.decode(WaveLook.self, from: look) == .minimal)
+            #expect(try decoder.decode(WaveLook.self, from: look) == .spectrum)
         }
     }
 
@@ -465,6 +465,20 @@ extension AppSettingsTests {
         }
     }
 
+    /// Стили «Минимал» и «Пульс» из 1.2 убраны: сохраненный выбор открывается как «Волны», вид из
+    /// остальных настроек собирается без ошибок.
+    @Test func removedLooksOpenAsWaves() {
+        Self.withDefaults { defaults in
+            for word in ["minimal", "pulse"] {
+                defaults.set(Data("\"\(word)\"".utf8), forKey: "wf.waveStyle")
+                let settings = AppSettings(defaults: defaults)
+                #expect(settings.look == .waves)
+                #expect(settings.appearance.look == .waves)
+                #expect(!settings.appearance.lines.isEmpty)
+            }
+        }
+    }
+
     /// Испорченный или неизвестный (палитра из будущей версии) режим цвета дает «Из обложки».
     @Test func garbageColorModeFallsBackToArtwork() {
         Self.withDefaults { defaults in
@@ -487,7 +501,7 @@ extension AppSettingsTests {
             written.fill = 0.4
             written.lineThickness = 1.5
             written.waveAmplitude = 0.75
-            written.look = .pulse
+            written.look = .spectrum
             written.colorFlow = 0.25
             written.colorByBand = true
 
@@ -510,7 +524,7 @@ extension AppSettingsTests {
             #expect(read.appearance == WaveAppearance(
                 wingWidth: 180, colorMode: .custom(PaletteColor(hex: 0x7A5CFF)), glowRadius: 2.5,
                 lineCount: 5, fill: 0.4, thickness: 1.5, amplitude: 0.75,
-                colorFlow: 0.25, colorByBand: true, look: .pulse
+                colorFlow: 0.25, colorByBand: true, look: .spectrum
             ))
 
             read.colorMode = .preset(.ocean)

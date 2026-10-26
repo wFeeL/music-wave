@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Замер CPU и памяти собранного приложения. Использование:
-#   scripts/cpu-probe.sh [--preset default|max|user] [--style waves|spectrum|minimal|pulse]
+#   scripts/cpu-probe.sh [--preset default|max|user] [--style waves|spectrum]
 #                        [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [секунды]
 #   scripts/cpu-probe.sh --help
 #
@@ -28,7 +28,7 @@
 # wf.waveStyle как JSON-данные, строка "spectrum" в кавычках (AppSettings хранит стиль через
 # JSONEncoder). Остальные значения набора не меняются, поэтому стили сравниваются на одних и тех же
 # настройках. Приложение подтверждает стиль строкой «стиль <стиль>» в «настройках из набора»; без
-# нее прогон считается проваленным. К имени итога добавляется стиль (cpu-max-pulse.txt,
+# нее прогон считается проваленным. К имени итога добавляется стиль (cpu-max-spectrum.txt,
 # cpu-spectrum-expanded.txt), в шапке отчета строка «style:».
 #
 # --island <режим> передается приложению только в прогоне play (прогон silence ждет скрытый
@@ -75,7 +75,7 @@
 # Рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 
-USAGE="usage: $0 [--preset default|max|user] [--style waves|spectrum|minimal|pulse] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
+USAGE="usage: $0 [--preset default|max|user] [--style waves|spectrum] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
 
 usage() {
     echo "$USAGE" >&2
@@ -96,9 +96,9 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
   --preset user     the owner's wf.* keys copied from com.wfeels.wavefeels, wf.paused forced
                     to 0; play limit 20 %; report cpu-user.txt
   --style STYLE     wave style written over the preset (also over the owner's settings with
-                    --preset user): waves, spectrum, minimal or pulse; stored as JSON data in
+                    --preset user): waves or spectrum; stored as JSON data in
                     wf.waveStyle, checked by "стиль STYLE" in the app's settings line; report
-                    and sample files get the style suffix (cpu-max-pulse-expanded.txt); without
+                    and sample files get the style suffix (cpu-max-spectrum-expanded.txt); without
                     it the preset's own style is kept (waves for default and max)
   --island MODE     play run only, the island's state machine still drives it:
                       collapsed  the pointer never expands the island
@@ -185,11 +185,11 @@ esac
 
 case "$STYLE" in
     "") ;;
-    waves | spectrum | minimal | pulse)
+    waves | spectrum)
         PREFIX="$PREFIX-$STYLE"
         ;;
     *)
-        echo "cpu-probe: unknown style $STYLE (expected waves, spectrum, minimal or pulse)" >&2
+        echo "cpu-probe: unknown style $STYLE (expected waves or spectrum)" >&2
         usage
         ;;
 esac

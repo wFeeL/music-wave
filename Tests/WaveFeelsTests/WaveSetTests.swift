@@ -227,71 +227,16 @@ struct WaveSetTests {
         }
     }
 
-    /// «Пульс»: в крыле линий нет вовсе (ни заливки, ни градиентов), в панели одна стоячая линия
-    /// общего уровня с нулевой фазой, без свечения и заливки.
-    @Test func pulseWingSetIsEmpty() {
-        let wing = Self.waves({
-            $0.look = .pulse
-            $0.fill = 0.5
-        }, style: .wing)
-        #expect(wing.layers.isEmpty)
-        #expect(wing.fill == 0)
-        #expect(wing.fillGradients.isEmpty)
-        #expect(wing.geometry == .standard)
-
-        var motion = WaveMotion()
-        motion.advance(layers: [0.5, 0.4, 0.3], dt: 0.5)
-        var appearance = WaveAppearance.standard
-        appearance.look = .pulse
-        let panel = WaveSet(
-            frame: Self.frame, palette: PaletteExtractor.fallback, motion: motion, time: 1, style: .panel,
-            appearance: appearance
-        )
-        #expect(panel.layers.count == 1)
-        let line = panel.layers[0]
-        #expect(line.shape == .mid)
-        #expect(line.level == Self.frame.level)
-        #expect(!line.glows)
-        #expect(panel.fill == 0)
-        #expect(Array(line.samples) == WaveShape.samples(
-            layer: .mid, amplitude: Self.frame.level, phase: WavePhase(carrier: 0, harmonic: 0),
-            count: WaveSet.panelPoints, profile: .panel
-        ))
-    }
-
-    /// «Пульс» не строит наборы и слои свернутого острова: ни крыльев у выреза, ни линии капсулы, ни
-    /// волн баннера (`collapsed == false`). Набор панели только у раскрытой панели. Остальные стили
-    /// решают как раньше, слои свернутого острова у них есть.
-    @Test func pulseBuildsNoCollapsedSets() {
-        for collapsedStyle in Self.styles {
-            for panelLayer in [false, true] {
-                let sets = IslandWavesView.neededSets(
-                    look: .pulse, wings: true, panelLayer: panelLayer, bannerLayer: true, collapsedStyle: collapsedStyle
-                )
-                #expect(sets.wing == false)
-                #expect(sets.panel == panelLayer)
-                #expect(sets.collapsed == false)
-            }
-        }
-        for look in [WaveLook.waves, .spectrum, .minimal] {
-            let notch = IslandWavesView.neededSets(
-                look: look, wings: true, panelLayer: false, bannerLayer: false, collapsedStyle: .wing
-            )
-            #expect(notch.wing && !notch.panel)
-            let pill = IslandWavesView.neededSets(
-                look: look, wings: true, panelLayer: false, bannerLayer: false, collapsedStyle: .panel
-            )
-            #expect(!pill.wing && pill.panel)
-            let banner = IslandWavesView.neededSets(
-                look: look, wings: false, panelLayer: false, bannerLayer: true, collapsedStyle: .panel
-            )
-            #expect(banner.wing && !banner.panel)
-            let expanded = IslandWavesView.neededSets(
-                look: look, wings: false, panelLayer: true, bannerLayer: false, collapsedStyle: .wing
-            )
-            #expect(!expanded.wing && expanded.panel)
-            #expect(notch.collapsed && pill.collapsed && banner.collapsed && expanded.collapsed)
-        }
+    /// Какие наборы нужны кадру: крылья у выреза, линия капсулы, волны баннера и раскрытая панель.
+    @Test func neededSetsFollowLayers() {
+        let notch = IslandWavesView.neededSets(wings: true, panelLayer: false, bannerLayer: false, collapsedStyle: .wing)
+        #expect(notch.wing && !notch.panel)
+        let pill = IslandWavesView.neededSets(wings: true, panelLayer: false, bannerLayer: false, collapsedStyle: .panel)
+        #expect(!pill.wing && pill.panel)
+        let banner = IslandWavesView.neededSets(wings: false, panelLayer: false, bannerLayer: true, collapsedStyle: .panel)
+        #expect(banner.wing && !banner.panel)
+        let expanded = IslandWavesView.neededSets(wings: false, panelLayer: true, bannerLayer: false, collapsedStyle: .wing)
+        #expect(!expanded.wing && expanded.panel)
     }
 
     /// Точка удара у выреза стоит там, где начинается линия: у середины крыла, у «Спектра» на
@@ -307,23 +252,6 @@ struct WaveSetTests {
         #expect(WaveAppearance.standard.lookGeometry.baseline == .center)
     }
 
-    /// «Минимал»: одна тонкая линия общего уровня, без заливки при любой «Заливке» в настройках.
-    @Test func minimalHasNoFill() {
-        for style in Self.styles {
-            let waves = Self.waves({
-                $0.look = .minimal
-                $0.fill = 1
-                $0.lineCount = 6
-            }, style: style)
-            #expect(waves.fill == 0)
-            #expect(waves.fillGradients.isEmpty)
-            #expect(waves.layers.count == 1)
-            #expect(waves.layers.first?.shape == .mid)
-            #expect(waves.layers.first?.level == Self.frame.level)
-            #expect(waves.geometry == WaveLookGeometry(baseline: .center, widthScale: WaveLook.minimalWidthScale))
-        }
-    }
-
     /// Цвет по частотам: одна линия красится участками (`sectionStops`) на точках с краями
     /// смешения, линии слоев своим цветом на обычных точках.
     @Test func colorByBandPaintsOneLineBySections() {
@@ -331,7 +259,7 @@ struct WaveSetTests {
             let sectionLocations = style == .wing ? WaveSet.wingSectionLocations : WaveSet.panelSectionLocations
             let locations = style == .wing ? WaveSet.wingLocations : WaveSet.panelLocations
             let options = WavePaint.Options(colorByBand: true)
-            for look in [WaveLook.waves, .spectrum, .minimal] {
+            for look in WaveLook.allCases {
                 let waves = Self.waves({
                     $0.look = look
                     $0.lineCount = 1
@@ -378,35 +306,20 @@ struct WaveSetTests {
         }
     }
 
-    /// «Пульс» дышит без «Вздоха на битах» и у свернутого острова светится громкостью; у раскрытой
-    /// панели и баннера свечение доли, как у остальных стилей. Остальные стили как раньше.
-    @Test func pulseBreathesWithoutBeatPulse() {
+    /// «Вздох» острова: масштаб растет с ударом только при «Вздохе на битах» и только если остров
+    /// может дышать; свечение под островом берется из кадра как есть.
+    @Test func breathingFollowsBeatPulse() {
         let visuals = IslandVisuals(
             frame: Self.frame, sampled: Self.frame, motion: WaveMotion(), palette: PaletteExtractor.fallback,
             glow: 0, pulse: 0.5, ambient: 0, time: 1
         )
-        let level = Self.frame.level
-        let pulse = IslandView.breathing(
-            look: .pulse, visuals: visuals, collapsed: true, canBreathe: true, beatPulse: false
-        )
-        let breath = PulseLook.breath(pulse: 0.5, ambient: 0, level: level)
-        #expect(pulse.scale == 1 + CGFloat(PulseLook.breathDepth) * CGFloat(breath))
-        #expect(pulse.glow == PulseLook.glow(glow: 0, ambient: 0, level: level))
-        #expect(pulse.glow > 0)
-        let expanded = IslandView.breathing(
-            look: .pulse, visuals: visuals, collapsed: false, canBreathe: false, beatPulse: true
-        )
-        #expect(expanded.scale == 1)
-        #expect(expanded.glow == visuals.glow)
-
-        let waves = IslandView.breathing(
-            look: .waves, visuals: visuals, collapsed: true, canBreathe: true, beatPulse: true
-        )
+        let waves = IslandView.breathing(visuals: visuals, canBreathe: true, beatPulse: true)
         #expect(waves.scale == 1 + IslandView.breathDepth * 0.5)
         #expect(waves.glow == 0)
-        let still = IslandView.breathing(
-            look: .waves, visuals: visuals, collapsed: true, canBreathe: true, beatPulse: false
-        )
+        let still = IslandView.breathing(visuals: visuals, canBreathe: true, beatPulse: false)
         #expect(still.scale == 1)
+        let stiff = IslandView.breathing(visuals: visuals, canBreathe: false, beatPulse: true)
+        #expect(stiff.scale == 1)
+        #expect(stiff.glow == visuals.glow)
     }
 }

@@ -141,7 +141,7 @@ struct RenderCostTests {
         for look in WaveLook.allCases {
             var appearance = WaveAppearance.standard
             appearance.look = look
-            let expected = look == .minimal ? 0.84 : 1.4
+            let expected = 1.4
             for options in [Self.contrast, Self.both] {
                 let adapted = appearance.adapted(to: options)
                 #expect(abs(adapted.lookGeometry.widthScale - expected) < 1e-9, "\(look)")
@@ -158,7 +158,7 @@ struct RenderCostTests {
             appearance.look = look
             let adapted = appearance.adapted(to: Self.opaque)
             #expect(!adapted.glowPass)
-            #expect(adapted.fill == 0 && adapted.effectiveFill == 0)
+            #expect(adapted.fill == 0)
             #expect(!adapted.highContrast)
             #expect(adapted.lineCount == 6)
             #expect(adapted.renderCost(for: .wing) <= appearance.renderCost(for: .wing))
@@ -227,7 +227,7 @@ struct RenderCostTests {
                 }
             }
         }
-        #expect(checked == 6 * 2 * 2 * 2 * 2 * 4 * 2 * 4)
+        #expect(checked == 6 * 2 * 2 * 2 * 2 * 4 * 2 * 2)
     }
 
     /// Цена стилей по модели: «Волны» не изменились, остальные считаются от своих линий.
@@ -242,17 +242,6 @@ struct RenderCostTests {
         for profile in WaveProfile.allCases {
             #expect(abs(appearance.renderCost(for: profile) - one.renderCost(for: profile)) < 1e-12)
         }
-        // «Минимал»: одна линия с толщиной × 0.6, со свечением, без заливки.
-        appearance.look = .minimal
-        appearance.fill = 1
-        let stroke = 0.75 + 0.25 * WaveLook.minimalWidthScale
-        #expect(abs(appearance.renderCost - stroke * 2 / 5) < 1e-12)
-        // «Пульс»: в крыле только «вздох» тела, в панели одна стоячая линия без свечения и заливки.
-        appearance.look = .pulse
-        appearance.wingWidth = 200
-        let span = 0.75 + 0.25 * 200 / 64
-        #expect(abs(appearance.renderCost(for: .wing) - 0.25 * span / 5) < 1e-12)
-        #expect(abs(appearance.renderCost(for: .panel) - 1.0 / 5) < 1e-12)
         #expect(appearance.renderCost == appearance.renderCost(for: .wing))
     }
 

@@ -150,9 +150,8 @@ struct WaveAppearanceTests {
     }
 
     @Test func lookTitlesAndDefault() throws {
-        #expect(WaveLook.allCases == [.waves, .spectrum, .minimal, .pulse])
-        #expect(WaveLook.allCases.map(\.title) == ["Волны", "Спектр", "Минимал", "Пульс"])
-        #expect(WaveLook.minimalWidthScale == 0.6)
+        #expect(WaveLook.allCases == [.waves, .spectrum])
+        #expect(WaveLook.allCases.map(\.title) == ["Волны", "Спектр"])
         #expect(WaveAppearance.standard.look == .waves)
         // Настройки 1.1 без поля стиля дают «Волны».
         let stored = Data(#"{"wingWidth": 120, "lineCount": 5}"#.utf8)
@@ -163,9 +162,6 @@ struct WaveAppearanceTests {
     @Test func lookTable() {
         let overall = WaveLine(source: .overall, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
         let spectrum = WaveLine(source: .spectrum, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
-        let standing = WaveLine(
-            source: .overall, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1, standing: true
-        )
         for count in 1...6 {
             var appearance = WaveAppearance.standard
             appearance.lineCount = count
@@ -177,23 +173,9 @@ struct WaveAppearanceTests {
             for profile in WaveProfile.allCases {
                 #expect(appearance.lines(for: profile) == [spectrum])
             }
-            appearance.look = .minimal
-            for profile in WaveProfile.allCases {
-                #expect(appearance.lines(for: profile) == [overall])
-            }
-            appearance.look = .pulse
-            #expect(appearance.lines(for: .wing).isEmpty)
-            #expect(appearance.lines == [])
-            #expect(appearance.lines(for: .panel) == [standing])
         }
-        #expect(standing.standing && !standing.glows)
-        #expect(!overall.standing && overall.glows)
+        #expect(overall.glows)
         #expect(spectrum.glows)
-        // Бегущих линий в «Пульсе» нет ни в одной раскладке.
-        var pulse = WaveAppearance.standard
-        pulse.look = .pulse
-        let pulseLines = WaveProfile.allCases.flatMap { pulse.lines(for: $0) }
-        #expect(pulseLines.allSatisfy { $0.standing })
     }
 
     @Test func lookGeometryTable() {
@@ -205,19 +187,17 @@ struct WaveAppearanceTests {
         }
         #expect(geometry(.waves) == .standard)
         #expect(geometry(.spectrum) == WaveLookGeometry(baseline: .bottom, widthScale: 1))
-        #expect(geometry(.minimal) == WaveLookGeometry(baseline: .center, widthScale: 0.6))
-        #expect(geometry(.pulse) == .standard)
     }
 
     /// Стиль из будущей сборки дает «Волны», остальные поля сохраняются.
     @Test func unknownLookFallsBackToWaves() throws {
         let appearance = WaveAppearance(
             wingWidth: 120, colorMode: .preset(.neon), glowRadius: 2, lineCount: 5, fill: 0.4, thickness: 1.5,
-            amplitude: 0.8, colorFlow: 0.3, colorByBand: true, look: .minimal
+            amplitude: 0.8, colorFlow: 0.3, colorByBand: true, look: .spectrum
         )
         let json = String(decoding: try JSONEncoder().encode(appearance), as: UTF8.self)
-        #expect(json.contains("\"look\":\"minimal\""))
-        let stored = Data(json.replacingOccurrences(of: "\"minimal\"", with: "\"laser\"").utf8)
+        #expect(json.contains("\"look\":\"spectrum\""))
+        let stored = Data(json.replacingOccurrences(of: "\"spectrum\"", with: "\"laser\"").utf8)
         let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
         var expected = appearance
         expected.look = .waves
@@ -228,21 +208,20 @@ struct WaveAppearanceTests {
         #expect(fallback.look == .waves && fallback.lineCount == 2)
     }
 
-    /// «Минимал» и «Пульс» рисуются без заливки, сохраненная заливка не меняется.
-    @Test func minimalAndPulseIgnoreFill() {
-        var appearance = WaveAppearance.standard
-        appearance.fill = 0.6
-        #expect(appearance.effectiveFill == 0.6)
-        appearance.look = .spectrum
-        #expect(appearance.effectiveFill == 0.6)
-        appearance.look = .minimal
-        #expect(appearance.effectiveFill == 0)
-        #expect(appearance.fill == 0.6)
-        appearance.look = .pulse
-        #expect(appearance.effectiveFill == 0)
-        #expect(appearance.fill == 0.6)
-        appearance.look = .waves
-        #expect(appearance.effectiveFill == 0.6)
+    /// Стили «Минимал» и «Пульс» из 1.2 убраны: сохраненное слово открывается как «Волны», и само по
+    /// себе, и внутри вида, остальные поля вида сохраняются.
+    @Test func removedStylesDecodeAsWaves() throws {
+        for word in ["minimal", "pulse"] {
+            let alone = Data("\"\(word)\"".utf8)
+            #expect(try JSONDecoder().decode(WaveLook.self, from: alone) == .waves)
+            let stored = Data("{\"look\": \"\(word)\", \"lineCount\": 5, \"fill\": 0.4}".utf8)
+            let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
+            #expect(decoded.look == .waves && decoded.lineCount == 5 && decoded.fill == 0.4)
+        }
+        for look in WaveLook.allCases {
+            let data = try JSONEncoder().encode(look)
+            #expect(try JSONDecoder().decode(WaveLook.self, from: data) == look)
+        }
     }
 
     private func hue(_ lab: OKLab) -> Float {

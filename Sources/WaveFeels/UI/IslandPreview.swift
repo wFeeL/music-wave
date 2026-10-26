@@ -176,9 +176,8 @@ extension PreviewPlayer {
 /// Свернутый остров на фоне строки меню, как на снимках (`SnapshotBackdrop`): условный вырез
 /// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн (под
 /// системные опции экрана модели, `AppModel.displayOptions`, как на острове), яркость свечения,
-/// «вздох», мягкий пульс и скорость переливания из настроек, в «Пульсе» дыхание и свечение как на
-/// острове (`IslandView.breathing`), крыло не шире, чем позволит экран острова
-/// (`wingLimit`). Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с
+/// «вздох» (`IslandView.breathing`), мягкий пульс и скорость переливания из настроек, крыло не
+/// шире, чем позволит экран острова (`wingLimit`). Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с
 /// частотой экрана острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
 /// (`PreviewPlayer.isActive`, у калибровки окно настроек не видно), `TimelineView` стоит.
 ///
@@ -255,8 +254,7 @@ struct IslandPreview: View {
                                 )
                             // Предпросмотр показывает свернутый остров без баннера.
                             let breath = IslandView.breathing(
-                                look: appearance.look, visuals: visuals, collapsed: true, canBreathe: canBreathe,
-                                beatPulse: beatPulse
+                                visuals: visuals, canBreathe: canBreathe, beatPulse: beatPulse
                             )
                             PreviewScene(
                                 visuals: visuals, geometry: geometry, glow: glow, appearance: appearance,

@@ -23,8 +23,7 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// вкладка «Вид» с предпросмотром острова, светлая, темная и самая высокая («Свой цвет», строка
 /// о нагрузке, подпись под крылом), и вкладка «Функции», светлая и темная. Все, что зависит от
 /// машины (список источников, запуск при входе, экран острова), у снимков настроек задано.
-/// «Пульс» на снимках настроек не выбран: подпись под «Стилем» зависит от «Уменьшения движения»
-/// машины. Перед ними функции 1.2 стоят в своих значениях по умолчанию, а не в значениях
+/// Перед ними функции 1.2 стоят в своих значениях по умолчанию, а не в значениях
 /// последней сцены.
 ///
 /// Кадры анализа не задаются руками: `demo.wav` прогоняется по шагам через `StreamAnalyzer` и
@@ -39,9 +38,8 @@ enum SnapshotError: Error, CustomStringConvertible {
 /// 400 pt).
 ///
 /// Снимки 1.2 рисуются после окна настроек, чтобы снимки 1.1 и окно настроек получали ту же
-/// модель, что и раньше. Снимки 22 показывают стили «Спектр», «Минимал» и «Пульс» (у выреза,
-/// на капсуле и в раскрытой панели), 23 цвет по частотам и переливание с фазой 0.4, 24 полосу
-/// прогресса у выреза и на капсуле, 25 свечение обложки, 26 «Увеличить контраст» и «Уменьшить
+/// модель, что и раньше. Снимки 22 показывают стиль «Спектр» (у выреза и в раскрытой панели), 23 цвет по частотам и
+/// переливание с фазой 0.4, 24 полосу прогресса у выреза и на капсуле, 25 свечение обложки, 26 «Увеличить контраст» и «Уменьшить
 /// прозрачность» (свечения обложки нет). `05-expanded-stale-progress`: позиция 150 с при
 /// длительности 133 с, полосы прогресса в панели нет. В сценах 1.1 полоса прогресса, свечение
 /// обложки и мягкая остановка выключены, опции экрана обычные, фаза переливания 0.
@@ -361,24 +359,8 @@ enum SnapshotRenderer {
                 appearance: look { $0.look = .spectrum }
             ),
             SnapshotScene(
-                name: "22-style-minimal", state: .collapsed, moment: groove, palette: fallback,
-                appearance: look { $0.look = .minimal }
-            ),
-            SnapshotScene(
-                name: "22-style-pulse", state: .collapsed, moment: loudBeat, palette: fallback,
-                appearance: look { $0.look = .pulse }
-            ),
-            SnapshotScene(
-                name: "22-style-pulse-pill", state: .collapsed, moment: loudBeat, palette: fallback, pill: true,
-                appearance: look { $0.look = .pulse }
-            ),
-            SnapshotScene(
                 name: "22-style-spectrum-expanded", state: .expanded, moment: loudBeat, palette: fromModel,
                 appearance: look { $0.look = .spectrum }
-            ),
-            SnapshotScene(
-                name: "22-style-pulse-expanded", state: .expanded, moment: loudBeat, palette: fromModel,
-                appearance: look { $0.look = .pulse }
             ),
             SnapshotScene(
                 name: "23-color-by-band", state: .collapsed, moment: groove, palette: fallback,

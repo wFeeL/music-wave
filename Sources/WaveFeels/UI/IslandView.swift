@@ -40,9 +40,7 @@ import WaveCore
 /// Открывается пружиной 0.42 / 0.82, закрывается 0.45 / 1.0. Наведение на баннер раскрывает
 /// полную панель (`NotchWindowController`), ее пружина главнее.
 ///
-/// Стиль «Пульс»: у свернутого острова волн нет, остров дышит и светится в такт и с громкостью
-/// (`breathing`, `PulseLook`), у выреза и на капсуле одинаково. Вид волн подстраивается под
-/// системные «Увеличить контраст» и «Уменьшить прозрачность» (`AppModel.displayOptions`,
+/// Вид волн подстраивается под системные «Увеличить контраст» и «Уменьшить прозрачность» (`AppModel.displayOptions`,
 /// `WaveAppearance.adapted(to:)`), только для рисования.
 ///
 /// «Мягкая остановка»: в тишине и на паузе источника-приложения волны, свечение, «вздох» и мягкий
@@ -86,27 +84,13 @@ struct IslandView: View {
     /// «Вздох»: насколько остров увеличивается на полном ударе.
     static let breathDepth: CGFloat = 0.03
 
-    /// Масштаб «вздоха» и свечение под островом на кадре по стилю. `collapsed`: остров свернут и
-    /// без баннера; `canBreathe`: к тому же без «Уменьшения движения». «Пульс»: остров дышит всегда,
-    /// когда может, без оглядки на «Вздох на битах», масштабом `1 + PulseLook.breathDepth ×
-    /// PulseLook.breath`; у свернутого острова свечение `PulseLook.glow` (удары, мягкий пульс и
-    /// громкость), у раскрытой панели и баннера свечение доли, как у других стилей, без ровного
-    /// свечения от громкости. Остальные стили как раньше: «вздох» `1 + breathDepth × pulse` только с
+    /// Масштаб «вздоха» и свечение под островом на кадре. `canBreathe`: остров свернут, без
+    /// баннера и без «Уменьшения движения». «Вздох» `1 + breathDepth × pulse` только с
     /// `beatPulse`, свечение доли.
     static func breathing(
-        look: WaveLook, visuals: IslandVisuals, collapsed: Bool, canBreathe: Bool, beatPulse: Bool
+        visuals: IslandVisuals, canBreathe: Bool, beatPulse: Bool
     ) -> (scale: CGFloat, glow: Float) {
-        switch look {
-        case .pulse:
-            let level = visuals.frame.level
-            let breath = PulseLook.breath(pulse: visuals.pulse, ambient: visuals.ambient, level: level)
-            let glow = collapsed
-                ? PulseLook.glow(glow: visuals.glow, ambient: visuals.ambient, level: level)
-                : visuals.glow
-            return (canBreathe ? 1 + CGFloat(PulseLook.breathDepth) * CGFloat(breath) : 1, glow)
-        case .waves, .spectrum, .minimal:
-            return (canBreathe && beatPulse ? 1 + breathDepth * CGFloat(visuals.pulse) : 1, visuals.glow)
-        }
+        (canBreathe && beatPulse ? 1 + breathDepth * CGFloat(visuals.pulse) : 1, visuals.glow)
     }
     /// Содержимое панели: появляется чуть позже формы, слегка вырастая от верха, исчезает быстро.
     static var panelContentTransition: AnyTransition {
@@ -294,8 +278,7 @@ struct IslandView: View {
         // У выреза и у капсулы на внешнем экране одинаково.
         let collapsedQuiet = state == .collapsed && !bannerVisible
         let breath = Self.breathing(
-            look: appearance.look, visuals: visuals, collapsed: collapsedQuiet,
-            canBreathe: collapsedQuiet && !reduceMotion, beatPulse: model.settings.beatPulse
+            visuals: visuals, canBreathe: collapsedQuiet && !reduceMotion, beatPulse: model.settings.beatPulse
         )
         let scale = breath.scale
         let anchor = geometry.anchor

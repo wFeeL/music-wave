@@ -86,37 +86,3 @@ public enum SpectrumShape {
         }
     }
 }
-
-/// Стиль «Пульс»: бегущих волн нет, остров и свечение дышат в такт и с громкостью.
-public enum PulseLook {
-    /// Глубина «вздоха»: масштаб острова `1 + breathDepth × breath(...)`.
-    public static let breathDepth = 0.04
-    /// Доля «вздоха» от громкости на полном уровне.
-    static let loudnessBreath: Float = 0.35
-    /// Доля свечения от громкости на полном уровне: ниже порога вспышки
-    /// `OfflineBeatChain.eventRise`, громкость в одиночку вспышку не дает.
-    static let loudnessGlow: Float = 0.15
-    /// Края громкости, между которыми растет ее вклад (`WavePaint.smoothstep`).
-    static let loudnessEdges: (low: Float, high: Float) = (0.05, 0.8)
-
-    /// «Вздох» 0...1: наибольшее из «вздоха» на сильной доле `pulse` (`BeatPulse.value`), мягкого
-    /// пульса `ambient` как есть и вклада громкости `0.35 × smoothstep(0.05, 0.8, level)`.
-    /// Не конечные и отрицательные входы считаются нулем.
-    public static func breath(pulse: Float, ambient: Float, level: Float) -> Float {
-        max(unit(pulse), unit(ambient), loudnessBreath * loudness(level))
-    }
-
-    /// Свечение 0...1: наибольшее из свечения ударов `glow`, мягкого пульса `ambient` и вклада
-    /// громкости `0.15 × smoothstep(0.05, 0.8, level)`. Вспышка удара проходит как есть.
-    public static func glow(glow: Float, ambient: Float, level: Float) -> Float {
-        max(unit(glow), unit(ambient), loudnessGlow * loudness(level))
-    }
-
-    private static func loudness(_ level: Float) -> Float {
-        WavePaint.smoothstep(loudnessEdges.low, loudnessEdges.high, unit(level))
-    }
-
-    private static func unit(_ value: Float) -> Float {
-        value.isFinite ? min(max(value, 0), 1) : 0
-    }
-}

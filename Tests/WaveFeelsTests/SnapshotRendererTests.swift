@@ -17,15 +17,14 @@ struct SnapshotRendererTests {
         "18-six-lines", "19-glow-radius-3x", "21-banner", "21-banner-light", "21-banner-long-title",
         "21-banner-pill", "21-banner-no-artwork", "21-banner-wide-wings",
         "13-settings-appearance-tall", "13-settings-features", "13-settings-features-dark",
-        "22-style-spectrum", "22-style-minimal", "22-style-pulse", "22-style-pulse-pill",
-        "22-style-spectrum-expanded", "22-style-pulse-expanded", "23-color-by-band", "23-color-by-band-spectrum",
+        "22-style-spectrum", "22-style-spectrum-expanded", "23-color-by-band", "23-color-by-band-spectrum",
         "23-color-flow", "24-progress-line", "24-progress-line-pill", "25-artwork-glow", "26-high-contrast",
         "26-reduce-transparency", "05-expanded-stale-progress",
     ]
 
     /// Раскрытые панели сцен 1.2: обложка и кнопки на тех же местах, что в 1.1.
     static let expandedFeatureNames = [
-        "05-expanded-stale-progress", "22-style-spectrum-expanded", "22-style-pulse-expanded", "25-artwork-glow",
+        "05-expanded-stale-progress", "22-style-spectrum-expanded", "25-artwork-glow",
         "26-reduce-transparency",
     ]
 
@@ -47,8 +46,7 @@ struct SnapshotRendererTests {
     }
 
     /// Самый высокий «Вид» показывает все необязательные строки: «Свой цвет», строку о нагрузке
-    /// и подпись под крылом. Стиль «Волны» (все строки линий, без подписи «Пульса», которая
-    /// зависит от «Уменьшения движения» машины).
+    /// и подпись под крылом. Стиль «Волны» (все строки линий).
     @Test func tallAppearanceShowsEveryOptionalRow() {
         let appearance = SnapshotRenderer.tallAppearance
         #expect(appearance.look == .waves)

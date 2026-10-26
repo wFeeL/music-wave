@@ -1,6 +1,5 @@
 /// Подписи и значения строк окна настроек, которые считаются, а не пишутся как есть: значения
-/// ползунков «Скорость переливания» и «Задержка раскрытия», подпись «Автовыбора источника» и
-/// подпись под «Стилем».
+/// ползунков «Скорость переливания» и «Задержка раскрытия» и подпись «Автовыбора источника».
 public enum SettingsText {
     /// Значение «Скорости переливания»: «Выкл» без переливания, иначе период полного оборота
     /// `PaletteFlow.period(speed:)` до десятых секунды («12 с», «19,4 с»). Соседние шаги ползунка
@@ -26,13 +25,6 @@ public enum SettingsText {
     public static func autoSource(enabled: Bool, current: String) -> String {
         enabled ? "Сейчас: \(current)" : "Волны переходят к приложению, которое начало играть"
     }
-
-    /// Подпись под «Стилем»: «Пульс» при системном «Уменьшении движения» не дышит
-    /// (свечение и вздох выключены), об этом сказано прямо. У остальных стилей подписи нет.
-    public static func lookCaption(_ look: WaveLook, reduceMotion: Bool) -> String? {
-        guard reduceMotion, look == .pulse else { return nil }
-        return "При уменьшении движения остров не дышит"
-    }
 }
 
 extension WaveLook {
@@ -40,23 +32,7 @@ extension WaveLook {
     public var usesLineCount: Bool {
         switch self {
         case .waves: true
-        case .spectrum, .minimal, .pulse: false
-        }
-    }
-
-    /// Стилю нужна «Заливка»: та же граница, что у `WaveAppearance.effectiveFill`.
-    public var usesFill: Bool {
-        switch self {
-        case .waves, .spectrum: true
-        case .minimal, .pulse: false
-        }
-    }
-
-    /// Стилю нужны «Толщина линий» и «Размах»: у «Пульса» на острове бегущих линий нет.
-    public var usesStroke: Bool {
-        switch self {
-        case .waves, .spectrum, .minimal: true
-        case .pulse: false
+        case .spectrum: false
         }
     }
 }

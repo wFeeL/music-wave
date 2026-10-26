@@ -114,7 +114,7 @@ nonisolated struct WaveSet: Sendable {
     let layers: [Layer]
     /// «Толщина линий», множитель.
     let thickness: CGFloat
-    /// Заливка стиля 0...1 (`WaveAppearance.effectiveFill`); 0 без заливки.
+    /// Заливка стиля 0...1 (`WaveAppearance.fill`); 0 без заливки.
     let fill: Double
     /// Базовая линия (она же ось заливки) и множитель толщины линий стиля
     /// (`WaveAppearance.lookGeometry`). Холст берет их только отсюда.
@@ -142,24 +142,22 @@ nonisolated struct WaveSet: Sendable {
     }
 
     /// По линии на каждую `appearance.lines(for: style.profile)`: размах от уровня источника
-    /// (общий уровень у одной волны, «Минимала», стоячей линии «Пульса» и спектра) ×
-    /// `amplitudeScale` и «Размаха», фаза формы со сдвигом `phaseOffset`, у стоячей линии фаза
-    /// нулевая. Линия спектра идет через уровни полос `frame.bands` (`SpectrumShape`). Цвет идет
+    /// (общий уровень у одной волны и спектра) × `amplitudeScale` и «Размаха», фаза формы со
+    /// сдвигом `phaseOffset`. Линия спектра идет через уровни полос `frame.bands` (`SpectrumShape`). Цвет идет
     /// от уровня источника с переливанием `flowPhase`, «Цветом по частотам» и контрастом
     /// (`WavePaint.Options`), прозрачность × `opacity`: эхо делит точки градиента со своей
-    /// основной линией и отличается от нее только прозрачностью. Заливка `effectiveFill`,
+    /// основной линией и отличается от нее только прозрачностью. Заливка `fill`,
     /// геометрия `lookGeometry`.
     ///
-    /// Раскладка `style` здесь совпадает с той, что нужна `lines(for:)`: у «Волн», «Спектра» и
-    /// «Минимала» линии от раскладки не зависят, а «Пульс» набора свернутой капсулы не получает
-    /// (`IslandWavesView.neededSets`), поэтому набор `.panel` в «Пульсе» только у раскрытой панели.
+    /// Раскладка `style` здесь совпадает с той, что нужна `lines(for:)`: у «Волн» и «Спектра»
+    /// линии от раскладки не зависят.
     init(
         frame: WaveFrame, palette: [PaletteColor], motion: WaveMotion, time: Double, style: WaveStyle,
         appearance: WaveAppearance, flowPhase: Double = 0
     ) {
         let profile = style.profile
         let colorByBand = appearance.colorByBand
-        let fillAmount = appearance.effectiveFill
+        let fillAmount = appearance.fill
         self.style = style
         thickness = CGFloat(appearance.thickness)
         fill = fillAmount
@@ -237,9 +235,7 @@ nonisolated struct WaveSet: Sendable {
                         gain: appearance.amplitude * Double(line.amplitudeScale), into: output
                     )
                 case .overall, .layer:
-                    let phase = line.standing
-                        ? WavePhase(carrier: 0, harmonic: 0)
-                        : motion.phase(line.shape, profile: profile).shifted(by: line.phaseOffset)
+                    let phase = motion.phase(line.shape, profile: profile).shifted(by: line.phaseOffset)
                     WaveShape.samples(
                         amplitude: levels[index], phase: phase, envelope: envelopes[index], gain: appearance.amplitude,
                         into: output

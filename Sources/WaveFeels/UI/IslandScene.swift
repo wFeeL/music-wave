@@ -110,9 +110,6 @@ struct IslandBodyView: View, Equatable {
 /// с крыльями. Оба слоя считаются, пока баннер открывается или закрывается (`wingLayer`,
 /// `bannerLayer`). Без «Уменьшения движения» все слои обрезаются текущей формой (она перетекает
 /// из свернутой в баннер), с ним у каждого слоя своя форма и меняется только прозрачность.
-///
-/// Стиль «Пульс» у свернутого острова волн не рисует (`neededSets`): слоев крыльев, линии капсулы
-/// и баннера нет вовсе, ни оболочки, ни текстуры. Остров дышит и светится снаружи (`IslandView`).
 struct IslandWavesView: View {
     /// Свечение линий: размытая копия основных волн, радиус размытия × «Радиус свечения».
     /// Выше 1× яркость умножается на корень из радиуса: иначе широкий ореол тусклее, чем при 1×.
@@ -151,23 +148,14 @@ struct IslandWavesView: View {
     /// Какие наборы волн строить на кадре. `wings`: волны свернутого острова нужны (`layers.wing`
     /// и `wingLayer`), `panelLayer`: слой раскрытой панели жив (`layers.panel`), `bannerLayer`:
     /// нужны волны баннера, `collapsedStyle`: раскладка свернутого острова (`.wing` у выреза,
-    /// `.panel` у капсулы, тогда свернутая линия берет набор панели). `collapsed`: есть ли вообще
-    /// слои волн свернутого острова и баннера; единственное место, где это решается. «Пульс» волн
-    /// у свернутого острова не рисует (ни крыльев, ни линии капсулы, ни волн баннера): этих слоев
-    /// нет, набора крыла нет, набор панели только у раскрытой панели.
+    /// `.panel` у капсулы, тогда свернутая линия берет набор панели).
     static func neededSets(
-        look: WaveLook, wings: Bool, panelLayer: Bool, bannerLayer: Bool, collapsedStyle: WaveStyle
-    ) -> (wing: Bool, panel: Bool, collapsed: Bool) {
-        switch look {
-        case .pulse:
-            return (wing: false, panel: panelLayer, collapsed: false)
-        case .waves, .spectrum, .minimal:
-            return (
-                wing: (wings && collapsedStyle == .wing) || bannerLayer,
-                panel: panelLayer || (wings && collapsedStyle == .panel),
-                collapsed: true
-            )
-        }
+        wings: Bool, panelLayer: Bool, bannerLayer: Bool, collapsedStyle: WaveStyle
+    ) -> (wing: Bool, panel: Bool) {
+        (
+            wing: (wings && collapsedStyle == .wing) || bannerLayer,
+            panel: panelLayer || (wings && collapsedStyle == .panel)
+        )
     }
 
     /// Высота точки удара у выреза в прямоугольнике крыла `rect`: там, где начинается линия.
@@ -184,26 +172,22 @@ struct IslandWavesView: View {
         // У капсулы свернутая линия и полоса панели одного стиля: точки общие.
         let collapsedStyle: WaveStyle = geometry.hasNotch ? .wing : .panel
         let wings = layers.wing && wingLayer
-        // `sets.collapsed`: слоев крыльев, капсулы и баннера может не быть вовсе («Пульс»).
         let sets = Self.neededSets(
-            look: appearance.look, wings: wings, panelLayer: layers.panel, bannerLayer: bannerLayer,
-            collapsedStyle: collapsedStyle
+            wings: wings, panelLayer: layers.panel, bannerLayer: bannerLayer, collapsedStyle: collapsedStyle
         )
         // nil: слой сейчас не нужен, холстов в нем нет.
         let panelSet: WaveSet? = sets.panel ? makeSet(.panel) : nil
         let wingSet: WaveSet? = sets.wing ? makeSet(.wing) : nil
-        let collapsedSet: WaveSet? = wings && sets.collapsed ? (collapsedStyle == .panel ? panelSet : wingSet) : nil
+        let collapsedSet: WaveSet? = wings ? (collapsedStyle == .panel ? panelSet : wingSet) : nil
         let shownPanelSet: WaveSet? = layers.panel ? panelSet : nil
         let form = banner && state == .collapsed
         // Форма, которой обрезаются волны крыльев и панели.
         let mask = reduceMotion ? false : form
 
         ZStack(alignment: .topLeading) {
-            if sets.collapsed {
-                collapsedWaves(collapsedSet, maskBanner: mask)
-                    .opacity(state == .expanded || form ? 0 : 1)
-            }
-            if bannerLayer && sets.collapsed {
+            collapsedWaves(collapsedSet, maskBanner: mask)
+                .opacity(state == .expanded || form ? 0 : 1)
+            if bannerLayer {
                 waveLayer(wingSet, rect: geometry.bannerWaves, mirrored: false, maskBanner: reduceMotion || form)
                     .opacity(form ? 1 : 0)
             }
