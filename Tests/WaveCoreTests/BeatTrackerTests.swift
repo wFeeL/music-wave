@@ -190,6 +190,52 @@ struct BeatTrackerTests {
         #expect(distance < 0.04, "first flash after the break at \(first), \(distance) s from a kick")
     }
 
+    /// Брейк без бочки 8 с на 160 BPM, где вспышки идут через долю и удержание ворота тянется на 2T:
+    /// ворот закрывается за две доли показа после последней бочки, как у трека в темпе показа (80 BPM),
+    /// дальше ярких предсказанных вспышек в брейке нет, период за брейк не уплывает (накат), а после
+    /// возврата бочки показанная сетка вспыхивает на одной из первых четырех бочек. Замер: последние
+    /// вспышки в брейке через 0.375 и 1.125 с после последней бочки (яркость 0.79 и 0.31), ворот после
+    /// двух долей показа 0, уход периода 0.2 %, первая вспышка после возврата в 6 мс от бочки.
+    @Test func breakdownAtFastTempoFadesWithTheShownHold() async throws {
+        let (scene, hops) = await runOffCooperativePool {
+            let scene = Drums.breakdown(at: 10, length: 8, bpm: 160)
+            return (scene, StreamAnalyzer(sampleRate: scene.sampleRate).processSignal(scene.samples))
+        }
+        let period = 60.0 / 160
+        let lastKick = try #require(scene.kicks.last { $0 < 10 })
+        let returned = try #require(scene.kicks.first { $0 >= 18 - 0.01 })
+        let firstKicks = scene.kicks.filter { $0 >= returned }.prefix(4)
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var halvingBefore = false
+        var worstGate: Float = 0
+        var periods: [Double] = []
+        var brightest: [UInt64: (time: Double, amplitude: Float)] = [:]
+        for hop in hops {
+            tracker.process(hop)
+            if hop.endTime > 8, hop.endTime < 10 { halvingBefore = halvingBefore || (tracker.locked && tracker.shownParity != nil) }
+            let quiet = hop.endTime >= lastKick + 2 * (2 * period) && hop.endTime < 18
+            if quiet {
+                worstGate = max(worstGate, tracker.energyGate)
+                if let current = tracker.period { periods.append(current) }
+            }
+            for event in tracker.schedule.events where event.predicted && event.time <= tracker.now {
+                let known = brightest[event.id]?.amplitude ?? 0
+                if event.amplitude > known { brightest[event.id] = (event.time, event.amplitude) }
+            }
+        }
+        try #require(halvingBefore, "no every-other display before the break")
+        #expect(worstGate <= 0.2, "gate in the breakdown up to \(worstGate)")
+        let flashes = brightest.values.filter { $0.amplitude > OfflineBeatChain.eventRise }.map(\.time).sorted()
+        let inBreak = flashes.filter { $0 >= lastKick + 2 * (2 * period) && $0 < returned - 0.05 }
+        #expect(inBreak.isEmpty, "predicted flashes in the break at \(inBreak)")
+        let drift = periods.map { abs($0 / period - 1) }.max() ?? .infinity
+        #expect(drift < 0.01, "period drifted by \(drift) in the break")
+        let last = try #require(firstKicks.last)
+        let first = try #require(flashes.first { $0 >= returned - 0.1 && $0 <= last + 0.05 }, "no flash on the first four kicks")
+        let distance = scene.kicks.map { abs($0 - first) }.min() ?? .infinity
+        #expect(distance < 0.04, "first flash after the break at \(first), \(distance) s from a kick")
+    }
+
     /// Брейк, после которого доли вернулись на полпериода позже (сетка наката больше не та): первая
     /// доля после возврата промахивается и сразу отпускает захват, ни одной яркой предсказанной
     /// вспышки мимо новых долей (уверенная вспышка не на ту долю хуже темноты). С одиночной атакой на
