@@ -330,7 +330,7 @@ struct BeatTrackerTests {
         hops.offbeatODF = 100
         hops.nextOffbeatTime = hops.nextBeatTime + 0.25
         var shadowStart: Double?
-        var takeover: (time: Double, confidence: Double, hits: Int)?
+        var takeover: (time: Double, confidence: Double, hits: Int, shadowConfidence: Double, shadowHits: Int)?
         var alwaysLocked = true
         var previous = tracker
         let watch = { (tracker: BeatTracker) in
@@ -338,7 +338,7 @@ struct BeatTrackerTests {
             if takeover == nil, previous.shadowNext != nil, tracker.shadowNext == nil, tracker.nextBeat.map({
                 abs(BeatTracker.circularDifference($0 - 0.5, period: 0.5)) < 0.03
             }) == true {
-                takeover = (tracker.now, tracker.confidence, tracker.hits)
+                takeover = (tracker.now, tracker.confidence, tracker.hits, previous.shadowConfidence, previous.shadowHits)
             }
             alwaysLocked = alwaysLocked && tracker.locked
             previous = tracker
@@ -360,6 +360,11 @@ struct BeatTrackerTests {
             let beats = (won.time - started) / 0.5
             #expect(beats >= 4 && beats <= 8.5, "takeover \(beats) beats after the shadow started")
             #expect(won.confidence > 0.6 && won.hits >= 4, "\(won)")
+            // Счет тени после попадания на доле перехвата, а не счет прежней сетки.
+            let gain = tracker.parameters.confidenceGain
+            #expect(abs(won.confidence - (won.shadowConfidence + gain * (1 - won.shadowConfidence))) < 1e-9, "\(won)")
+            #expect(won.hits == won.shadowHits + 1, "\(won)")
+            #expect(tracker.shadowConfidence == 0 && tracker.shadowHits == 0)
             #expect(abs(BeatTracker.circularDifference(next - 0.5, period: 0.5)) < 0.03, "next beat \(next)")
             #expect(tracker.locked)
         } else {
@@ -773,9 +778,6 @@ struct SyntheticBeats {
     /// Широкополосная функция на «и» (без онсета): ее видит только гребенка фазы. 0 выключает.
     var offbeatODF: Float = 0
     var nextOffbeatTime = 0.0
-    /// Больше нуля: на каждом таком «и» (по счету) еще и широкополосный онсет.
-    var offbeatOnsetEvery = 0
-    private var offbeatCount = 0
 
     init(bpm: Double) {
         self.bpm = bpm
@@ -792,10 +794,6 @@ struct SyntheticBeats {
             var hop = Self.hop(endTime: endTime, broadband: onset, kick: onset)
             if offbeatODF > 0, nextOffbeatTime <= endTime {
                 hop.broadbandODF = max(hop.broadbandODF, offbeatODF)
-                if offbeatOnsetEvery > 0, offbeatCount % offbeatOnsetEvery == 0, hop.broadbandOnset == nil {
-                    hop.broadbandOnset = OnsetEvent(time: nextOffbeatTime, strength: 1)
-                }
-                offbeatCount += 1
                 nextOffbeatTime += 60 / bpm
             }
             tracker.process(hop)

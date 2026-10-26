@@ -519,6 +519,8 @@ public struct BeatTracker: Sendable {
     private mutating func dropShadow() {
         shadowNext = nil
         shadowVotes = 0
+        shadowConfidence = 0
+        shadowHits = 0
         shadowMatched = false
         shadowBeats = 0
         shadowLead = 0
