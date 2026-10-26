@@ -132,4 +132,32 @@ struct ProgressEdgeTests {
         }
         #expect(changes <= 2)
     }
+
+    /// Цвет полосы округляется до 8 бит на канал: каждое значение на ступени k/255 не дальше
+    /// полуступени от исходного, сдвиг меньше полуступени (переливание за кадр) цвета не меняет,
+    /// сдвиг на ступень меняет. Вне 0...1 и не конечные значения не ломают цвет.
+    @Test func colorIsQuantizedToEightBits() {
+        let color = RGBColor(hex: 0x80_40_C8)
+        let quantized = ProgressEdge.quantized(color)
+        let half: Float = 0.5 / 255
+        #expect(ProgressEdge.colorLevels == 255)
+        for (value, original) in [(quantized.r, color.r), (quantized.g, color.g), (quantized.b, color.b)] {
+            #expect(value == Float((value * 255).rounded()) / 255)
+            #expect(abs(value - original) <= half)
+        }
+        #expect(ProgressEdge.quantized(quantized) == quantized)
+        let drift = RGBColor(r: color.r + 0.0012, g: color.g - 0.0012, b: color.b + 0.0005)
+        #expect(ProgressEdge.quantized(drift) == quantized)
+        let step = RGBColor(r: color.r + 1.0 / 255, g: color.g, b: color.b)
+        #expect(ProgressEdge.quantized(step) != quantized)
+        let odd = ProgressEdge.quantized(RGBColor(r: -0.2, g: 1.3, b: .nan))
+        #expect(odd == RGBColor(r: 0, g: 1, b: 0))
+        // Произвольные цвета: на ступени и не дальше полуступени.
+        for index in 0..<200 {
+            let value = Float(index) / 199
+            let result = ProgressEdge.quantized(RGBColor(r: value, g: 1 - value, b: value * value))
+            #expect(abs(result.r - value) <= half + 1e-6)
+            #expect(result.r == Float((result.r * 255).rounded()) / 255)
+        }
+    }
 }

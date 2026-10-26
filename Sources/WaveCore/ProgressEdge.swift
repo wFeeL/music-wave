@@ -20,6 +20,20 @@ public enum ProgressEdge {
     public static let step: CGFloat = 0.5
     /// Короче этой видимой длины полосы нет (крыльев нет или они уже скруглений), pt.
     public static let minVisibleLength: CGFloat = 2
+    /// Ступеней на канал цвета полосы (`quantized`): 8 бит, как на экране.
+    public static let colorLevels: Float = 255
+
+    /// Цвет полосы `color`, округленный до `colorLevels` ступеней на канал (значения вне 0...1
+    /// прижимаются к краю, не конечные дают 0). С переливанием цвет плывет на каждом кадре на доли
+    /// ступени; округленный меняется, только когда сдвиг доходит до ступени, поэтому вид полосы
+    /// (`==`) пересчитывается реже, а на экране отличие не больше полуступени.
+    public static func quantized(_ color: RGBColor) -> RGBColor {
+        func level(_ value: Float) -> Float {
+            guard value.isFinite else { return 0 }
+            return (min(max(value, 0), 1) * colorLevels).rounded() / colorLevels
+        }
+        return RGBColor(r: level(color.r), g: level(color.g), b: level(color.b))
+    }
 
     /// Полоса рисуется только у свернутого острова без баннера и при включенной функции.
     public static func isShown(enabled: Bool, state: IslandState, banner: Bool) -> Bool {

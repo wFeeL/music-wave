@@ -333,10 +333,11 @@ struct IslandView: View {
                     reduceMotion: reduceMotion
                 )
                 if let progress = progressEdge(state: state, banner: bannerVisible, geometry: geometry) {
-                    // Уходит сразу: при раскрытии полоса не висит над растущей панелью.
+                    // Уходит сразу: при раскрытии полоса не висит над растущей панелью. Цвет
+                    // округлен до 8 бит: с переливанием вид не пересчитывается на каждом кадре.
                     ProgressEdgeView(
                         segments: progress.segments, filled: progress.filled,
-                        color: WavePaint.glowColor(visuals.glowSourceColor)
+                        color: ProgressEdge.quantized(WavePaint.glowColor(visuals.glowSourceColor))
                     )
                     .equatable()
                     .transition(AnyTransition.asymmetric(insertion: .opacity, removal: .identity))

@@ -413,10 +413,10 @@ struct ArtworkGlowView: View, Equatable {
 
 /// Полоса прогресса по нижней кромке свернутого острова (`ProgressEdge`): в каждом видимом куске
 /// `segments` (у выреза левое и правое крыло, у капсулы вся полоса) заполненная часть шириной
-/// `filled` от его левого края, цветом `color` (уже поднятым `WavePaint.glowColor`) с
-/// непрозрачностью `ProgressEdge.opacity`. Ширины идут шагами `ProgressEdge.step`, поэтому вид
-/// (`==`) перерисовывается несколько раз в секунду, а не на каждом кадре; с переливанием еще и
-/// со сменой цвета.
+/// `filled` от его левого края, цветом `color` (уже поднятым `WavePaint.glowColor` и округленным
+/// до 8 бит `ProgressEdge.quantized`) с непрозрачностью `ProgressEdge.opacity`. Ширины идут шагами
+/// `ProgressEdge.step`, поэтому вид (`==`) перерисовывается несколько раз в секунду, а не на каждом
+/// кадре; с переливанием еще и тогда, когда цвет сдвинулся на ступень.
 struct ProgressEdgeView: View, Equatable {
     /// Видимые куски полосы в координатах панели (`IslandGeometry.progressSegments`).
     let segments: [CGRect]
