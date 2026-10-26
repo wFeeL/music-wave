@@ -421,26 +421,36 @@ struct ArtworkGlowView: View, Equatable {
     }
 }
 
-/// Полоса прогресса по нижней кромке свернутого острова (`ProgressEdge`): заполненная часть
-/// полосы `track` шириной `filled` цветом `color` (уже поднятым `WavePaint.glowColor`) с
-/// непрозрачностью `ProgressEdge.opacity`. Ширина идет шагами `ProgressEdge.step`, поэтому вид
+/// Полоса прогресса по нижней кромке свернутого острова (`ProgressEdge`): в каждом видимом куске
+/// `segments` (у выреза левое и правое крыло, у капсулы вся полоса) заполненная часть шириной
+/// `filled` от его левого края, цветом `color` (уже поднятым `WavePaint.glowColor`) с
+/// непрозрачностью `ProgressEdge.opacity`. Ширины идут шагами `ProgressEdge.step`, поэтому вид
 /// (`==`) перерисовывается несколько раз в секунду, а не на каждом кадре; с переливанием еще и
 /// со сменой цвета.
 struct ProgressEdgeView: View, Equatable {
-    /// Полоса во всю длину в координатах панели (`IslandGeometry.progressEdge`).
-    let track: CGRect
-    /// Заполненная ширина от левого края полосы (`ProgressEdge.filledWidth`).
-    let filled: CGFloat
+    /// Видимые куски полосы в координатах панели (`IslandGeometry.progressSegments`).
+    let segments: [CGRect]
+    /// Заполненная ширина каждого куска (`ProgressEdge.filledWidths`).
+    let filled: [CGFloat]
     let color: PaletteColor
 
     nonisolated static func == (lhs: ProgressEdgeView, rhs: ProgressEdgeView) -> Bool {
-        lhs.track == rhs.track && lhs.filled == rhs.filled && lhs.color == rhs.color
+        lhs.segments == rhs.segments && lhs.filled == rhs.filled && lhs.color == rhs.color
     }
 
     var body: some View {
-        Capsule(style: .continuous)
-            .fill(Color(palette: color, opacity: ProgressEdge.opacity))
-            .frame(width: filled, height: track.height)
-            .offset(x: track.minX, y: track.minY)
+        let count = min(segments.count, filled.count)
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<count, id: \.self) { index in
+                let segment = segments[index]
+                let width = filled[index]
+                if width > 0 {
+                    Capsule(style: .continuous)
+                        .fill(Color(palette: color, opacity: ProgressEdge.opacity))
+                        .frame(width: width, height: segment.height)
+                        .offset(x: segment.minX, y: segment.minY)
+                }
+            }
+        }
     }
 }

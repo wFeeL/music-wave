@@ -69,4 +69,67 @@ struct ProgressEdgeTests {
         }
         #expect(changes >= 1 && changes <= 4)
     }
+
+    /// Полоса у выреза: видимые куски слева и справа от выреза, середина под вырезом выпадает.
+    /// Куски обрезаются полосой, пустые не остаются. У капсулы один кусок, вся полоса.
+    @Test func visibleSegmentsSkipTheNotch() {
+        let track = CGRect(x: 100, y: 49.5, width: 281, height: 1.5)
+        let notch = CGRect(x: 148, y: 0, width: 185, height: 32)
+        let segments = ProgressEdge.visibleSegments(track: track, notch: notch)
+        #expect(segments == [
+            CGRect(x: 100, y: 49.5, width: 48, height: 1.5),
+            CGRect(x: 333, y: 49.5, width: 48, height: 1.5),
+        ])
+        #expect(ProgressEdge.visibleSegments(track: track, notch: nil) == [track])
+        // Вырез сдвинут к краю: слева пусто, остается один правый кусок.
+        let shifted = CGRect(x: 90, y: 0, width: 185, height: 32)
+        #expect(ProgressEdge.visibleSegments(track: track, notch: shifted) == [
+            CGRect(x: 275, y: 49.5, width: 106, height: 1.5),
+        ])
+        // Крыльев нет: полоса целиком под вырезом.
+        let inside = CGRect(x: 164, y: 49.5, width: 153, height: 1.5)
+        #expect(ProgressEdge.visibleSegments(track: inside, notch: notch).isEmpty)
+    }
+
+    /// Доля раскладывается по видимой длине: сначала левое крыло, затем правое.
+    @Test func filledWidthsRunAcrossVisibleWings() throws {
+        let track = CGRect(x: 100, y: 49.5, width: 281, height: 1.5)
+        let notch = CGRect(x: 148, y: 0, width: 185, height: 32)
+        let segments = ProgressEdge.visibleSegments(track: track, notch: notch)
+        #expect(ProgressEdge.filledWidths(fraction: 0, segments: segments) == [0, 0])
+        #expect(ProgressEdge.filledWidths(fraction: 0.25, segments: segments) == [24, 0])
+        #expect(ProgressEdge.filledWidths(fraction: 0.5, segments: segments) == [48, 0])
+        #expect(ProgressEdge.filledWidths(fraction: 0.75, segments: segments) == [48, 24])
+        #expect(ProgressEdge.filledWidths(fraction: 1, segments: segments) == [48, 48])
+        #expect(ProgressEdge.filledWidths(fraction: .nan, segments: segments) == [0, 0])
+        // Шаг полпикселя по видимой длине 96 pt.
+        #expect(ProgressEdge.filledWidths(fraction: 0.3, segments: segments) == [28.5, 0])
+        // Крыльев нет или видимая часть короче `minVisibleLength`: полосы нет.
+        let inside = CGRect(x: 164, y: 49.5, width: 153, height: 1.5)
+        #expect(ProgressEdge.filledWidths(fraction: 0.5, segments: ProgressEdge.visibleSegments(track: inside, notch: notch)) == nil)
+        let tiny = [CGRect(x: 0, y: 0, width: 0.5, height: 1.5), CGRect(x: 10, y: 0, width: 1, height: 1.5)]
+        #expect(ProgressEdge.minVisibleLength == 2)
+        #expect(ProgressEdge.filledWidths(fraction: 0.5, segments: tiny) == nil)
+        // Капсула: один кусок, как `filledWidth`.
+        for fraction in [0.0, 0.3, 0.501, 1] {
+            #expect(
+                ProgressEdge.filledWidths(fraction: fraction, segments: [track])
+                    == [ProgressEdge.filledWidth(fraction: fraction, trackWidth: track.width)]
+            )
+        }
+    }
+
+    /// По двум крыльям 48 pt на трехминутном треке ширина меняется не чаще нескольких раз в секунду.
+    @Test func filledWidthsChangeAFewTimesPerSecond() throws {
+        let segments = [CGRect(x: 0, y: 0, width: 48, height: 1.5), CGRect(x: 233, y: 0, width: 48, height: 1.5)]
+        var changes = 0
+        var last: [CGFloat]?
+        for frame in 0...120 {
+            let position = PlaybackPosition(elapsed: 100 + Double(frame) / 120, duration: 180)
+            let filled = try #require(ProgressEdge.filledWidths(fraction: position.fraction, segments: segments))
+            if let last, filled != last { changes += 1 }
+            last = filled
+        }
+        #expect(changes <= 2)
+    }
 }

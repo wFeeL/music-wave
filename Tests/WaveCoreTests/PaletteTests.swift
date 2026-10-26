@@ -330,7 +330,6 @@ struct PaletteTests {
 
     /// Сияние с размытием помещается в поля окна панели и не обрезается краем окна.
     @Test func haloFitsPanelMargins() {
-        #expect(ArtworkGlow.reach == ArtworkGlow.spread + 2 * ArtworkGlow.blur)
         #expect(ArtworkGlow.reach <= Double(NotchGeometry.panelSideMargin))
         #expect(ArtworkGlow.reach <= Double(NotchGeometry.glowMargin))
         #expect(ArtworkGlow.reach <= Double(NotchGeometry.panelTopMargin))

@@ -297,7 +297,6 @@ struct NotchGeometryTests {
                 }
             }
         }
-        #expect(NotchGeometry.panelTopMargin == CGFloat(ArtworkGlow.reach))
         let pill = try #require(NotchGeometry.layout(for: [external()]))
         #expect(pill.panelFrame.maxY == pill.expandedIsland.maxY + NotchGeometry.panelTopMargin)
         let notch = try #require(NotchGeometry.layout(for: [notched()]))

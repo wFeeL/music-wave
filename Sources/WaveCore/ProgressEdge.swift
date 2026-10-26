@@ -5,8 +5,9 @@ import CoreGraphics
 
 /// Полоса прогресса по нижней кромке свернутого острова: тонкая линия, заполненная на долю
 /// прошедшего трека (`PlaybackPosition.fraction`). Координаты с осью Y вниз, как у
-/// `IslandGeometry` в приложении. Доля отсчитывается по всей ширине полосы, в том числе под
-/// аппаратным вырезом, где пикселей нет и середины полосы не видно.
+/// `IslandGeometry` в приложении. Под аппаратным вырезом пикселей нет, поэтому у выреза доля
+/// отсчитывается только по видимым кускам полосы в крыльях (`visibleSegments`): сначала
+/// заполняется левое крыло, затем правое (`filledWidths`). У капсулы кусок один, вся полоса.
 public enum ProgressEdge {
     /// Толщина полосы, pt.
     public static let height: CGFloat = 1.5
@@ -17,6 +18,8 @@ public enum ProgressEdge {
     /// Шаг заполненной ширины, pt: полпикселя Retina. На трехминутном треке ширина меняется
     /// несколько раз в секунду, и вид полосы перерисовывается только тогда.
     public static let step: CGFloat = 0.5
+    /// Короче этой видимой длины полосы нет (крыльев нет или они уже скруглений), pt.
+    public static let minVisibleLength: CGFloat = 2
 
     /// Полоса рисуется только у свернутого острова без баннера и при включенной функции.
     public static func isShown(enabled: Bool, state: IslandState, banner: Bool) -> Bool {
@@ -41,5 +44,38 @@ public enum ProgressEdge {
         guard fraction < 1 else { return trackWidth }
         let raw = trackWidth * CGFloat(fraction)
         return min((raw / step).rounded(.down) * step, trackWidth)
+    }
+
+    /// Видимые куски полосы `track`. У выреза `notch` (в тех же координатах): слева от него
+    /// и справа от него, обрезанные полосой, пустые выпадают. Без выреза (`nil`, капсула) вся
+    /// полоса одним куском.
+    public static func visibleSegments(track: CGRect, notch: CGRect?) -> [CGRect] {
+        guard let notch else { return track.width > 0 ? [track] : [] }
+        // Ширины считаются до `CGRect`: у него `width` всегда неотрицательна.
+        let leftWidth = min(notch.minX, track.maxX) - track.minX
+        let rightStart = max(notch.maxX, track.minX)
+        let rightWidth = track.maxX - rightStart
+        var segments: [CGRect] = []
+        if leftWidth > 0 {
+            segments.append(CGRect(x: track.minX, y: track.minY, width: leftWidth, height: track.height))
+        }
+        if rightWidth > 0 {
+            segments.append(CGRect(x: rightStart, y: track.minY, width: rightWidth, height: track.height))
+        }
+        return segments
+    }
+
+    /// Заполненная ширина каждого куска `segments` на доле `fraction`: доля берется от их общей
+    /// длины (`filledWidth`, шаг `step`) и заполняет куски по порядку, слева направо. `nil`, если
+    /// видимая длина короче `minVisibleLength`: тогда полосы нет.
+    public static func filledWidths(fraction: Double, segments: [CGRect]) -> [CGFloat]? {
+        let total = segments.reduce(CGFloat(0)) { $0 + $1.width }
+        guard total.isFinite, total >= minVisibleLength else { return nil }
+        var remaining = filledWidth(fraction: fraction, trackWidth: total)
+        return segments.map { segment in
+            let width = min(remaining, segment.width)
+            remaining -= width
+            return width
+        }
     }
 }
