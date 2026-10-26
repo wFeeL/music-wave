@@ -1171,8 +1171,9 @@ struct BeatTrackerTests {
     /// Быстрая сетка (160 BPM), бочка через долю, широкополосный онсет на каждой (на долях с бочкой
     /// сильнее, как в музыке): предсказанные доли вспыхивают через одну, на долях с бочкой, а мягкий
     /// пульс стоит на каждой доле (период сетки). Четность решает широкополосный акцент: с акцентом на
-    /// долях без бочки вспыхивают они. Тот же рисунок на 100 BPM (период выше `everyOtherPeriod`) и с
-    /// выключенным правилом светит каждую долю.
+    /// долях без бочки вспыхивают они, а бочка на скрытой доле не светится сама (ни тусклым отблеском,
+    /// ни вспышкой), чтобы ритм через долю не ломался. Тот же рисунок на 100 BPM (период выше
+    /// `everyOtherPeriod`) и с выключенным правилом светит каждую долю.
     @Test(arguments: [
         (160.0, 0.42, true, true), (160.0, 0.42, false, true), (100.0, 0.42, true, false), (160.0, 0.0, true, false),
     ])
@@ -1188,7 +1189,11 @@ struct BeatTrackerTests {
         // Доли сцены на 0.25 + k · 60 / bpm, бочка на четных k. Яркость доли берется, когда время
         // потока до нее дошло (дальше она не меняется).
         let scenePeriod = 60 / bpm
+        var kickEvents: Set<UInt64> = []
         let amplitudes = Self.predictedAmplitudes(&tracker, &hops, from: 9, until: 14, scenePeriod: scenePeriod) { tracker in
+            for event in tracker.schedule.events where !event.predicted && event.time >= 9 {
+                kickEvents.insert(event.id)
+            }
             guard let ambient = tracker.schedule.ambient else { return }
             #expect(abs(ambient.period - scenePeriod) / scenePeriod < 0.05, "pulse period \(ambient.period)")
             #expect(abs(BeatTracker.circularDifference(ambient.anchor - 0.25, period: scenePeriod)) < 0.05 * scenePeriod)
@@ -1200,6 +1205,7 @@ struct BeatTrackerTests {
             let flashes = amplitude > OfflineBeatChain.eventRise
             #expect(flashes == (!halves || beat % 2 == shown), "beat \(beat): amplitude \(amplitude)")
         }
+        #expect(kickEvents.isEmpty, "\(kickEvents.count) kick onsets glow on their own")
     }
 
     /// Темп у порога показа через долю (период 0.42 с, около 143 BPM) с колебанием периода ±1 % за

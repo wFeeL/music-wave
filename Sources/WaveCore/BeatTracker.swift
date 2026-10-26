@@ -1095,10 +1095,14 @@ public struct BeatTracker: Sendable {
         if let nextBeat, let period {
             // Бочка у доли сетки отбрасывается, только если сама доля вспыхнет: иначе на передаче от
             // бочек к сетке (вес уже выше 0.5, а яркость доли еще ниже порога) доля оставалась тусклой.
+            // У доли, скрытой показом через долю, бочка отбрасывается всегда: ее отблеск или вспышка
+            // (пока вес растет) ломали бы ритм через долю.
             let toNext = abs(onset.time - nextBeat)
             let toPrevious = abs(onset.time - (nextBeat - period))
             if min(toNext, toPrevious) < parameters.dropWindow * period {
-                let beatAmplitude = toNext <= toPrevious ? nextAmplitude : archivedAmplitude(id: beatCounter &- 1)
+                let id = toNext <= toPrevious ? beatCounter : beatCounter &- 1
+                if let shownParity, id & 1 != shownParity { return }
+                let beatAmplitude = toNext <= toPrevious ? nextAmplitude : archivedAmplitude(id: id)
                 if beatAmplitude > OfflineBeatChain.eventRise { return }
             }
         }
