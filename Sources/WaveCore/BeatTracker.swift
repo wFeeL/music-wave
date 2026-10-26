@@ -21,7 +21,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    `now − d* − StreamAnalyzer.onsetLag` лежит на оси онсетов. Если он расходится с ФАПЧ (разность по
 ///    кругу в `(−T/2, T/2]`) больше чем на `phaseJump · T`, а его оценка выше оценки гребенки у фазы
 ///    ФАПЧ больше чем на `phaseJumpMargin`, на `phaseJumpChecks` проверках подряд, ФАПЧ прыгает на него
-///    с теми же последствиями, что и смена темпа;
+///    с теми же последствиями, что и смена темпа. При уверенном захвате вместо скачка кандидат идет
+///    тенью и должен выиграть гонку (`raceBeats`, `raceVotes`), сетка берет его счет;
 /// 3. широкополосный онсет у ближайшей доли (в пределах `matchWindow · T`) подстраивает фазу
 ///    (`alpha`) и период (`beta`) и засчитывает долю. Онсеты бочки ФАПЧ не трогают, они дают только
 ///    события свечения;
@@ -94,6 +95,18 @@ public struct BeatTracker: Sendable {
         /// пока период был неверен, ФАПЧ отставала (журнал 2: 0.18 периода). До этой доли периода
         /// уверенность переносится и фаза берется у гребенки; четверть периода никогда не «и».
         public var carryPhase: Double
+        /// Гонка фаз вместо скачка при уверенном захвате (`startShadow`): тень перехватывает сетку, когда
+        /// ее уверенность выше текущей больше чем на `raceMargin` на `raceBeats` своих долях подряд или
+        /// когда гребенка еще `raceVotes` проверок подряд (после `phaseJumpChecks`) за фазу тени, и
+        /// бросается после `raceLimit` своих долей без победы. Без уверенного захвата скачок сразу, как
+        /// в 1.1: на GTZAN гонка и там держала неверную фазу дольше (wrongLock 25 против 15).
+        /// Голоса гребенки нужны: на попаданиях одних неверный захват набирает их не реже тени на верной
+        /// фазе, и тень проигрывала (wrongLock 19-20). 3 голоса, то есть скачок через 5 проверок
+        /// (1.25 с) вместо 2, лучший замер; 2 и 4-8 голосов давали 17-18 файлов.
+        public var raceBeats: Int
+        public var raceMargin: Double
+        public var raceLimit: Int
+        public var raceVotes: Int
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -116,6 +129,10 @@ public struct BeatTracker: Sendable {
             crossfadeBeats: Double = 1.0,
             carryTolerance: Double = 0.10,
             carryPhase: Double = 0.25,
+            raceBeats: Int = 4,
+            raceMargin: Double = 0.1,
+            raceLimit: Int = 8,
+            raceVotes: Int = 3,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -135,6 +152,10 @@ public struct BeatTracker: Sendable {
             self.crossfadeBeats = crossfadeBeats
             self.carryTolerance = carryTolerance
             self.carryPhase = carryPhase
+            self.raceBeats = raceBeats
+            self.raceMargin = raceMargin
+            self.raceLimit = raceLimit
+            self.raceVotes = raceVotes
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -176,7 +197,7 @@ public struct BeatTracker: Sendable {
     /// Время потока следующей оценки темпа, `nil` до первого шага.
     private var nextUpdate: Double?
     /// «Сейчас», `endTime` последнего шага.
-    private var now = 0.0
+    private(set) var now = 0.0
 
     /// Кольцо широкополосной функции онсетов для гребенки фазы.
     private var odfRing: [Float]
@@ -200,6 +221,16 @@ public struct BeatTracker: Sendable {
     /// `reset()` и `reconfigure` посреди захвата дают `.reset`.
     public internal(set) var lastUnlockReason: UnlockReason?
     private var disagreements = 0
+    /// Теневая фаза: следующая доля другой фазы того же периода, которую гребенка предложила вместо
+    /// мгновенного скачка. Считает попадания по тем же широкополосным онсетам; `nil`, пока гонки нет.
+    private(set) var shadowNext: Double?
+    private var shadowMatched = false
+    private(set) var shadowConfidence = 0.0
+    private(set) var shadowHits = 0
+    /// Закрытых долей тени и сколько из последних подряд она впереди текущей фазы.
+    private var shadowBeats = 0
+    private var shadowLead = 0
+    private var shadowVotes = 0
     private var strengthEMA: Float = 0
     /// Id доли `nextBeat`, у `nextBeat + T` на 1 больше.
     private var beatCounter: UInt64 = 0
@@ -278,9 +309,11 @@ public struct BeatTracker: Sendable {
         }
 
         if let onset = hop.broadbandOnset {
+            correctShadow(with: onset)
             correct(with: onset)
         }
         closeWindows()
+        closeShadowWindows()
         updateGate(hop.kickLevelDB)
         updateBlend()
         if let onset = hop.kickOnset {
@@ -308,6 +341,7 @@ public struct BeatTracker: Sendable {
         lastUnlockReason = locked ? .reset : nil
         locked = false
         disagreements = 0
+        dropShadow()
         strengthEMA = 0
         beatCounter += 2
         kickGateDB = Self.floorDB
@@ -345,6 +379,7 @@ public struct BeatTracker: Sendable {
         period = estimate.period
         let comb = phaseCandidate(period: estimate.period, current: estimate.switched ? nil : nextBeat)
         guard let nextBeat, !estimate.switched else {
+            dropShadow()
             if let nextBeat, let previous, let comb, carry(from: previous, next: nextBeat, comb: comb.time) { return }
             if nextBeat != nil { resetConfidence(.tempoSwitch) }
             if let comb { rephase(to: comb.time) }
@@ -355,12 +390,22 @@ public struct BeatTracker: Sendable {
         let stronger = comb.score > (1 + parameters.phaseJumpMargin) * comb.currentScore
         if abs(diff) > parameters.phaseJump * estimate.period, stronger {
             disagreements += 1
-            if disagreements >= parameters.phaseJumpChecks {
-                resetConfidence(.phaseJump)
-                rephase(to: comb.time)
+            if let shadow = shadowNext {
+                let agrees = abs(Self.circularDifference(comb.time - shadow, period: estimate.period)) <= parameters.phaseJump * estimate.period
+                shadowVotes = agrees ? shadowVotes + 1 : 0
+            }
+            if disagreements >= parameters.phaseJumpChecks, shadowNext == nil {
+                if locked, confidence >= parameters.lockConfidence {
+                    startShadow(at: comb.time)
+                } else {
+                    // Уверенного захвата нет, защищать нечего: скачок сразу, как в 1.1.
+                    resetConfidence(.phaseJump)
+                    rephase(to: comb.time)
+                }
             }
         } else {
             disagreements = 0
+            shadowVotes = 0
         }
     }
 
@@ -417,6 +462,73 @@ public struct BeatTracker: Sendable {
         committedAmplitude = nil
         disagreements = 0
         beatCounter += 2
+    }
+
+    /// Гонка фаз (IBT, `2026-10-25-audio-viz-and-beat.md` C.3): новая фаза гребенки идет тенью с
+    /// половиной текущей уверенности, текущая сетка и захват остаются. Тень не стартует ближе
+    /// `phaseJump` к текущей фазе (это та же сетка). Зовется только при уверенном захвате.
+    private mutating func startShadow(at candidate: Double) {
+        guard let period, let nextBeat else { return }
+        let steps = ((now - candidate) / period).rounded(.down) + 1
+        let first = candidate + max(steps, 0) * period
+        guard abs(Self.circularDifference(first - nextBeat, period: period)) > parameters.phaseJump * period else { return }
+        shadowNext = first
+        shadowMatched = false
+        shadowConfidence = confidence * 0.5
+        shadowHits = 0
+        shadowBeats = 0
+        shadowLead = 0
+    }
+
+    private mutating func dropShadow() {
+        shadowNext = nil
+        shadowVotes = 0
+        shadowMatched = false
+        shadowBeats = 0
+        shadowLead = 0
+    }
+
+    /// Закрывает окна тени: уверенность и попадания как у текущей фазы, затем счет гонки. Перехват
+    /// идет при закрытии окна, когда следующая доля тени еще впереди, так что новая сетка не
+    /// начинается с уже прошедшей доли.
+    private mutating func closeShadowWindows() {
+        while let shadow = shadowNext, let period, now > shadow + parameters.matchWindow * period {
+            let hit = shadowMatched ? 1.0 : 0.0
+            shadowConfidence += parameters.confidenceGain * (hit - shadowConfidence)
+            shadowHits = shadowMatched ? shadowHits + 1 : 0
+            shadowNext = shadow + period
+            shadowMatched = false
+            shadowBeats += 1
+            shadowLead = shadowConfidence > confidence + parameters.raceMargin ? shadowLead + 1 : 0
+            if let nextBeat, abs(Self.circularDifference(shadow + period - nextBeat, period: period)) <= parameters.phaseJump * period {
+                // Фазы сошлись: это та же сетка.
+                dropShadow()
+            } else if shadowLead >= parameters.raceBeats || (parameters.raceVotes > 0 && shadowVotes >= parameters.raceVotes) {
+                takeOverShadow()
+            } else if shadowBeats >= parameters.raceLimit {
+                dropShadow()
+            }
+        }
+    }
+
+    /// Тень выиграла: сетка переходит на нее с ее уверенностью и счетом попаданий. Захват остается,
+    /// только если счет тени сам проходит правило захвата; иначе он потерян из-за скачка фазы.
+    private mutating func takeOverShadow() {
+        guard let shadow = shadowNext else { return }
+        if let nextBeat, nextBeat <= now {
+            archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
+        }
+        nextBeat = shadow
+        nextMatched = false
+        committedAmplitude = nil
+        beatCounter += 2
+        disagreements = 0
+        confidence = shadowConfidence
+        hits = shadowHits
+        let wasLocked = locked
+        locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
+        if wasLocked, !locked { lastUnlockReason = .phaseJump }
+        dropShadow()
     }
 
     /// Время последней доли по гребенке на оси онсетов и ее оценка, `nil` без энергии в истории.
@@ -491,6 +603,17 @@ public struct BeatTracker: Sendable {
         if isNext { nextMatched = true }
         let strength = onset.strength.isFinite ? min(max(onset.strength, 0), 1) : 0
         strengthEMA += Self.strengthGain * (strength - strengthEMA)
+    }
+
+    /// Тот же онсет подстраивает фазу тени (без периода: он общий) и засчитывает ее долю.
+    private mutating func correctShadow(with onset: OnsetEvent) {
+        guard let shadow = shadowNext, let period else { return }
+        let previous = shadow - period
+        let isNext = abs(onset.time - shadow) <= abs(onset.time - previous)
+        let error = onset.time - (isNext ? shadow : previous)
+        guard abs(error) < parameters.matchWindow * period else { return }
+        shadowNext = shadow + parameters.alpha * error
+        if isNext { shadowMatched = true }
     }
 
     private mutating func closeWindows() {

@@ -216,7 +216,8 @@ struct BeatTrackerTests {
     }
 
     /// «И» без онсетов, которую видит только гребенка фазы: чуть сильнее доли (60 против 50) фазу не
-    /// перебрасывает и захват держится, вдвое сильнее перебрасывает на «и».
+    /// перебрасывает и захват держится, вдвое сильнее перебрасывает на «и». С B3 при уверенном
+    /// захвате это гонка: тень на «и» побеждает голосами гребенки (`raceVotes`), а не сразу.
     @Test(arguments: [(Float(60), false), (Float(100), true)])
     func phaseJumpNeedsAClearlyStrongerComb(offbeat: Float, jumps: Bool) throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
@@ -225,7 +226,9 @@ struct BeatTrackerTests {
         try #require(tracker.locked)
         hops.offbeatODF = offbeat
         hops.nextOffbeatTime = hops.nextBeatTime + 0.25
-        hops.feed(&tracker, until: 16)
+        var shadowSeen = false
+        hops.feed(&tracker, until: 16) { shadowSeen = shadowSeen || $0.shadowNext != nil }
+        #expect(shadowSeen == jumps)
         let next = try #require(tracker.nextBeat)
         // Доли сцены на 0.25 + k · 0.5 с.
         let distance = abs(BeatTracker.circularDifference(next - 0.25, period: 0.5))
@@ -235,6 +238,89 @@ struct BeatTrackerTests {
             #expect(distance < 0.02, "next beat \(next)")
             #expect(tracker.locked)
         }
+    }
+
+    /// Гонка по попаданиям (голоса гребенки выключены, `raceVotes` 0). Гребенка на «и» без онсетов
+    /// до старта тени, потом ее нет; тень не попадает: сетка не перехватывается, захват
+    /// держится всю гонку. Вспышка гребенки, а затем все доли уходят на «и» (текущая фаза
+    /// промахивается): тень впереди с `raceMargin` 4 доли подряд, перехватывает не раньше 4 и не позже
+    /// 8 своих долей и приносит свой счет, захват на новой фазе без захода в «нет захвата» с нуля.
+    @Test(arguments: [false, true])
+    func shadowWinsOnlyWhenBetter(better: Bool) throws {
+        var parameters = BeatTracker.Parameters()
+        parameters.raceVotes = 0
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked && tracker.confidence >= parameters.lockConfidence)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var shadowStart: Double?
+        var takeover: (time: Double, confidence: Double, hits: Int)?
+        var alwaysLocked = true
+        var previous = tracker
+        let watch = { (tracker: BeatTracker) in
+            if shadowStart == nil, tracker.shadowNext != nil { shadowStart = tracker.now }
+            if takeover == nil, previous.shadowNext != nil, tracker.shadowNext == nil, tracker.nextBeat.map({
+                abs(BeatTracker.circularDifference($0 - 0.5, period: 0.5)) < 0.03
+            }) == true {
+                takeover = (tracker.now, tracker.confidence, tracker.hits)
+            }
+            alwaysLocked = alwaysLocked && tracker.locked
+            previous = tracker
+        }
+        // Гребенка на «и» до старта тени (не дольше 2 с).
+        while shadowStart == nil, hops.endTime < 12 {
+            hops.feed(&tracker, until: hops.endTime + 0.05, each: watch)
+        }
+        let started = try #require(shadowStart, "no shadow phase")
+        hops.offbeatODF = 0
+        if better {
+            // Доли переходят на 0.5 + k · 0.5 с, туда же, где тень.
+            hops.nextBeatTime += 0.25
+        }
+        hops.feed(&tracker, until: 18, each: watch)
+        let next = try #require(tracker.nextBeat)
+        if better {
+            let won = try #require(takeover, "the shadow never took over")
+            let beats = (won.time - started) / 0.5
+            #expect(beats >= 4 && beats <= 8.5, "takeover \(beats) beats after the shadow started")
+            #expect(won.confidence > 0.6 && won.hits >= 4, "\(won)")
+            #expect(abs(BeatTracker.circularDifference(next - 0.5, period: 0.5)) < 0.03, "next beat \(next)")
+            #expect(tracker.locked)
+        } else {
+            #expect(takeover == nil)
+            #expect(alwaysLocked)
+            #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.02, "next beat \(next)")
+        }
+    }
+
+    /// Голоса гребенки: при уверенном захвате гребенка на «и» (100 против 50, без онсетов) не
+    /// перебрасывает фазу сразу. Захват держится, пока идет гонка, и сетка уходит к тени через
+    /// `raceVotes` проверок темпа (по 0.25 с) после ее старта, а не раньше (в 1.1 скачок и сброс
+    /// уверенности шли на второй проверке).
+    @Test func combVotesDecideTheRace() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var shadowStart: Double?
+        var moved: Double?
+        var lockedUntilMove = true
+        hops.feed(&tracker, until: 16) { tracker in
+            if shadowStart == nil, tracker.shadowNext != nil { shadowStart = tracker.now }
+            let onOffbeat = tracker.nextBeat.map { abs(BeatTracker.circularDifference($0 - 0.5, period: 0.5)) < 0.03 } == true
+            if moved == nil, onOffbeat { moved = tracker.now }
+            if moved == nil, shadowStart != nil { lockedUntilMove = lockedUntilMove && tracker.locked }
+        }
+        let start = try #require(shadowStart, "no shadow phase")
+        let move = try #require(moved, "the grid never moved")
+        let votes = Double(tracker.parameters.raceVotes) * TempoEstimator.updateInterval
+        // Перехват при закрытии окна тени после последнего голоса: до одного периода позже.
+        #expect(move - start >= votes - 0.01 && move - start <= votes + 0.5 + 0.01, "moved \(move - start) s after the shadow started")
+        #expect(lockedUntilMove)
     }
 
     /// Захват с нуля на пятом попадании подряд (уверенность 0.76, после четырех 0.68 уже выше 0.6, но
@@ -544,6 +630,9 @@ struct SyntheticBeats {
     /// Широкополосная функция на «и» (без онсета): ее видит только гребенка фазы. 0 выключает.
     var offbeatODF: Float = 0
     var nextOffbeatTime = 0.0
+    /// Больше нуля: на каждом таком «и» (по счету) еще и широкополосный онсет.
+    var offbeatOnsetEvery = 0
+    private var offbeatCount = 0
 
     init(bpm: Double) {
         self.bpm = bpm
@@ -560,6 +649,10 @@ struct SyntheticBeats {
             var hop = Self.hop(endTime: endTime, broadband: onset, kick: onset)
             if offbeatODF > 0, nextOffbeatTime <= endTime {
                 hop.broadbandODF = max(hop.broadbandODF, offbeatODF)
+                if offbeatOnsetEvery > 0, offbeatCount % offbeatOnsetEvery == 0, hop.broadbandOnset == nil {
+                    hop.broadbandOnset = OnsetEvent(time: nextOffbeatTime, strength: 1)
+                }
+                offbeatCount += 1
                 nextOffbeatTime += 60 / bpm
             }
             tracker.process(hop)

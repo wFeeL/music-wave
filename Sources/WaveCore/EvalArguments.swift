@@ -238,7 +238,8 @@ extension BeatTracker.Parameters {
     public static let names: [String] = [
         "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "crossfadeBeats",
-        "carryTolerance", "carryPhase", "gateFallPerBeatDB", "gateFallNoTempoDB",
+        "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes",
+        "gateFallPerBeatDB", "gateFallNoTempoDB",
     ]
 
     /// Задает поле по имени. `false`, если имени нет или значение не подходит (целые поля берут только
@@ -258,13 +259,20 @@ extension BeatTracker.Parameters {
         case "crossfadeBeats": crossfadeBeats = value
         case "carryTolerance": carryTolerance = value
         case "carryPhase": carryPhase = value
+        case "raceMargin": raceMargin = value
         case "offGridScale": offGridScale = Float(value)
         case "onsetFloor": onsetFloor = Float(value)
         case "gateFallPerBeatDB": gateFallPerBeatDB = Float(value)
         case "gateFallNoTempoDB": gateFallNoTempoDB = Float(value)
-        case "lockHits", "phaseJumpChecks":
+        case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes":
             guard value == value.rounded(), abs(value) < 1e9 else { return false }
-            if name == "lockHits" { lockHits = Int(value) } else { phaseJumpChecks = Int(value) }
+            switch name {
+            case "lockHits": lockHits = Int(value)
+            case "phaseJumpChecks": phaseJumpChecks = Int(value)
+            case "raceBeats": raceBeats = Int(value)
+            case "raceLimit": raceLimit = Int(value)
+            default: raceVotes = Int(value)
+            }
         default: return false
         }
         return true
