@@ -134,12 +134,38 @@ public struct RenderPacing: Sendable {
     /// если кадров заметно больше частоты экрана, поставить 1.0.
     public static let intervalSlack = 0.9
 
-    /// Наименьший интервал `TimelineView(.animation(minimumInterval:))` острова, с: в режиме
-    /// энергосбережения ровно 1/30 (не больше 30 кадров), иначе `intervalSlack` периода экрана
-    /// `refreshPeriod` (без конечного положительного 1/60 с).
-    public static func timelineInterval(refreshPeriod: Double, lowPower: Bool) -> Double {
-        if lowPower { return 1.0 / 30 }
-        let period = refreshPeriod.isFinite && refreshPeriod > 0 ? refreshPeriod : 1.0 / 60
+    /// Частоты кадров, которые можно выбрать в настройках («Частота кадров»).
+    public static let frameRates = [30, 60]
+    /// Частота кадров по умолчанию.
+    public static let defaultFrameRate = 60
+
+    /// Выбранная частота: 30 или 60; любое другое значение заменяется на `defaultFrameRate`.
+    public static func normalizedFrameRate(_ rate: Int) -> Int {
+        frameRates.contains(rate) ? rate : defaultFrameRate
+    }
+
+    /// Период кадров острова, с: не короче периода экрана `refreshPeriod` (без конечного
+    /// положительного 1/60 с) и не короче периода выбранной частоты `frameRate`
+    /// (`normalizedFrameRate`); в режиме энергосбережения не короче 1/30. Единственное место, где
+    /// настройка «Частота кадров» превращается в период: от него считаются шаг `TimelineView`
+    /// (`timelineInterval`), упреждение показа (`LatencyCalculator.presentationLead`) и выборка
+    /// свечения, поэтому сдвиг синхронизации, подобранный на одной частоте, сохраняет смысл на
+    /// другой: кадр всегда показывается на два периода позже момента отрисовки. Экран 120 Гц
+    /// при 60 дает 1/60, при 30 дает 1/30; экран 60 Гц при 60 дает 1/60.
+    public static func cadencePeriod(refreshPeriod: Double, frameRate: Int, lowPower: Bool) -> Double {
+        let screen = refreshPeriod.isFinite && refreshPeriod > 0 ? refreshPeriod : 1.0 / 60
+        let chosen = 1 / Double(normalizedFrameRate(frameRate))
+        let period = max(screen, chosen)
+        return lowPower ? max(period, 1.0 / 30) : period
+    }
+
+    /// Наименьший интервал `TimelineView(.animation(minimumInterval:))` острова, с:
+    /// `intervalSlack` периода кадров `cadencePeriod`; в режиме энергосбережения, когда период
+    /// кадров 1/30, ровно 1/30 (не больше 30 кадров). Простой (12 кадров в секунду,
+    /// `RenderIdleDetector.idleInterval`) выбирает вызывающий, от частоты он не зависит.
+    public static func timelineInterval(refreshPeriod: Double, lowPower: Bool, frameRate: Int = defaultFrameRate) -> Double {
+        let period = cadencePeriod(refreshPeriod: refreshPeriod, frameRate: frameRate, lowPower: lowPower)
+        if lowPower && period == 1.0 / 30 { return 1.0 / 30 }
         return intervalSlack * period
     }
 
@@ -209,6 +235,14 @@ public struct RenderPacing: Sendable {
     /// (`RenderIdleDetector`): редкие кадры простоя не должны попадать в замер.
     public mutating func restart() {
         last = nil
+    }
+
+    /// Забывает интервалы для медианы (`medianInterval`, `refreshedMedian`): частота кадров
+    /// сменилась, интервалы старой частоты не должны давать период отрисовки. Сводки корзин
+    /// (`summary`) остаются.
+    public mutating func resetMedian() {
+        intervals = Ring<Double>(capacity: Self.window)
+        medianRecorded = nil
     }
 
     /// Сводка корзины при периоде экрана `refreshPeriod` (без конечного положительного 1/60 с);

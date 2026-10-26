@@ -197,11 +197,11 @@ extension PreviewPlayer {
 /// системные опции экрана модели, `AppModel.displayOptions`, как на острове), яркость свечения,
 /// «вздох» (`IslandView.breathing`), мягкий пульс и скорость переливания из настроек, крыло не
 /// шире, чем позволит экран острова (`wingLimit`). Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с
-/// частотой экрана острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
+/// выбранной частотой кадров и частотой экрана острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
 /// (`PreviewPlayer.isActive`, у калибровки окно настроек не видно), `TimelineView` стоит.
 ///
 /// С игроком калибровки (`PreviewPlayer.isCalibrating`) часы кадров это часы хоста, как у острова,
-/// период обновления берется у экрана острова (`AppModel.refreshPeriod`), а яркость свечения не
+/// период кадров берется у модели (`AppModel.cadencePeriod`: экран острова и «Частота кадров»), а яркость свечения не
 /// ниже яркости по умолчанию, чтобы вспышку было видно и при слабом свечении в настройках.
 struct IslandPreview: View {
     static let stripSize = CGSize(width: 640, height: 150)
@@ -261,13 +261,13 @@ struct IslandPreview: View {
                     ) {
                         TimelineView(.animation(
                             minimumInterval: RenderPacing.timelineInterval(
-                                refreshPeriod: model.refreshPeriod, lowPower: false
+                                refreshPeriod: model.refreshPeriod, lowPower: false, frameRate: model.settings.frameRate
                             ),
                             paused: !active
                         )) { context in
                             let visuals = calibrating
                                 ? player.calibrationVisuals(
-                                    now: CACurrentMediaTime(), refreshPeriod: model.refreshPeriod, palette: palette
+                                    now: CACurrentMediaTime(), refreshPeriod: model.cadencePeriod, palette: palette
                                 )
                                 : player.visuals(
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,

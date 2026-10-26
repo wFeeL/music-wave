@@ -37,6 +37,17 @@ struct FeaturesSettingsView: View {
             in: AppSettings.Limits.expandDelay,
             text: SettingsText.seconds(settings.expandDelay)
         )
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Частота кадров", selection: Binding(get: { settings.frameRate }, set: { settings.frameRate = $0 })) {
+                ForEach(RenderPacing.frameRates, id: \.self) { rate in
+                    Text("\(rate)").tag(rate)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(SettingsText.frameRateCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
         Toggle(isOn: Binding(get: { settings.progressLine }, set: { settings.progressLine = $0 })) {
             Text("Полоса прогресса")
             Text("Тонкая линия внизу острова: сколько трека прошло")

@@ -29,6 +29,9 @@ public enum SettingsText {
         return "Обычные вспышки"
     }
 
+    /// Подпись под «Частотой кадров» (30 или 60 кадров в секунду).
+    public static let frameRateCaption = "30 экономит заряд, 60 плавнее"
+
     /// Подпись «Автовыбора источника»: выключен, что он делает; включен, какой источник
     /// у волн сейчас (`current`, имя `AppModel.effectiveSource`).
     public static func autoSource(enabled: Bool, current: String) -> String {

@@ -184,13 +184,93 @@ struct RenderPacingTests {
         let slack = RenderPacing.intervalSlack
         #expect(slack == 0.9)
         #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 60, lowPower: false) - slack / 60) < 1e-9)
-        #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: false) - slack / 120) < 1e-9)
+        // Частота кадров по умолчанию 60 ограничивает и экран 120 Гц (до 1.3 он рисовался на 120).
+        #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: false) - slack / 60) < 1e-9)
         // Энергосбережение как в 1.1: ровно 1/30 (IslandView.swift:101), не больше 30 кадров.
         #expect(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 60, lowPower: true) == 1.0 / 30)
         #expect(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: true) == 1.0 / 30)
         // Странный период экрана: как у экрана 60 Гц.
         #expect(abs(RenderPacing.timelineInterval(refreshPeriod: 0, lowPower: false) - slack / 60) < 1e-9)
         #expect(abs(RenderPacing.timelineInterval(refreshPeriod: .nan, lowPower: false) - slack / 60) < 1e-9)
+    }
+
+    @Test func frameRateChoiceIsThirtyOrSixty() {
+        #expect(RenderPacing.frameRates == [30, 60])
+        #expect(RenderPacing.defaultFrameRate == 60)
+        #expect(RenderPacing.normalizedFrameRate(30) == 30)
+        #expect(RenderPacing.normalizedFrameRate(60) == 60)
+        for stray in [0, -30, 24, 45, 120, Int.max] {
+            #expect(RenderPacing.normalizedFrameRate(stray) == 60)
+        }
+    }
+
+    @Test func thirtyFpsGivesThirtyFpsCadenceOnAnyScreen() {
+        let slack = RenderPacing.intervalSlack
+        for screen in [1.0 / 60, 1.0 / 120] {
+            #expect(RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: 30, lowPower: false) == 1.0 / 30)
+            let interval = RenderPacing.timelineInterval(refreshPeriod: screen, lowPower: false, frameRate: 30)
+            #expect(abs(interval - slack / 30) < 1e-12)
+            // Тик сетки 120 Гц через 25 мс не проходит, через 33.3 мс проходит: 30 кадров в секунду.
+            #expect(interval > 3.0 / 120)
+            #expect(interval <= 4.0 / 120)
+        }
+        // Низкая частота энергосбережения и выбранные 30 дают те же ровно 1/30.
+        #expect(RenderPacing.timelineInterval(refreshPeriod: 1.0 / 60, lowPower: true, frameRate: 30) == 1.0 / 30)
+    }
+
+    @Test func sixtyFpsStaysSixtyOnSixtyAndOneTwentyHertz() {
+        let slack = RenderPacing.intervalSlack
+        for screen in [1.0 / 60, 1.0 / 120] {
+            #expect(RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: 60, lowPower: false) == 1.0 / 60)
+            let interval = RenderPacing.timelineInterval(refreshPeriod: screen, lowPower: false, frameRate: 60)
+            #expect(abs(interval - slack / 60) < 1e-12)
+        }
+        // Без указания частоты как раньше: 60 кадров.
+        #expect(
+            RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: false)
+                == RenderPacing.timelineInterval(refreshPeriod: 1.0 / 120, lowPower: false, frameRate: 60)
+        )
+        // Экран медленнее выбранной частоты: кадров не больше, чем у экрана.
+        #expect(RenderPacing.cadencePeriod(refreshPeriod: 1.0 / 24, frameRate: 60, lowPower: false) == 1.0 / 24)
+        #expect(RenderPacing.cadencePeriod(refreshPeriod: .nan, frameRate: 60, lowPower: false) == 1.0 / 60)
+        #expect(RenderPacing.cadencePeriod(refreshPeriod: 1.0 / 120, frameRate: 7, lowPower: false) == 1.0 / 60)
+        // Энергосбережение держит 30 даже при выбранных 60.
+        #expect(RenderPacing.cadencePeriod(refreshPeriod: 1.0 / 120, frameRate: 60, lowPower: true) == 1.0 / 30)
+    }
+
+    /// Задержка показа и выборка свечения берут период выбранной частоты: на 30 кадрах это два
+    /// периода по 1/30 с, а не 2/60, поэтому сдвиг синхронизации (мс от момента звука до вспышки)
+    /// не зависит от частоты кадров: свечение по расписанию сэмплируется в момент показа кадра.
+    @Test func renderDelayUsesTheChosenRatePeriod() {
+        for screen in [1.0 / 60, 1.0 / 120] {
+            let thirty = RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: 30, lowPower: false)
+            let sixty = RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: 60, lowPower: false)
+            #expect(abs(LatencyCalculator.presentationLead(refreshPeriod: thirty) - 2.0 / 30) < 1e-12)
+            #expect(abs(LatencyCalculator.presentationLead(refreshPeriod: sixty) - 2.0 / 60) < 1e-12)
+            // Замер на 30 кадрах не короче периода выбранной частоты, до замера берется он же.
+            #expect(RenderPacing.effectivePeriod(measured: nil, refreshPeriod: thirty) == 1.0 / 30)
+            #expect(RenderPacing.effectivePeriod(measured: 1.0 / 60, refreshPeriod: thirty) == 1.0 / 30)
+        }
+    }
+
+    @Test func resetMedianDropsIntervalsOfTheOldRate() throws {
+        var pacing = RenderPacing()
+        record([Double](repeating: 1.0 / 30, count: 90), bucket: .expanded, into: &pacing)
+        #expect(try #require(pacing.medianInterval(last: 60)) > 0.03)
+        pacing.resetMedian()
+        #expect(pacing.medianInterval(last: 60) == nil)
+        let empty = pacing.refreshedMedian(last: 60, every: 15)
+        #expect(empty == nil)
+        // Сводка корзины остается, новые интервалы дают новую медиану.
+        #expect(pacing.summary(.expanded, refreshPeriod: 1.0 / 30) != nil)
+        record([Double](repeating: 1.0 / 60, count: 70), bucket: .expanded, into: &pacing, start: 1000)
+        let fresh = pacing.refreshedMedian(last: 60, every: 15)
+        let median = try #require(fresh)
+        #expect(abs(median - 1.0 / 60) < 1e-9)
+    }
+
+    @Test func idleIntervalIgnoresFrameRate() {
+        #expect(RenderIdleDetector.idleInterval == 1.0 / 12)
     }
 
     @Test func effectivePeriodNeverBelowScreen() {

@@ -89,6 +89,13 @@ struct SettingsTextTests {
         #expect(SettingsText.seconds(.nan) == "0 с")
     }
 
+    @Test func frameRateCaptionIsPlainRussian() {
+        #expect(SettingsText.frameRateCaption == "30 экономит заряд, 60 плавнее")
+        for forbidden in ["—", "ё", "·", "•"] {
+            #expect(!SettingsText.frameRateCaption.contains(forbidden))
+        }
+    }
+
     @Test func flashLengthHintNamesShortAndLong() {
         #expect(SettingsText.flashLengthHint(scale: 0.5) == "Короткие вспышки")
         #expect(SettingsText.flashLengthHint(scale: 0.9) == "Короткие вспышки")

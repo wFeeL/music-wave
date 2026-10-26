@@ -14,11 +14,34 @@ struct AppModelRenderTests {
         model.store.publish(Self.frame(bass: 0.2), at: t)
         model.store.publish(Self.frame(bass: 0.6), at: t + 1.0 / 60)
         // Кадр анализа берется на момент показа, на два периода отрисовки позже: посередине между
-        // двумя кадрами. До 60 кадров период отрисовки равен периоду экрана.
+        // двумя кадрами. До 60 кадров период отрисовки равен периоду кадров (экран, «Частота кадров»).
+        model.lowPower = false
+        #expect(model.renderPeriod == model.cadencePeriod)
         #expect(model.renderPeriod == model.refreshPeriod)
         let lead = LatencyCalculator.presentationLead(refreshPeriod: model.renderPeriod)
         let visuals = model.islandVisuals(now: t + 1.0 / 120 - lead, timelineTime: 0, reduceMotion: false)
         #expect(abs(visuals.sampled.layers[0] - 0.4) < 0.02)
+    }
+
+    /// «Частота кадров» 30: период кадров и отрисовки 1/30 с на экране 60 и 120 Гц, упреждение показа
+    /// два периода по 1/30 с, шаг `TimelineView` не короче 0.9 периода; 60 на экране 120 Гц остается
+    /// 60. Простой остается 12 кадров в секунду.
+    @Test func frameRateSettingSetsCadenceAndRenderDelay() throws {
+        let (model, defaults, suite) = try Self.makeModel("render-frame-rate")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.lowPower = false
+        for screen in [1.0 / 60, 1.0 / 120] {
+            model.refreshPeriod = screen
+            model.settings.frameRate = 30
+            #expect(model.cadencePeriod == 1.0 / 30)
+            #expect(model.renderPeriod == 1.0 / 30)
+            #expect(abs(LatencyCalculator.presentationLead(refreshPeriod: model.renderPeriod) - 2.0 / 30) < 1e-12)
+            #expect(abs(model.timelineInterval - RenderPacing.intervalSlack / 30) < 1e-12)
+            model.settings.frameRate = 60
+            #expect(model.cadencePeriod == 1.0 / 60)
+            #expect(model.renderPeriod == 1.0 / 60)
+            #expect(abs(model.timelineInterval - RenderPacing.intervalSlack / 60) < 1e-12)
+        }
     }
 
     /// Свечение по расписанию на момент показа кадра, акцент доли на басу после пружин; при

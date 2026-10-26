@@ -114,13 +114,33 @@ final class AppModel {
     /// частоту кадров (`RenderPacing.timelineInterval`) и должны пересчитаться, когда остров
     /// переехал на другой экран или у экрана сменилась частота, даже если рамка та же.
     var refreshPeriod = 1.0 / 60
+    /// Период кадров острова, с: не короче периода экрана, периода выбранной «Частоты кадров»
+    /// (`AppSettings.frameRate`) и, в энергосбережении, 1/30 (`RenderPacing.cadencePeriod`).
+    /// Единственное место, где частота кадров превращается в период: от него идут шаг
+    /// `TimelineView` (`timelineInterval`) и период отрисовки `renderPeriod`, а через него
+    /// упреждение показа и выборка свечения.
+    var cadencePeriod: Double {
+        RenderPacing.cadencePeriod(refreshPeriod: refreshPeriod, frameRate: settings.frameRate, lowPower: lowPower)
+    }
+    /// Наименьший интервал `TimelineView(.animation(minimumInterval:))` острова, с: в простое
+    /// (`renderIdle`) `RenderIdleDetector.idleInterval`, иначе `RenderPacing.timelineInterval` по
+    /// экрану, выбранной частоте и энергосбережению. Читает только наблюдаемые значения, поэтому
+    /// вид пересчитывается при смене частоты, экрана и простоя.
+    var timelineInterval: Double {
+        renderIdle
+            ? RenderIdleDetector.idleInterval
+            : RenderPacing.timelineInterval(
+                refreshPeriod: refreshPeriod, lowPower: lowPower, frameRate: settings.frameRate
+            )
+    }
     /// Период отрисовки R, с: медиана последних 60 интервалов кадров в пределах 1/120...1/30
-    /// (энергосбережение 30 Гц, ProMotion), но не короче `refreshPeriod`
-    /// (`RenderPacing.effectivePeriod`): кадр не показывается чаще экрана. До 60 кадров
-    /// `refreshPeriod`. Медиана считается при записи кадра в замер (`recordRender`) раз в 15
-    /// кадров, а не на каждом чтении.
+    /// (энергосбережение 30 Гц, ProMotion), но не короче `cadencePeriod`
+    /// (`RenderPacing.effectivePeriod`): кадр не показывается чаще выбранной частоты и экрана.
+    /// До 60 кадров `cadencePeriod`: на 30 кадрах упреждение показа сразу два периода по 1/30 с,
+    /// и сдвиг синхронизации не меняет смысла. Медиана считается при записи кадра в замер
+    /// (`recordRender`) раз в 15 кадров, а не на каждом чтении.
     var renderPeriod: Double {
-        RenderPacing.effectivePeriod(measured: measuredRenderPeriod, refreshPeriod: refreshPeriod)
+        RenderPacing.effectivePeriod(measured: measuredRenderPeriod, refreshPeriod: cadencePeriod)
     }
     /// Простой отрисовки: волны ровные, свечения и «вздоха» нет дольше
     /// `RenderIdleDetector.settle`, остров не в переходе. Тогда остров рисуется не чаще
@@ -249,6 +269,9 @@ final class AppModel {
     /// Медиана последних интервалов отрисовки в пределах `renderPeriodRange`; `nil`, пока их
     /// меньше `renderPeriodSamples`.
     @ObservationIgnored private var measuredRenderPeriod: Double?
+    /// `cadencePeriod` последнего записанного кадра: смена частоты, экрана или энергосбережения
+    /// сбрасывает `measuredRenderPeriod`, замер старой частоты не держит упреждение.
+    @ObservationIgnored private var measuredCadence: Double?
     /// Обложка, из которой получены `artwork` и `palette` (или ждут разбора).
     @ObservationIgnored private var artworkData: Data?
     @ObservationIgnored private var artworkTask: Task<Void, Never>?
@@ -1688,6 +1711,14 @@ final class AppModel {
         if renderIdle {
             renderPacing.restart()
             return
+        }
+        let cadence = cadencePeriod
+        if cadence != measuredCadence {
+            if measuredCadence != nil {
+                measuredRenderPeriod = nil
+                renderPacing.resetMedian()
+            }
+            measuredCadence = cadence
         }
         let bucket = RenderBucket.classify(state: islandState, sinceStateChange: now - islandStateChangedAt)
         renderPacing.record(now: now, timelineTime: timelineTime, bucket: bucket, analysisSequence: store.sequence)

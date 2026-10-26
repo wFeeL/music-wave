@@ -51,6 +51,7 @@ final class AppSettings {
         static let trackSwipe = "wf.trackSwipe"
         static let expandDelay = "wf.expandDelay"
         static let followDisplayOptions = "wf.followDisplayOptions"
+        static let frameRate = "wf.frameRate"
     }
 
     enum Limits {
@@ -97,6 +98,7 @@ final class AppSettings {
         static let trackSwipe = true
         static let expandDelay = IslandStateMachine.defaultExpandDelay
         static let followDisplayOptions = true
+        static let frameRate = RenderPacing.defaultFrameRate
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -134,6 +136,7 @@ final class AppSettings {
     @ObservationIgnored private var storedTrackSwipe: Bool
     @ObservationIgnored private var storedExpandDelay: Double
     @ObservationIgnored private var storedFollowDisplayOptions: Bool
+    @ObservationIgnored private var storedFrameRate: Int
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -223,6 +226,7 @@ final class AppSettings {
         )
         storedFollowDisplayOptions = Self.readBool(defaults, Key.followDisplayOptions)
             ?? Default.followDisplayOptions
+        storedFrameRate = RenderPacing.normalizedFrameRate(Self.readInt(defaults, Key.frameRate) ?? Default.frameRate)
     }
 
     // MARK: - Свойства
@@ -515,6 +519,22 @@ final class AppSettings {
             guard newValue != storedFollowDisplayOptions else { return }
             withMutation(keyPath: \.followDisplayOptions) { storedFollowDisplayOptions = newValue }
             defaults.set(newValue, forKey: Key.followDisplayOptions)
+        }
+    }
+
+    /// «Частота кадров» острова, 30 или 60 (`RenderPacing.frameRates`); другое значение
+    /// заменяется на 60. Ограничивает частоту сверху: простой в 12 кадров остается, экран 120 Гц
+    /// при 60 рисуется на 60.
+    var frameRate: Int {
+        get {
+            access(keyPath: \.frameRate)
+            return storedFrameRate
+        }
+        set {
+            let value = RenderPacing.normalizedFrameRate(newValue)
+            guard value != storedFrameRate else { return }
+            withMutation(keyPath: \.frameRate) { storedFrameRate = value }
+            defaults.set(value, forKey: Key.frameRate)
         }
     }
 

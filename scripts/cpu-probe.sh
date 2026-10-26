@@ -53,7 +53,11 @@
 # В collapsed и banner строка «-> раскрыт» значит провал. Итог и стеки с режимом идут в файлы с
 # суффиксом режима: cpu-expanded.txt, cpu-user-banner.txt, cpu-max-expanded-sample.txt.
 #
-# Частота кадров. С --settings-suite приложение раз в 10 с пишет в лог строки «отрисовка,
+# Частота кадров острова: --set wf.frameRate=30 (или 60, по умолчанию 60) ограничивает кадры
+# в секунду; в шапке отчета строка «frame rate:», приложение подтверждает значение в «настройках
+# из набора» («частота кадров 30,»), без подтверждения прогон провален.
+#
+# Частота кадров в замере. С --settings-suite приложение раз в 10 с пишет в лог строки «отрисовка,
 # свернутый: ...» и «отрисовка, раскрытый: ...» (замер раздела «Отрисовка» и кадров в секунду).
 # Из последней строки корзины прогона (раскрытый для --island expanded, иначе свернутый)
 # частота кадров и p50 идут в раздел прогона, а из прогона play еще и в шапку отчета (render).
@@ -122,7 +126,9 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
                     wf.latencyMode, wf.syncOffsets) are rejected: use --style for the style.
                     Every key is listed in the report header ("set:") and added to the report
                     and sample file names (wf.colorFlow=0 adds -colorFlow0:
-                    cpu-max-colorFlow0-softPulse0.txt)
+                    cpu-max-colorFlow0-softPulse0.txt). wf.frameRate=30 (or 60, the default)
+                    caps the island's frames per second; the report header shows it
+                    ("frame rate:") and the app confirms it ("частота кадров 30,")
   --island MODE     play run only, the island's state machine still drives it:
                       collapsed  the pointer never expands the island
                       expanded   held open as if hovered; checked by "остров: ... -> раскрыт"
@@ -270,6 +276,9 @@ set_type() { # значение
 # добавляет к имени итога «-<ключ без wf.><значение>» (только буквы, цифры, точка и минус, так
 # «-1» и «1» дают разные файлы). Флаги пишутся в нижнем регистре.
 SET_SUMMARY=""
+# Частота кадров, заданная через --set wf.frameRate=30 или 60 (иначе пусто: набор не трогает ее,
+# приложение берет 60 или значение владельца при --preset user).
+FRAME_RATE=""
 SET_KEY_PATTERN='^wf[.][A-Za-z0-9_.]+$'
 i=0
 while [[ $i -lt $SET_COUNT ]]; do
@@ -292,6 +301,9 @@ while [[ $i -lt $SET_COUNT ]]; do
     if [[ $(set_type "$value") == -bool ]]; then
         value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
         SET_VALUES[i]=$value
+    fi
+    if [[ $key == wf.frameRate && $value =~ ^(30|60)$ ]]; then
+        FRAME_RATE=$value
     fi
     PREFIX="$PREFIX-${key#wf.}$(printf '%s' "$value" | tr -cd 'A-Za-z0-9.-')"
     SET_SUMMARY="$SET_SUMMARY, $key=$value ($(set_type "$value"))"
@@ -684,6 +696,10 @@ probe() {
         if [[ -n $STYLE && $settings_line != *"стиль $STYLE,"* ]]; then
             reasons="$reasons; app did not report style $STYLE (wf.waveStyle not applied, build before 1.2?)"
         fi
+        # --set wf.frameRate=30|60: приложение должно было прочитать частоту («частота кадров N,»).
+        if [[ -n $FRAME_RATE && $settings_line != *"частота кадров $FRAME_RATE,"* ]]; then
+            reasons="$reasons; app did not report frame rate $FRAME_RATE (wf.frameRate not applied, build before 1.3?)"
+        fi
     else
         report "effective settings: not reported"
         reasons="$reasons; app did not report settings from $SUITE (build without --settings-suite?), the run may have used personal settings"
@@ -772,6 +788,12 @@ if [[ $SET_COUNT -gt 0 ]]; then
 else
     report "set: none (--set)"
 fi
+if [[ -n $FRAME_RATE ]]; then
+    FRAME_RATE_TEXT="$FRAME_RATE fps"
+else
+    FRAME_RATE_TEXT="not forced"
+fi
+report "frame rate: $FRAME_RATE_TEXT (--set wf.frameRate; the app's value is in applied settings as \"частота кадров\")"
 report "island: ${ISLAND:-not forced} (--island, play run only)"
 report "method: cumulative CPU time from ps over a ${DURATION} s window after ${WARMUP} s warm-up, % of one core"
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"

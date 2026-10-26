@@ -13,8 +13,8 @@ import WaveCore
 /// Капсула на экране без выреза (ровно `NotchGeometry.pillSize`, без крыльев): волны идут
 /// через нее одной линией от середины, по краю свернутой капсулы тонкая светлая обводка. Скрытый остров сжимается в вырез и становится полностью прозрачным.
 ///
-/// Кадры идут от `TimelineView(.animation)` с частотой экрана острова
-/// (`RenderPacing.timelineInterval`, `AppModel.refreshPeriod`), на паузе, пока остров скрыт
+/// Кадры идут от `TimelineView(.animation)` с выбранной «Частотой кадров» (30 или 60), но не
+/// чаще экрана острова (`AppModel.timelineInterval`, `RenderPacing.timelineInterval`), на паузе, пока остров скрыт
 /// (после скрытия еще `IslandTransition.overlap`, чтобы волны двигались, пока остров гаснет);
 /// в простое (`AppModel.renderIdle`: волны ровные, свечения и «вздоха» нет) 12 в секунду
 /// (`RenderIdleDetector.idleInterval`);
@@ -123,9 +123,7 @@ struct IslandView: View {
                     scene(state: state, geometry: geometry, now: time, timelineTime: time)
                 } else {
                     TimelineView(.animation(
-                        minimumInterval: model.renderIdle
-                            ? RenderIdleDetector.idleInterval
-                            : RenderPacing.timelineInterval(refreshPeriod: model.refreshPeriod, lowPower: model.lowPower),
+                        minimumInterval: model.timelineInterval,
                         paused: state == .hidden && hideSettled
                     )) { context in
                         scene(
