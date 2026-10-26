@@ -858,6 +858,9 @@ final class AppModel {
 
         pipeline.adapterAvailable = adapter.isAvailable
         pipeline.adapterSaysPlaying = sourcePlaying
+        // Трек для памяти темпа (только у источника-приложения): запись уже прошла удержание пустых
+        // снимков адаптера.
+        pipeline.nowPlayingTrack = TrackTempoMemory.key(sourceInfo.map(Self.bannerKey), source: source)
 
         let audioActive = gate.update(levelDB: store.latest.rawLevelDB, now: now)
         previousAudioActive = audioActive

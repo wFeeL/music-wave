@@ -71,6 +71,13 @@ final class AudioPipeline {
         didSet { if islandHidden != oldValue { engine.setIdle(islandHidden) } }
     }
 
+    /// Трек Now Playing выбранного источника-приложения (пустой снимок трек не меняет), `nil` без
+    /// него и у всего звука системы. Сбросы анализа в том же треке (пауза, тишина, пересборка tap)
+    /// сохраняют темп ритма, новый трек начинает его заново. Выставляет `AppModel`.
+    @ObservationIgnored var nowPlayingTrack: TrackKey? = nil {
+        didSet { if nowPlayingTrack != oldValue { engine.setTrack(nowPlayingTrack) } }
+    }
+
     @ObservationIgnored var source: AudioSource = .systemWide {
         didSet {
             guard source != oldValue else { return }

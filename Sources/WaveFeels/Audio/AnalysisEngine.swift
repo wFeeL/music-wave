@@ -25,6 +25,11 @@ import WaveCore
 /// обрабатывается только самый новый шаг на пробуждение, уровни и сглаживание идут на время с
 /// прошлого пробуждения, трекер стоит, расписание пустое.
 ///
+/// Сбросы трекера (запуск, скрытие острова, обнуление кольца, остановка подачи, отставание)
+/// сохраняют темп, если трек Now Playing известен и тот же, под которым шли шаги (`setTrack`,
+/// `TrackTempoMemory`, `BeatTracker.reset(keepTempo:)`). Смена частоты начинает трекер заново, смена
+/// известного трека на другой (и посреди звука) тоже.
+///
 /// `zeroRunDuration` растет, если поток встал или все окна пробуждения из точных нулей, и
 /// обнуляется на любом ненулевом окне; пробуждение без нового шага при живом потоке его не
 /// меняет (блоки IOProc приходят реже пробуждений). Прибавка это время с прошлого пробуждения,
@@ -61,6 +66,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         var hopsProcessed = 0
         var frameObserver: (@Sendable (WaveFrame, Double) -> Void)?
         var rhythm: RhythmSession?
+        var track: TrackKey?
     }
 
     /// Запись ритма на одно пробуждение: сессия и задержка со сдвигом, с которыми идет анализ.
@@ -81,6 +87,8 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     // Только на queue.
     private let analyzer: StreamAnalyzer
     private var tracker: BeatTracker
+    /// Трек, под которым трекер получал шаги: по нему сброс решает, сохранить ли темп.
+    private var tempoMemory = TrackTempoMemory()
     private var hostClock = HostClock(sampleRate: 48_000)
     private var window: [Float]
     private var timer: DispatchSourceTimer?
@@ -127,7 +135,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 self.window = [Float](repeating: 0, count: self.analyzer.config.fftSize)
             } else {
                 self.analyzer.reset()
-                self.tracker.reset()
+                self.resetTracker()
             }
             self.restartStream()
             self.lastWake = nil
@@ -177,6 +185,13 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         }
     }
 
+    /// Трек Now Playing выбранного источника-приложения (с удержанием пустых снимков), `nil` без него.
+    /// Сброс трекера в том же треке сохраняет темп, новый трек сбрасывает трекер полностью. Можно звать
+    /// с любого потока.
+    func setTrack(_ track: TrackKey?) {
+        shared.withLock { $0.track = track }
+    }
+
     /// Остров скрыт: пробуждения реже, по одному шагу, трекер стоит, расписание пустое.
     /// Применяется на очереди анализа, сохраняется между запусками.
     func setIdle(_ idle: Bool) {
@@ -185,7 +200,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             self.idle = idle
             if idle {
                 self.endRhythm(.islandHidden)
-                self.tracker.reset()
+                self.resetTracker()
                 self.store.publishSchedule(.empty)
             } else {
                 // В простое следящие пики онсетов спадали за пробуждение 15 Гц и могли остаться
@@ -239,6 +254,13 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
 
     // MARK: - Очередь анализа
 
+    /// Сброс трекера: темп остается, если трек Now Playing известен и тот же, под которым шли шаги
+    /// (пауза, короткая тишина, пересборка tap в том же треке).
+    private func resetTracker() {
+        let track = shared.withLock { $0.track }
+        tracker.reset(keepTempo: tempoMemory.keepsTempo(current: track))
+    }
+
     /// Поток начинается заново: часы хоста без метки, первый шаг самый новый, в хранилище тихий
     /// кадр и пустое расписание.
     private func restartStream() {
@@ -254,8 +276,8 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
 
     private func wake(now: Double) {
         guard active, now.isFinite else { return }
-        let (settings, latency, syncOffset, observer, rhythmSession) = shared.withLock {
-            ($0.settings, $0.outputLatency, $0.syncOffset, $0.frameObserver, $0.rhythm)
+        let (settings, latency, syncOffset, observer, rhythmSession, track) = shared.withLock {
+            ($0.settings, $0.outputLatency, $0.syncOffset, $0.frameObserver, $0.rhythm, $0.track)
         }
         let rhythm = rhythmSession.map {
             RhythmTap(session: $0, outputLatency: latency, syncOffset: syncOffset, now: now)
@@ -272,7 +294,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         if let next = nextHopEnd, total < next - config.hopSize {
             // Кольцо обнулено (пересборка tap, новое демо): поток начинается заново.
             analyzer.reset()
-            tracker.reset()
+            resetTracker()
             restartStream()
         }
 
@@ -299,7 +321,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             // Новых сэмплов нет: волны гаснут, а не застывают на последнем окне.
             if !feedStalled {
                 analyzer.reset()
-                tracker.reset()
+                resetTracker()
                 store.publishSchedule(.empty)
                 feedStalled = true
                 endRhythm(.stalled)
@@ -311,7 +333,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         } else {
             feedStalled = false
             windows = processHops(
-                total: total, dt: dt, settings: settings, offset: offset, observer: observer, rhythm: rhythm
+                total: total, dt: dt, settings: settings, offset: offset, track: track, observer: observer, rhythm: rhythm
             )
         }
         guard windows != .noHop else { return }
@@ -335,6 +357,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         dt: Double,
         settings: LevelSettings,
         offset: Double,
+        track: TrackKey?,
         observer: (@Sendable (WaveFrame, Double) -> Void)?,
         rhythm: RhythmTap?
     ) -> Windows {
@@ -350,6 +373,11 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             // Анализ отстал (сон, остановленная очередь): старые шаги уже не нужны.
             end += (total - end) / hop * hop
             analyzer.reset()
+            resetTracker()
+        }
+        if !idle, tempoMemory.feeding(current: track, resuming: tracker.resumingTempo) {
+            // Новый трек (посреди звука или выбран на паузе) или трек сменился, пока трекер идет по памяти
+            // темпа: темп и сетка прежнего трека не нужны.
             tracker.reset()
         }
 
