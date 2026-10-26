@@ -282,4 +282,51 @@ struct PaletteTests {
         #expect(PaletteFlow(phase: 1).phase == 0)
         #expect(PaletteFlow().phase == 0)
     }
+
+    // MARK: - ArtworkGlow
+
+    /// Свечение обложки только у раскрытой панели, при включенной функции, с обложкой и без
+    /// «Уменьшить прозрачность».
+    @Test func artworkGlowShownOnlyWhileExpanded() {
+        let states: [IslandState] = [.hidden, .collapsed, .expanded]
+        var shown = 0
+        for state in states {
+            for enabled in [false, true] {
+                for hasArtwork in [false, true] {
+                    for reduceTransparency in [false, true] {
+                        let expected = state == .expanded && enabled && hasArtwork && !reduceTransparency
+                        let actual = ArtworkGlow.isShown(
+                            enabled: enabled, state: state, hasArtwork: hasArtwork,
+                            reduceTransparency: reduceTransparency
+                        )
+                        #expect(
+                            actual == expected,
+                            "\(state) enabled \(enabled) artwork \(hasArtwork) reduce \(reduceTransparency)"
+                        )
+                        if actual { shown += 1 }
+                    }
+                }
+            }
+        }
+        #expect(shown == 1)
+    }
+
+    /// Цвета свечения обложки это `WavePaint.glowColor` каждого цвета палитры: темные поднимаются.
+    @Test func artworkGlowColorsAreLifted() {
+        let dark = [RGBColor(hex: 0x3A1F12), RGBColor(hex: 0x10204A), RGBColor(hex: 0x202020)]
+        let colors = ArtworkGlow.colors(artworkPalette: dark)
+        #expect(colors == dark.map(WavePaint.glowColor))
+        #expect(colors.count == 3)
+        for (glow, source) in zip(colors, dark) {
+            #expect(glow.oklab.l >= WavePaint.glowLightness - 1e-3)
+            #expect(glow.oklab.l > source.oklab.l)
+        }
+        #expect(ArtworkGlow.colors(artworkPalette: []).isEmpty)
+        #expect(ArtworkGlow.opacity == 0.45 && ArtworkGlow.blur == 8 && ArtworkGlow.spread == 4)
+    }
+
+    /// Сияние с размытием помещается в поля окна панели и не обрезается краем окна.
+    @Test func haloFitsPanelMargins() {
+        #expect(ArtworkGlow.spread + 2 * ArtworkGlow.blur <= Double(NotchGeometry.panelSideMargin))
+    }
 }

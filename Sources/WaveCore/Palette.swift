@@ -412,3 +412,26 @@ public struct PaletteFlow: Sendable {
         return result < 1 ? result : 0
     }
 }
+
+/// Свечение обложки: мягкое сияние цвета обложки за раскрытой панелью. Скругленный прямоугольник
+/// панели, расширенный на `spread`, с размытием `blur` и прозрачностью `opacity`. Сияние с
+/// размытием помещается в поля окна панели (`NotchGeometry.panelSideMargin`).
+public enum ArtworkGlow {
+    public static let opacity = 0.45
+    /// Радиус размытия, pt.
+    public static let blur = 8.0
+    /// На сколько сияние шире панели с каждой стороны, pt.
+    public static let spread = 4.0
+
+    /// Рисуется только у раскрытой панели, при включенной функции и с обложкой. При «Уменьшить
+    /// прозрачность» размытого сияния нет.
+    public static func isShown(enabled: Bool, state: IslandState, hasArtwork: Bool, reduceTransparency: Bool) -> Bool {
+        enabled && state == .expanded && hasArtwork && !reduceTransparency
+    }
+
+    /// Цвета сияния: `WavePaint.glowColor` каждого цвета палитры обложки, как у свечения под
+    /// островом, чтобы темная обложка светилась, а не темнела.
+    public static func colors(artworkPalette: [RGBColor]) -> [RGBColor] {
+        artworkPalette.map(WavePaint.glowColor)
+    }
+}

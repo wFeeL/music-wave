@@ -1,0 +1,219 @@
+import Foundation
+import Testing
+@testable import WaveCore
+
+/// Мягкая остановка: на паузе показанные волны, полосы, уровень и свечение затихают за 0,6 с.
+struct SoftStopTests {
+    private static let start = 10.0
+    private static let soundLayers: [Float] = [0.8, 0.5, 0.3]
+    private static let soundGlow: Float = 0.6
+
+    /// Показанные значения одного кадра после `SoftStop.apply`.
+    private struct Shown {
+        var layers: [Float]
+        var bands: [Float]
+        var level: Float
+        var glow: Float
+    }
+
+    /// Один кадр через `stop`.
+    private static func frame(
+        _ stop: inout SoftStop, layers: [Float], bands: [Float] = [], level: Float, glow: Float, silent: Bool,
+        now: Double
+    ) -> Shown {
+        var shown = Shown(layers: layers, bands: bands, level: level, glow: glow)
+        stop.apply(
+            layers: &shown.layers, bands: &shown.bands, level: &shown.level, glow: &shown.glow, silent: silent,
+            now: now
+        )
+        return shown
+    }
+
+    /// Кадр со звуком на `start`: слои [0.8, 0.5, 0.3], уровень 0.8, свечение 0.6.
+    private static func playing(bands: [Float] = []) -> SoftStop {
+        var stop = SoftStop()
+        _ = frame(&stop, layers: soundLayers, bands: bands, level: 0.8, glow: soundGlow, silent: false, now: start)
+        return stop
+    }
+
+    /// Тихий кадр с нулевым входом на `start + t`.
+    private static func quiet(_ stop: inout SoftStop, at t: Double, bands: Int = 0, glow: Float = 0) -> Shown {
+        frame(
+            &stop, layers: [0, 0, 0], bands: [Float](repeating: 0, count: bands), level: 0, glow: glow, silent: true,
+            now: start + t
+        )
+    }
+
+    private static func factor(_ t: Double) -> Float {
+        Float(1 - WavePaint.smoothstep(0, SoftStop.duration, t))
+    }
+
+    @Test func easesOutOverSixTenths() {
+        #expect(SoftStop.duration == 0.6)
+        var stop = Self.playing()
+        #expect(!stop.isFading)
+
+        let early = Self.quiet(&stop, at: 0.01)
+        #expect(abs(Self.factor(0.01) - 0.99918) < 1e-5)
+        #expect(abs(early.layers[0] - 0.7993) < 1e-4)
+        #expect(stop.isFading)
+
+        let middle = Self.quiet(&stop, at: 0.3)
+        #expect(abs(middle.layers[0] - 0.4) < 1e-4)
+        #expect(abs(middle.layers[1] - 0.25) < 1e-4)
+        #expect(abs(middle.layers[2] - 0.15) < 1e-4)
+        #expect(abs(middle.level - 0.4) < 1e-4)
+        #expect(abs(middle.glow - 0.3) < 1e-4)
+        #expect(stop.isFading)
+
+        let end = Self.quiet(&stop, at: 0.6)
+        #expect(end.layers == [0, 0, 0])
+        #expect(end.level == 0)
+        #expect(end.glow == 0)
+        #expect(!stop.isFading)
+    }
+
+    @Test func bandsFadeWithLayers() {
+        let bands = [Float](repeating: 0.6, count: BandMapper.bandCount)
+        var stop = Self.playing(bands: bands)
+        let middle = Self.quiet(&stop, at: 0.3, bands: BandMapper.bandCount)
+        #expect(middle.bands.count == BandMapper.bandCount)
+        #expect(middle.bands.allSatisfy { abs($0 - 0.3) < 1e-4 })
+        let end = Self.quiet(&stop, at: 0.6, bands: BandMapper.bandCount)
+        #expect(end.bands == [Float](repeating: 0, count: BandMapper.bandCount))
+
+        // Полосы другой длины, чем при запоминании, проходят как есть.
+        var other = Self.playing(bands: bands)
+        let short: [Float] = [0.1, 0, 0.2, 0, 0, 0, 0, 0, 0, 0.05]
+        let shown = Self.frame(&other, layers: [0, 0, 0], bands: short, level: 0, glow: 0, silent: true, now: Self.start + 0.3)
+        #expect(shown.bands == short)
+        #expect(abs(shown.layers[0] - 0.4) < 1e-4)
+    }
+
+    @Test func soundReturnPassesThrough() {
+        var stop = Self.playing(bands: [Float](repeating: 0.6, count: BandMapper.bandCount))
+        _ = Self.quiet(&stop, at: 0.2, bands: BandMapper.bandCount)
+        #expect(stop.isFading)
+        let layers: [Float] = [0.1, 0.05, 0.02]
+        let bands = [Float](repeating: 0.03, count: BandMapper.bandCount)
+        let back = Self.frame(&stop, layers: layers, bands: bands, level: 0.1, glow: 0.9, silent: false, now: Self.start + 0.25)
+        #expect(back.layers == layers)
+        #expect(back.bands == bands)
+        #expect(back.level == 0.1)
+        #expect(back.glow == 0.9)
+        #expect(!stop.isFading)
+
+        // Следующая пауза угасает от новых показанных значений.
+        let next = Self.quiet(&stop, at: 0.25 + 0.3, bands: BandMapper.bandCount)
+        #expect(abs(next.layers[0] - 0.05) < 1e-4)
+        #expect(abs(next.glow - 0.45) < 1e-4)
+        #expect(next.bands.allSatisfy { abs($0 - 0.015) < 1e-4 })
+    }
+
+    @Test func phantomGlowSuppressedWhileSilent() {
+        var stop = Self.playing()
+        for t in [0.01, 0.1, 0.3, 0.5, 0.59, 0.6, 1, 5] {
+            let shown = Self.quiet(&stop, at: t, glow: 0.9)
+            #expect(shown.glow <= Self.soundGlow * Self.factor(t) + 1e-6, "t \(t): \(shown.glow)")
+        }
+        #expect(!stop.isFading)
+    }
+
+    @Test func louderInputWinsDuringFade() {
+        var stop = Self.playing()
+        let shown = Self.frame(&stop, layers: [0.9, 0.1, 0.5], level: 0.9, glow: 0, silent: true, now: Self.start + 0.3)
+        #expect(shown.layers[0] == 0.9)
+        #expect(abs(shown.layers[1] - 0.25) < 1e-4)
+        #expect(shown.layers[2] == 0.5)
+        #expect(shown.level == 0.9)
+        #expect(abs(shown.glow - 0.3) < 1e-4)
+    }
+
+    @Test func silenceFromStartStaysSilent() {
+        var stop = SoftStop()
+        for step in 0..<10 {
+            let shown = Self.frame(
+                &stop, layers: [0, 0, 0], bands: [Float](repeating: 0, count: BandMapper.bandCount), level: 0,
+                glow: 0.8, silent: true, now: Self.start + Double(step) / 60
+            )
+            #expect(shown.layers == [0, 0, 0])
+            #expect(shown.bands == [Float](repeating: 0, count: BandMapper.bandCount))
+            #expect(shown.level == 0)
+            #expect(shown.glow == 0)
+            #expect(!stop.isFading)
+        }
+    }
+
+    @Test func fadeIsFrameRateIndependent() {
+        func shown(step: Double) -> Shown {
+            var stop = Self.playing(bands: [Float](repeating: 0.6, count: BandMapper.bandCount))
+            var result = Shown(layers: [], bands: [], level: 0, glow: 0)
+            // Кадры через `step`, последний ровно на 0.3 с (0.3 не кратно 1/12).
+            var times = Array(stride(from: step, to: 0.3 - 1e-9, by: step))
+            times.append(0.3)
+            for t in times {
+                result = Self.quiet(&stop, at: t, bands: BandMapper.bandCount)
+            }
+            return result
+        }
+        let fast = shown(step: 1.0 / 120)
+        let slow = shown(step: 1.0 / 12)
+        for (a, b) in zip(fast.layers, slow.layers) {
+            #expect(abs(a - b) < 1e-4)
+        }
+        for (a, b) in zip(fast.bands, slow.bands) {
+            #expect(abs(a - b) < 1e-4)
+        }
+        #expect(abs(fast.level - slow.level) < 1e-4)
+        #expect(abs(fast.glow - slow.glow) < 1e-4)
+        #expect(abs(fast.layers[0] - 0.4) < 1e-4)
+    }
+
+    @Test func badInputSafe() {
+        // Не конечные значения входа на тишине дают конечный результат.
+        var stop = Self.playing()
+        let nan = Self.frame(
+            &stop, layers: [.nan, .infinity, -.infinity], level: .nan, glow: .nan, silent: true, now: Self.start + 0.3
+        )
+        #expect(nan.layers.allSatisfy { $0.isFinite })
+        #expect(nan.level.isFinite && nan.glow.isFinite)
+        #expect(abs(nan.layers[0] - 0.4) < 1e-4)
+
+        // Не конечный звук не попадает в удержание.
+        var poisoned = SoftStop()
+        _ = Self.frame(&poisoned, layers: [.nan, 0.5, .infinity], level: .nan, glow: .infinity, silent: false, now: Self.start)
+        let after = Self.quiet(&poisoned, at: 0.3)
+        #expect(after.layers.allSatisfy { $0.isFinite })
+        #expect(after.level.isFinite && after.glow.isFinite)
+
+        // Часы назад: угасание стоит в начале и идет дальше, когда часы пошли вперед.
+        var back = Self.playing()
+        _ = Self.quiet(&back, at: 0.3)
+        let rewound = Self.quiet(&back, at: -1)
+        #expect(abs(rewound.layers[0] - 0.8) < 1e-4)
+        #expect(back.isFading)
+        let resumed = Self.quiet(&back, at: -1 + 0.3)
+        #expect(abs(resumed.layers[0] - 0.4) < 1e-4)
+
+        // Не конечное время кончает угасание.
+        var clock = Self.playing()
+        let broken = Self.frame(&clock, layers: [0, 0, 0], level: 0, glow: 0.9, silent: true, now: .nan)
+        #expect(broken.layers == [0, 0, 0])
+        #expect(broken.glow == 0)
+        #expect(!clock.isFading)
+
+        // Звук с не конечным временем: угасания нет, тишина сразу тихая.
+        var timeless = SoftStop()
+        _ = Self.frame(&timeless, layers: Self.soundLayers, level: 0.8, glow: 0.6, silent: false, now: .infinity)
+        let silentNext = Self.quiet(&timeless, at: 0.1)
+        #expect(silentNext.layers == [0, 0, 0] && silentNext.glow == 0)
+        #expect(!timeless.isFading)
+
+        // Слои другой длины и пустые массивы проходят как есть.
+        var lengths = Self.playing()
+        let two = Self.frame(&lengths, layers: [0.2, 0.1], level: 0, glow: 0, silent: true, now: Self.start + 0.1)
+        #expect(two.layers == [0.2, 0.1])
+        let empty = Self.frame(&lengths, layers: [], level: 0, glow: 0, silent: true, now: Self.start + 0.2)
+        #expect(empty.layers.isEmpty && empty.bands.isEmpty)
+    }
+}

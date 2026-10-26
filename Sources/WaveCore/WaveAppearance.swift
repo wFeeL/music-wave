@@ -174,6 +174,22 @@ public struct WaveLine: Sendable, Equatable {
     }
 }
 
+/// Системные настройки экрана, под которые подстраивается вид (`WaveAppearance.adapted(to:)`).
+public struct DisplayOptions: Sendable, Equatable {
+    /// «Увеличить контраст».
+    public var increaseContrast: Bool
+    /// «Уменьшить прозрачность».
+    public var reduceTransparency: Bool
+
+    public init(increaseContrast: Bool = false, reduceTransparency: Bool = false) {
+        self.increaseContrast = increaseContrast
+        self.reduceTransparency = reduceTransparency
+    }
+
+    /// Обе выключены: вид как в настройках.
+    public static let standard = DisplayOptions()
+}
+
 /// Настройки вида волн (вкладка «Вид»). Каждое значение держится в своем диапазоне `Limits`:
 /// и в `init`, и при записи в свойство, и при чтении из сохраненных настроек. Не конечное
 /// значение заменяется значением по умолчанию.
@@ -239,8 +255,11 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     /// Стиль волн: по умолчанию «Волны», неизвестный сохраненный стиль тоже дает «Волны».
     public var look: WaveLook
     /// Рисуется ли свечение линий (размытая копия под ними). Не настройка и не сохраняется:
-    /// выключает его только `lightened()`.
+    /// выключают его только `lightened()` и `adapted(to:)` при «Уменьшить прозрачность».
     public private(set) var glowPass = true
+    /// Системное «Увеличить контраст» (`adapted(to:)`): линии толще (`contrastWidthScale` в
+    /// `lookGeometry`) и ярче (`WavePaint.Options.highContrast`). Не настройка и не сохраняется.
+    public private(set) var highContrast = false
 
     public init(
         wingWidth: Double, colorMode: WaveColorMode, glowRadius: Double,
@@ -331,17 +350,26 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         }
     }
 
+    /// Множитель толщины линий при «Увеличить контраст» (`highContrast`).
+    public static let contrastWidthScale = 1.4
+
     /// Базовая линия и толщина стиля: «Спектр» от нижней базовой линии, «Минимал» с толщиной
-    /// × `WaveLook.minimalWidthScale`, «Волны» и «Пульс» как раньше.
+    /// × `WaveLook.minimalWidthScale`, «Волны» и «Пульс» как раньше. При `highContrast` толщина
+    /// еще × `contrastWidthScale`: у «Минимала» 0.84, у остальных 1.4.
     public var lookGeometry: WaveLookGeometry {
-        switch look {
-        case .waves, .pulse: .standard
+        var geometry = switch look {
+        case .waves, .pulse: WaveLookGeometry.standard
         case .spectrum: WaveLookGeometry(baseline: .bottom, widthScale: 1)
         case .minimal: WaveLookGeometry(baseline: .center, widthScale: WaveLook.minimalWidthScale)
         }
+        if highContrast {
+            geometry.widthScale *= Self.contrastWidthScale
+        }
+        return geometry
     }
 
-    /// Сколько линий остается в режиме энергосбережения: три основные, без эха.
+    /// Сколько линий остается в режиме энергосбережения и при «Увеличить контраст»: три
+    /// основные, без эха.
     static let lightenedLineLimit = 3
 
     /// Вид для режима энергосбережения: эхо не рисуется (больше трех линий рисуются тремя
@@ -351,6 +379,23 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         light.lineCount = min(lineCount, Self.lightenedLineLimit)
         light.glowPass = false
         return light
+    }
+
+    /// Вид под системные настройки экрана, как `lightened()`: сами настройки не меняются, флаги
+    /// не сохраняются. «Увеличить контраст»: эха нет (больше трех линий рисуются тремя основными)
+    /// и `highContrast`. «Уменьшить прозрачность»: нет свечения линий и заливки. Свечение под
+    /// островом от этого не зависит и остается. Без опций (`.standard`) вид тот же.
+    public func adapted(to options: DisplayOptions) -> WaveAppearance {
+        var adapted = self
+        if options.increaseContrast {
+            adapted.lineCount = min(lineCount, Self.lightenedLineLimit)
+            adapted.highContrast = true
+        }
+        if options.reduceTransparency {
+            adapted.glowPass = false
+            adapted.fill = 0
+        }
+        return adapted
     }
 
     /// Порог `renderCost`, выше которого вкладка «Вид» предупреждает о нагрузке на процессор.

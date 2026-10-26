@@ -102,8 +102,97 @@ struct RenderCostTests {
         #expect(wide.renderCost == light.renderCost)
     }
 
+    // MARK: - Опции экрана
+
+    private static let contrast = DisplayOptions(increaseContrast: true)
+    private static let opaque = DisplayOptions(reduceTransparency: true)
+    private static let both = DisplayOptions(increaseContrast: true, reduceTransparency: true)
+
+    @Test func standardOptionsChangeNothing() {
+        #expect(DisplayOptions.standard == DisplayOptions())
+        #expect(!DisplayOptions.standard.increaseContrast && !DisplayOptions.standard.reduceTransparency)
+        for look in WaveLook.allCases {
+            var appearance = Self.maxPreset
+            appearance.look = look
+            #expect(appearance.adapted(to: .standard) == appearance)
+        }
+        #expect(WaveAppearance.standard.adapted(to: .standard) == .standard)
+        #expect(!WaveAppearance.standard.highContrast)
+    }
+
+    /// «Увеличить контраст»: эха нет (больше трех линий рисуются тремя), флаг для красок поднят,
+    /// остальное как в настройках.
+    @Test func increaseContrastDropsEchoesAndFlags() {
+        let adapted = Self.maxPreset.adapted(to: Self.contrast)
+        #expect(adapted.highContrast)
+        #expect(adapted.lineCount == 3)
+        #expect(adapted.lines == WaveLine.lines(count: 3))
+        #expect(adapted.glowPass)
+        #expect(adapted.fill == 1 && adapted.thickness == 2 && adapted.glowRadius == 3 && adapted.wingWidth == 200)
+        for count in 1...3 {
+            let few = Self.changed { $0.lineCount = count }
+            #expect(few.adapted(to: Self.contrast).lineCount == count)
+        }
+        #expect(Self.maxPreset.lineCount == 6 && !Self.maxPreset.highContrast)
+    }
+
+    @Test func contrastWidensLines() {
+        #expect(WaveAppearance.contrastWidthScale == 1.4)
+        for look in WaveLook.allCases {
+            var appearance = WaveAppearance.standard
+            appearance.look = look
+            let expected = look == .minimal ? 0.84 : 1.4
+            for options in [Self.contrast, Self.both] {
+                let adapted = appearance.adapted(to: options)
+                #expect(abs(adapted.lookGeometry.widthScale - expected) < 1e-9, "\(look)")
+                #expect(adapted.lookGeometry.baseline == appearance.lookGeometry.baseline)
+            }
+            #expect(appearance.adapted(to: Self.opaque).lookGeometry == appearance.lookGeometry)
+        }
+    }
+
+    /// «Уменьшить прозрачность»: нет размытого свечения линий и полупрозрачной заливки.
+    @Test func reduceTransparencyDropsGlowAndFill() {
+        for look in WaveLook.allCases {
+            var appearance = Self.maxPreset
+            appearance.look = look
+            let adapted = appearance.adapted(to: Self.opaque)
+            #expect(!adapted.glowPass)
+            #expect(adapted.fill == 0 && adapted.effectiveFill == 0)
+            #expect(!adapted.highContrast)
+            #expect(adapted.lineCount == 6)
+            #expect(adapted.renderCost(for: .wing) <= appearance.renderCost(for: .wing))
+        }
+    }
+
+    /// Флаги опций экрана не сохраняются: прочитанный вид без контраста и со свечением.
+    @Test func adaptedFlagsAreNotStored() throws {
+        let adapted = Self.maxPreset.adapted(to: Self.both)
+        let data = try JSONEncoder().encode(adapted)
+        let json = String(decoding: data, as: UTF8.self)
+        #expect(!json.contains("highContrast"))
+        #expect(!json.contains("glowPass"))
+        let decoded = try JSONDecoder().decode(WaveAppearance.self, from: data)
+        #expect(!decoded.highContrast)
+        #expect(decoded.glowPass)
+    }
+
+    /// Опции экрана и энергосбережение складываются в любом порядке, повтор ничего не меняет.
+    @Test func adaptedThenLightenedComposes() {
+        for options in [Self.contrast, Self.opaque, Self.both] {
+            let first = Self.maxPreset.adapted(to: options).lightened()
+            let second = Self.maxPreset.lightened().adapted(to: options)
+            #expect(first == second)
+            #expect(first.lineCount == 3 && !first.glowPass)
+            #expect(first.highContrast == options.increaseContrast)
+            #expect(first.fill == (options.reduceTransparency ? 0 : 1))
+            #expect(first.adapted(to: options) == first)
+            #expect(first.adapted(to: .standard) == first)
+        }
+    }
+
     /// Каждый стиль на тех же настройках стоит не больше «Волн»: и на свернутом острове (`.wing`),
-    /// и в раскрытой панели (`.panel`), со свечением и без него.
+    /// и в раскрытой панели (`.panel`), со свечением и без него, с опциями экрана и без них.
     @Test func everyLookCostsNoMoreThanWaves() {
         var checked = 0
         for lineCount in 1...6 {
@@ -115,7 +204,9 @@ struct RenderCostTests {
                                 wingWidth: wing, colorMode: .artwork, glowRadius: radius, lineCount: lineCount,
                                 fill: fill, thickness: thickness, amplitude: 1
                             )
-                            for appearance in [base, base.lightened()] {
+                            for appearance in [
+                                base, base.lightened(), base.adapted(to: Self.contrast), base.adapted(to: Self.both),
+                            ] {
                                 for profile in WaveProfile.allCases {
                                     let waves = appearance.renderCost(for: profile)
                                     for look in WaveLook.allCases {
@@ -136,7 +227,7 @@ struct RenderCostTests {
                 }
             }
         }
-        #expect(checked == 6 * 2 * 2 * 2 * 2 * 2 * 2 * 4)
+        #expect(checked == 6 * 2 * 2 * 2 * 2 * 4 * 2 * 4)
     }
 
     /// Цена стилей по модели: «Волны» не изменились, остальные считаются от своих линий.
