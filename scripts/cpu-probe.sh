@@ -34,9 +34,9 @@
 #
 # --set wf.ключ=значение пишет один ключ поверх набора, после --style и баннера, поэтому
 # главнее их; можно повторять. Ключ обязан начинаться с «wf.», значение не пустое. Тип для
-# `defaults write` по виду значения: true, false, yes, no дают -bool, целое -int, дробное -float,
-# остальное -string (AppSettings читает числа и флаги через NSNumber, поэтому
-# wf.softPulse=0 выключает флаг). Ключи, которые AppSettings хранит как JSON-данные (wf.waveStyle,
+# `defaults write` по виду значения: true, false, yes, no (в любом регистре) дают -bool, целое
+# -int, дробное (и «1.», «1e-3») -float, остальное -string (AppSettings читает числа и флаги
+# через NSNumber, поэтому wf.softPulse=0 выключает флаг). Ключи, которые AppSettings хранит как JSON-данные (wf.waveStyle,
 # wf.colorMode, wf.source, wf.levelMode, wf.latencyMode, wf.syncOffsets), так не пишутся: стиль
 # задает --style, остальные отклоняются. Все ключи --set идут в шапку отчета строкой «set:» и в
 # имя итога и стеков (wf.colorFlow=0 добавляет «-colorFlow0»: cpu-max-colorFlow0-softPulse0.txt),
@@ -115,8 +115,9 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
   --set wf.KEY=VALUE  one benchmark key written over the preset, after --style and the banner
                     key, so it wins over both; repeat for more keys. The key must start with
                     "wf.", the value must not be empty. Type by the value: true/false/yes/no
-                    -bool, integer -int, decimal -float, anything else -string (flags read 0
-                    and 1 too: wf.softPulse=0 turns the soft pulse off). Keys stored as JSON
+                    in any case -bool, integer -int, decimal (also 1., .5, 1e-3) -float,
+                    anything else -string (flags read 0 and 1 too: wf.softPulse=0 turns the
+                    soft pulse off). Keys stored as JSON
                     data (wf.waveStyle, wf.colorMode, wf.source, wf.levelMode,
                     wf.latencyMode, wf.syncOffsets) are rejected: use --style for the style.
                     Every key is listed in the report header ("set:") and added to the report
@@ -245,10 +246,11 @@ case "$ISLAND" in
         ;;
 esac
 
-# Тип `defaults write` для значения --set: флаг, целое, дробное или строка.
+# Тип `defaults write` для значения --set: флаг (true, false, yes, no в любом регистре), целое,
+# дробное (в том числе «1.», «.5», «1e-3») или строка.
 set_type() { # значение
-    local integer='^-?[0-9]+$' decimal='^-?[0-9]*[.][0-9]+$'
-    case "$1" in
+    local integer='^[-+]?[0-9]+$' decimal='^[-+]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][-+]?[0-9]+)?$'
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
         true | false | yes | no)
             echo -bool
             ;;
@@ -265,7 +267,8 @@ set_type() { # значение
 }
 
 # Проверка ключей --set: имя wf.*, непустое значение, не JSON-ключ AppSettings. Каждый ключ
-# добавляет к имени итога «-<ключ без wf.><значение>» (только буквы, цифры и точка).
+# добавляет к имени итога «-<ключ без wf.><значение>» (только буквы, цифры, точка и минус, так
+# «-1» и «1» дают разные файлы). Флаги пишутся в нижнем регистре.
 SET_SUMMARY=""
 SET_KEY_PATTERN='^wf[.][A-Za-z0-9_.]+$'
 i=0
@@ -286,7 +289,11 @@ while [[ $i -lt $SET_COUNT ]]; do
             usage
             ;;
     esac
-    PREFIX="$PREFIX-${key#wf.}$(printf '%s' "$value" | tr -cd 'A-Za-z0-9.')"
+    if [[ $(set_type "$value") == -bool ]]; then
+        value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+        SET_VALUES[i]=$value
+    fi
+    PREFIX="$PREFIX-${key#wf.}$(printf '%s' "$value" | tr -cd 'A-Za-z0-9.-')"
     SET_SUMMARY="$SET_SUMMARY, $key=$value ($(set_type "$value"))"
     i=$((i + 1))
 done
