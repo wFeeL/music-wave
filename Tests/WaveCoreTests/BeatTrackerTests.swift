@@ -102,14 +102,25 @@ struct BeatTrackerTests {
 
     /// Брейк, после которого доли вернулись на полпериода позже (сетка наката больше не та): первая
     /// доля после возврата промахивается и сразу отпускает захват, ни одной яркой предсказанной
-    /// вспышки мимо новых долей (уверенная вспышка не на ту долю хуже темноты).
-    @Test func coastReturnOffTheGridUnlocks() throws {
+    /// вспышки мимо новых долей (уверенная вспышка не на ту долю хуже темноты). С одиночной атакой на
+    /// старой доле посреди брейка (ворот закрыт) то же самое: решает только доля с открытым воротом.
+    @Test(arguments: [false, true])
+    func coastReturnOffTheGridUnlocks(strayHit: Bool) throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var hops = SyntheticBeats(bpm: 120)
         hops.feed(&tracker, until: 10)
         try #require(tracker.locked)
         // Тишина 4 с (уровень бочки -40 dBFS): ворот закрывается, захват держится накатом.
         hops.feedSilence(&tracker, until: 14)
+        if strayHit {
+            // Атака на последней старой доле перед возвратом (14.25 с), уровень бочки не растет.
+            hops.feedSilence(&tracker, until: 14.25)
+            hops.endTime += hops.hop
+            var hop = SyntheticBeats.hop(endTime: hops.endTime, broadband: OnsetEvent(time: 14.25, strength: 1), kick: nil)
+            hop.kickLevelDB = -40
+            tracker.process(hop)
+            hops.feedSilence(&tracker, until: 14.45)
+        }
         try #require(tracker.energyGate < tracker.parameters.coastGate)
         try #require(tracker.locked)
         // Доли возвращаются на 0.5 + k · 0.5 с вместо 0.25 + k · 0.5 с.

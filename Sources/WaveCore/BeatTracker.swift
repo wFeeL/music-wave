@@ -654,7 +654,8 @@ public struct BeatTracker: Sendable {
 
     private mutating func closeWindows() {
         while let nextBeat, let period, now > nextBeat + parameters.matchWindow * period {
-            if isCoasting, !nextMatched {
+            let coasting = isCoasting
+            if coasting, !nextMatched {
                 // Брейк без бочки при захвате: доля без онсета не довод против сетки, уверенность,
                 // счет и захват стоят, сетка идет дальше по последнему периоду.
                 coasted = true
@@ -670,7 +671,8 @@ public struct BeatTracker: Sendable {
                 } else {
                     locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
                 }
-                coasted = false
+                // Атака при закрытом вороте сетку не подтверждает: решает доля с открытым воротом.
+                if !coasting { coasted = false }
             }
             archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
             self.nextBeat = nextBeat + period
