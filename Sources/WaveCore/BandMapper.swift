@@ -128,10 +128,14 @@ public struct BandMapper: Sendable {
     /// Частота, на которой наклон равен 0 дБ.
     public static let tiltReferenceHz = 1000.0
 
-    /// Наклон каждой полосы в дБ: `20 × tiltExponent × log10(center / tiltReferenceHz)`. Ниже 1 кГц
-    /// отрицательный, выше положительный. Прибавляется к уровням только для волн в режиме `auto`.
+    /// Наклон каждой полосы в дБ: `max(0, 20 × tiltExponent × log10(center / tiltReferenceHz))`.
+    /// Наклон только поднимает: ниже 1 кГц он 0, поэтому бас и низ середины от него не меняются.
+    /// Нормировка идет по слоям, и внутри слоя наклон почти сокращается; заметен он там, где слой
+    /// прижат к `minPeakDB` или к разбросу слоев, то есть на тихих верхах. Срез ниже 1 кГц там же
+    /// уводил бы бас на 7...10 дБ под `minPeakDB`, и тихие записи давали бы меньше баса.
+    /// Прибавляется к уровням только для волн в режиме `auto`.
     public func tiltDB() -> [Float] {
-        centers.map { Float(20 * Self.tiltExponent * log10($0 / Self.tiltReferenceHz)) }
+        centers.map { Float(max(0, 20 * Self.tiltExponent * log10($0 / Self.tiltReferenceHz))) }
     }
 
     /// Полосы слоя (по центру полосы), подряд идущий диапазон индексов.

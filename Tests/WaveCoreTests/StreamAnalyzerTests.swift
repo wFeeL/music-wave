@@ -169,8 +169,7 @@ struct StreamAnalyzerTests {
 
         analyzer.reset()
         let resumed = try #require(analyzer.processSignal(quiet, firstSample: 600_000).last?.frame)
-        // Тон -40 dBFS на 440 Гц с наклоном -2.6 дБ стоит ниже minPeakDB, поэтому чуть ниже 0.5.
-        #expect(fresh.level > 0.45)
+        #expect(fresh.level > 0.5)
         #expect(abs(resumed.level - fresh.level) < 0.05)
     }
 
@@ -187,6 +186,83 @@ struct StreamAnalyzerTests {
         #expect(auto.map(\.kickOnset) == absolute.map(\.kickOnset))
         #expect(auto.map(\.broadbandOnset) == absolute.map(\.broadbandOnset))
         #expect(auto.contains { $0.kickOnset != nil })
+    }
+
+    /// Слои волн по шагам, как в `processHop` (нормировка, сглаживание, половина пика и половина
+    /// среднего), но с заданным наклоном. Времена это центры окон.
+    private static func layerSeries(_ samples: [Float], tiltDB: [Float]) -> (times: [Double], layers: [[Float]]) {
+        let config = AnalysisConfig(sampleRate: rate)
+        let mapper = BandMapper(fftSize: config.fftSize, sampleRate: rate)
+        let fft = RealFFT(size: config.fftSize)
+        let ranges = WaveLayer.allCases.map { mapper.bands(for: $0) }
+        var processor = LevelProcessor(layerBands: ranges, tiltDB: tiltDB)
+        var smoothers = [AttackRelease](
+            repeating: AttackRelease(attack: StreamAnalyzer.attack, release: StreamAnalyzer.release),
+            count: BandMapper.bandCount
+        )
+        var times: [Double] = []
+        var layers: [[Float]] = []
+        var end = config.fftSize
+        while end <= samples.count {
+            let levels = mapper.bandLevels(fft.amplitudeSpectrum(Array(samples[(end - config.fftSize)..<end])))
+            let normalized = processor.normalize(levels, dt: config.hopDuration, settings: LevelSettings())
+            var bands = [Float](repeating: 0, count: BandMapper.bandCount)
+            for band in bands.indices {
+                bands[band] = smoothers[band].step(toward: normalized[band], dt: config.hopDuration)
+            }
+            layers.append(ranges.map { range in
+                var peak: Float = 0
+                var sum: Float = 0
+                for band in range {
+                    peak = max(peak, bands[band])
+                    sum += bands[band]
+                }
+                return 0.5 * peak + 0.5 * sum / Float(range.count)
+            })
+            times.append(Double(end - config.fftSize / 2) / rate)
+            end += config.hopSize
+        }
+        return (times, layers)
+    }
+
+    /// Хэты на 14 dB тише баса и бочки: верх прижат к разбросу слоев (пик баса -4 dB, хэтов -40 dB),
+    /// и наклон поднимает размах верхнего слоя между ударом хэта и паузой. Наклон только поднимает,
+    /// поэтому слой баса с ним и без него одинаков. Анализатор дает те же слои, что и ряд с наклоном.
+    @Test func tiltWidensQuietHatSwing() throws {
+        let seconds = 8.0
+        let body = Drums.fourOnFloor(seconds: seconds, sampleRate: Self.rate, offbeatBass: true)
+        let hats = Drums.fourOnFloor(seconds: seconds, sampleRate: Self.rate, hats: .eighths, levelDB: -14)
+        let mix = zip(body.samples, hats.samples).map { $0 + $1 }
+        let tilt = BandMapper(fftSize: AnalysisConfig(sampleRate: Self.rate).fftSize, sampleRate: Self.rate).tiltDB()
+        let tilted = Self.layerSeries(mix, tiltDB: tilt)
+        let flat = Self.layerSeries(mix, tiltDB: [])
+
+        /// Средний верхний слой через 5...30 мс после хэта минус через 90...200 мс, после 3 с.
+        func hatSwing(_ series: (times: [Double], layers: [[Float]])) -> Float {
+            var on: [Float] = []
+            var off: [Float] = []
+            for (index, time) in series.times.enumerated() where time > 3 {
+                guard let hat = hats.hats.last(where: { $0 <= time }) else { continue }
+                let since = time - hat
+                if (0.005...0.03).contains(since) { on.append(series.layers[index][WaveLayer.high.rawValue]) }
+                if (0.09...0.2).contains(since) { off.append(series.layers[index][WaveLayer.high.rawValue]) }
+            }
+            return on.reduce(0, +) / Float(max(on.count, 1)) - off.reduce(0, +) / Float(max(off.count, 1))
+        }
+        let swingTilted = hatSwing(tilted)
+        let swingFlat = hatSwing(flat)
+        #expect(swingFlat > 0.05)
+        #expect(swingTilted > swingFlat + 0.03)
+
+        let bassDifference = zip(tilted.layers, flat.layers)
+            .map { abs($0[WaveLayer.bass.rawValue] - $1[WaveLayer.bass.rawValue]) }.max() ?? 1
+        #expect(bassDifference <= 1e-6)
+
+        let analyzed = StreamAnalyzer(sampleRate: Self.rate).processSignal(mix)
+        try #require(analyzed.count == tilted.layers.count)
+        let analyzerDifference = zip(analyzed, tilted.layers)
+            .map { zip($0.frame.layers, $1).map { abs($0 - $1) }.max() ?? 1 }.max() ?? 1
+        #expect(analyzerDifference <= 1e-5)
     }
 
     @Test func envelopeDecaysWithin200ms() {

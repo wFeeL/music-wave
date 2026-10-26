@@ -195,6 +195,22 @@ import Testing
         #expect(withoutTilt[3] == 1)
     }
 
+    /// Заморозка опоры в тишине решается по уровню без наклона: шипение -72 dB в верхней полосе
+    /// (с наклоном +8 dB было бы выше порога шума) не двигает опору верхнего слоя.
+    @Test func hissDoesNotUnfreezeReference() {
+        let tilt = BandMapper(fftSize: 1024, sampleRate: 48_000).tiltDB()
+        var processor = LevelProcessor(layerBands: Self.layers, tiltDB: tilt)
+        Self.run(&processor, Self.levels([20: -20]), seconds: 5)
+        let reference = processor.layerReferencesDB[2]
+        var drift: Float = 0
+        for _ in 0..<600 {
+            _ = processor.normalize(Self.levels([23: -72]), dt: Self.frame, settings: LevelSettings(followSystemVolume: false))
+            drift = max(drift, abs(processor.layerReferencesDB[2] - reference))
+        }
+        #expect(reference > -20)
+        #expect(drift == 0)
+    }
+
     /// Порог шума проверяется по dB без наклона: шипение -72 dB остается нулем и на верхах.
     @Test func tiltIgnoresHissFloor() {
         let tilt = BandMapper(fftSize: 1024, sampleRate: 48_000).tiltDB()

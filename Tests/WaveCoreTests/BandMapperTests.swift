@@ -17,15 +17,30 @@ struct BandMapperTests {
         }
     }
 
-    /// Наклон `f^0.35`: 20 × 0.35 × log10(2) = 2.107 dB на октаву между любыми соседними полосами.
+    /// Наклон `f^0.35` выше 1 кГц: 20 × 0.35 × log10(2) = 2.107 dB на октаву между соседними полосами.
     @Test func tiltRisesAboutTwoDecibelsPerOctave() {
         let m = BandMapper(fftSize: 1024, sampleRate: 48_000)
         let tilt = m.tiltDB()
         #expect(tilt.count == BandMapper.bandCount)
         let expected = 20 * 0.35 * log10(2.0)
-        for i in 0..<(BandMapper.bandCount - 1) {
+        let first = m.centers.firstIndex { $0 >= BandMapper.tiltReferenceHz } ?? BandMapper.bandCount
+        for i in first..<(BandMapper.bandCount - 1) {
             let slope = Double(tilt[i + 1] - tilt[i]) / log2(m.centers[i + 1] / m.centers[i])
             #expect(abs(slope - expected) < 0.01)
+        }
+        #expect(first == 13)
+    }
+
+    /// Наклон только поднимает: ниже 1 кГц ровно 0, бас и низ середины не меняются.
+    @Test func tiltNeverCutsBelowReference() {
+        let m = BandMapper(fftSize: 1024, sampleRate: 48_000)
+        let tilt = m.tiltDB()
+        for band in 0..<BandMapper.bandCount {
+            if m.centers[band] <= BandMapper.tiltReferenceHz {
+                #expect(tilt[band] == 0)
+            } else {
+                #expect(tilt[band] > 0)
+            }
         }
     }
 

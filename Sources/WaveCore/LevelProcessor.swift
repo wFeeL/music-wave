@@ -60,7 +60,8 @@ public struct DeadBandAGC: Sendable {
     }
 
     /// Сдвигает опору на `dt` секунд. `heldPeakDB` это пик трекера слоя, `currentDB` максимум полос
-    /// слоя в этом кадре (тот же, что ушел в трекер). `rangeDB` меньше 1 дБ считается за 1 дБ.
+    /// слоя в этом кадре без наклона спектра (по нему решается правило 1: шипение верхов с
+    /// наклоном не считается звуком). `rangeDB` меньше 1 дБ считается за 1 дБ.
     public mutating func update(heldPeakDB: Float, currentDB: Float, rangeDB: Float = LevelProcessor.autoRangeDB, dt: Double) {
         guard currentDB >= LevelProcessor.noiseFloorDB, !heldPeakDB.isNaN else { return }
         if heldPeakDB >= referenceDB {
@@ -92,7 +93,8 @@ public struct DeadBandAGC: Sendable {
 ///
 /// Наклон спектра `tiltDB` (дБ на полосу, `BandMapper.tiltDB()`) прибавляется к уровням только в
 /// режиме `auto`, до трекеров пика, чтобы верхи двигались на хэтах. Порог шума `noiseFloorDB`
-/// проверяется по уровню без наклона: шипение не поднимается.
+/// и заморозка опоры в тишине проверяются по уровню без наклона: шипение не поднимается и не
+/// считается звуком.
 public struct LevelProcessor: Sendable {
     public static let noiseFloorDB: Float = -70
     public static let autoRangeDB: Float = 33
@@ -172,15 +174,19 @@ public struct LevelProcessor: Sendable {
         var globalReference = Self.floorDB
         if settings.mode == .auto {
             for layer in layerBands.indices {
+                // Максимум слоя с наклоном идет в трекер, без наклона решает, тишина ли это.
                 var layerMax = Self.floorDB
+                var untiltedMax = Self.floorDB
                 for band in layerBands[layer] where band >= 0 && band < count {
                     // +inf это испорченный вход: он ограничивается на выходе, но пик не двигает.
                     if levelsDB[band] != .infinity {
-                        layerMax = max(layerMax, Self.clamped(levelsDB[band]) + tilt(band))
+                        let db = Self.clamped(levelsDB[band])
+                        layerMax = max(layerMax, db + tilt(band))
+                        untiltedMax = max(untiltedMax, db)
                     }
                 }
                 trackers[layer].update(with: layerMax, dt: dt)
-                agcs[layer].update(heldPeakDB: trackers[layer].peak, currentDB: layerMax, dt: dt)
+                agcs[layer].update(heldPeakDB: trackers[layer].peak, currentDB: untiltedMax, dt: dt)
                 globalReference = max(globalReference, agcs[layer].referenceDB)
             }
         }
