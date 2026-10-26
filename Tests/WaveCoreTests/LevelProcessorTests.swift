@@ -105,6 +105,81 @@ import Testing
         #expect(output[2] < 0.8)
     }
 
+    /// Припев 10 с, затем куплет на 6 dB тише: удержанный пик спадает за 1...2 с, опора остается в
+    /// мертвой зоне и уходит медленно, куплет остается ниже припева (около 0.80 от него).
+    @Test func verseStaysBelowChorus() {
+        var processor = Self.makeProcessor()
+        let chorus = Self.run(&processor, Self.bassPair(level: -20), seconds: 10)
+        let verse = Self.run(&processor, Self.bassPair(level: -26), seconds: 6)
+        #expect(abs(chorus[4] - Float(pow(23.0 / 33.0, 1.4))) < 0.001)
+        #expect(verse[4] <= 0.85 * chorus[4])
+        #expect(verse[4] >= 0.5 * chorus[4])
+    }
+
+    /// Тишина между припевом и куплетом опору не двигает: куплет после нее тоже ниже припева.
+    @Test func silenceThenVerseStaysBelowChorus() {
+        var processor = Self.makeProcessor()
+        let chorus = Self.run(&processor, Self.bassPair(level: -20), seconds: 10)
+        Self.run(&processor, Self.levels([:]), seconds: 10)
+        let first = processor.normalize(Self.bassPair(level: -26), dt: Self.frame, settings: LevelSettings(followSystemVolume: false))
+        #expect(first[4] < 0.7 * chorus[4])
+        let verse = Self.run(&processor, Self.bassPair(level: -26), seconds: 6)
+        #expect(verse[4] <= 0.85 * chorus[4])
+        #expect(verse[4] >= 0.5 * chorus[4])
+    }
+
+    @Test func loudJumpTakesTopInstantly() {
+        var processor = Self.makeProcessor()
+        Self.run(&processor, Self.levels([3: -40]), seconds: 5)
+        let output = processor.normalize(Self.levels([3: -10]), dt: Self.frame, settings: LevelSettings(followSystemVolume: false))
+        #expect(output.allSatisfy { (0...1).contains($0) })
+        #expect(output[3] == 1)
+    }
+
+    @Test func silenceFreezesReference() {
+        var processor = Self.makeProcessor()
+        let chorus = Self.run(&processor, Self.bassPair(level: -20), seconds: 10)
+        #expect(processor.layerReferencesDB[0] == -10)
+        var drift: Float = 0
+        for _ in 0..<600 {
+            _ = processor.normalize(Self.levels([:]), dt: Self.frame, settings: LevelSettings(followSystemVolume: false))
+            drift = max(drift, abs(processor.layerReferencesDB[0] + 10))
+        }
+        #expect(drift == 0)
+        let after = processor.normalize(Self.bassPair(level: -20), dt: Self.frame, settings: LevelSettings(followSystemVolume: false))
+        #expect(abs(after[4] - chorus[4]) < 0.02)
+    }
+
+    /// Гонит `DeadBandAGC` `frames` кадров по 1/60 с с одним и тем же пиком (он же уровень кадра).
+    private static func agc(from reference: Float, peak: Float, frames: Int) -> DeadBandAGC {
+        var agc = DeadBandAGC(referenceDB: reference)
+        for _ in 0..<frames {
+            agc.update(heldPeakDB: peak, currentDB: peak, dt: frame)
+        }
+        return agc
+    }
+
+    /// Пик на 6 dB под опорой (доля 0.82...0.84, в зоне): опора идет с tau 8 с, за 1 с до -10.705.
+    @Test func deadBandMovesSlowlyInsideZone() {
+        let agc = Self.agc(from: -10, peak: -16, frames: 60)
+        #expect(agc.referenceDB >= -10.8 && agc.referenceDB <= -10.6)
+        #expect(agc.isFast == false)
+    }
+
+    /// Пик на 20 dB под опорой (доля 0.394, ниже зоны): быстрый путь до 0.5 dB, затем медленный.
+    @Test func fastOutsideZone() {
+        let agc = Self.agc(from: -10, peak: -30, frames: 60)
+        #expect(agc.referenceDB >= -29.6 && agc.referenceDB <= -29.5)
+        #expect(agc.isFast == false)
+    }
+
+    /// Защелка держит быстрый путь, хотя доля уже на втором кадре вернулась в зону.
+    @Test func fastModeLatchesThroughZone() {
+        let agc = Self.agc(from: -10, peak: -30, frames: 18)
+        #expect(agc.isFast == true)
+        #expect(agc.referenceDB <= -27.2)
+    }
+
     @Test func absoluteModeFollowsLoudness() {
         var processor = Self.makeProcessor()
         let settings = LevelSettings(mode: .absolute, followSystemVolume: false)

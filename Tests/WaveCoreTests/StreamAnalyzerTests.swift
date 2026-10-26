@@ -173,6 +173,21 @@ struct StreamAnalyzerTests {
         #expect(abs(resumed.level - fresh.level) < 0.05)
     }
 
+    /// Ступень уровней (автоуровень, наклон, чувствительность) не влияет на функции онсетов и онсеты.
+    @Test func onsetFunctionsIgnoreLevelStage() {
+        let scene = Drums.fourOnFloor(seconds: 8, hats: .eighths, snareOnBackbeat: true)
+        let auto = StreamAnalyzer(sampleRate: scene.sampleRate)
+            .processSignal(scene.samples, settings: LevelSettings(mode: .auto))
+        let absolute = StreamAnalyzer(sampleRate: scene.sampleRate)
+            .processSignal(scene.samples, settings: LevelSettings(mode: .absolute, sensitivity: 3))
+        #expect(auto.count == absolute.count)
+        #expect(auto.map(\.broadbandODF) == absolute.map(\.broadbandODF))
+        #expect(auto.map(\.kickODF) == absolute.map(\.kickODF))
+        #expect(auto.map(\.kickOnset) == absolute.map(\.kickOnset))
+        #expect(auto.map(\.broadbandOnset) == absolute.map(\.broadbandOnset))
+        #expect(auto.contains { $0.kickOnset != nil })
+    }
+
     @Test func envelopeDecaysWithin200ms() {
         var envelope = BeatEnvelope()
         envelope.trigger()

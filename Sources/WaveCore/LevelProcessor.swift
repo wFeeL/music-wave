@@ -23,12 +23,72 @@ public struct LevelSettings: Sendable, Equatable {
     }
 }
 
+/// Автоуровень слоя с мертвой зоной (как в cava и WLED): опора нормировки, которая сразу встает на
+/// громкий пик, а на спаде идет за ним медленно, пока пик в зоне, и быстро, когда пик ушел ниже нее.
+///
+/// Доля `p = (peak - (ref - range)) / range` показывает, где удержанный пик слоя стоит в диапазоне
+/// под опорой. Порядок правил в `update`:
+/// 1. Уровень слоя в этом кадре ниже `LevelProcessor.noiseFloorDB`: опора и `isFast` стоят на месте.
+///    Удержанный пик для этого не годится: после конца музыки он еще 1 с держится, потом падает
+///    на 6 дБ/с, и опора около 9 с уходила бы за ним к полу.
+/// 2. Пик не ниже опоры: опора сразу встает на пик, быстрый путь снимается.
+/// 3. Иначе разрыв `gap = ref - peak`. Если `gap <= fastExitDB`, быстрый путь снимается, иначе при
+///    `p` ниже `zone` он включается (защелка). Опора идет к пику экспонентой
+///    `ref = peak + gap * exp(-dt / tau)`, `tau` это `fastTau` на быстром пути и `slowTau` иначе.
+///    Защелка держит быстрый путь, пока опора не подойдет к пику на `fastExitDB`, даже когда `p`
+///    уже вернулась в зону.
+/// 4. Верх зоны (`p > 0.85`) быстрый путь не включает. Иначе на спаде удержанного пика (6 дБ/с)
+///    опора отставала бы от него всего на 6 × 0.15 = 0.9 дБ, и куплет на 6 дБ тише через 2 с
+///    вставал бы на уровень припева.
+public struct DeadBandAGC: Sendable {
+    /// Мертвая зона по доле `p`: внутри и выше нее опора идет медленно.
+    public static let zone: ClosedRange<Float> = 0.4...0.85
+    /// Постоянная времени медленного пути, с.
+    public static let slowTau = 8.0
+    /// Постоянная времени быстрого пути, с.
+    public static let fastTau = 0.15
+    /// Быстрый путь снимается, когда опора подошла к пику на столько дБ.
+    public static let fastExitDB: Float = 0.5
+
+    /// Опора нормировки слоя, dB.
+    public private(set) var referenceDB: Float
+    /// Включен ли быстрый путь (защелка).
+    public private(set) var isFast = false
+
+    public init(referenceDB: Float = -120) {
+        self.referenceDB = referenceDB
+    }
+
+    /// Сдвигает опору на `dt` секунд. `heldPeakDB` это пик трекера слоя, `currentDB` максимум полос
+    /// слоя в этом кадре (тот же, что ушел в трекер). `rangeDB` меньше 1 дБ считается за 1 дБ.
+    public mutating func update(heldPeakDB: Float, currentDB: Float, rangeDB: Float = LevelProcessor.autoRangeDB, dt: Double) {
+        guard currentDB >= LevelProcessor.noiseFloorDB, !heldPeakDB.isNaN else { return }
+        if heldPeakDB >= referenceDB {
+            referenceDB = heldPeakDB
+            isFast = false
+            return
+        }
+        let dt = dt.isFinite ? max(dt, 0) : 0
+        let range = rangeDB.isFinite ? max(rangeDB, 1) : LevelProcessor.autoRangeDB
+        let gap = referenceDB - heldPeakDB
+        let share = (heldPeakDB - (referenceDB - range)) / range
+        if gap <= Self.fastExitDB {
+            isFast = false
+        } else if share < Self.zone.lowerBound {
+            isFast = true
+        }
+        let tau = isFast ? Self.fastTau : Self.slowTau
+        referenceDB = heldPeakDB + gap * Float(exp(-dt / tau))
+    }
+}
+
 /// Переводит уровни полос в dBFS в значения 0...1 для рисования волны.
 ///
 /// В режиме `auto` у каждого слоя свой трекер пика: он мгновенно растет, держится `peakHold`
-/// секунд и затем падает на `peakReleaseDBPerSecond` дБ в секунду. Слой не опускается
-/// ниже глобального пика минус `layerPeakSpreadDB`, поэтому тихий слой не раздувается до
-/// полной высоты рядом с громким.
+/// секунд и затем падает на `peakReleaseDBPerSecond` дБ в секунду. Нормирует слой не сам пик, а
+/// опора `DeadBandAGC`, которая идет за пиком с мертвой зоной, поэтому тихий куплет остается
+/// ниже громкого припева. Слой не опускается ниже наибольшей опоры минус `layerPeakSpreadDB`,
+/// поэтому тихий слой не раздувается до полной высоты рядом с громким.
 public struct LevelProcessor: Sendable {
     public static let noiseFloorDB: Float = -70
     public static let autoRangeDB: Float = 33
@@ -63,10 +123,15 @@ public struct LevelProcessor: Sendable {
     /// Слой каждой полосы по `layerBands` (при пересечении побеждает последний), -1 без слоя.
     private let bandLayers: [Int]
     private var trackers: [PeakTracker]
+    private var agcs: [DeadBandAGC]
+
+    /// Опоры автоуровня по слоям, dB (для тестов).
+    var layerReferencesDB: [Float] { agcs.map(\.referenceDB) }
 
     public init(layerBands: [Range<Int>]) {
         self.layerBands = layerBands
         self.trackers = [PeakTracker](repeating: PeakTracker(), count: layerBands.count)
+        self.agcs = [DeadBandAGC](repeating: DeadBandAGC(), count: layerBands.count)
         var bandLayers = [Int](repeating: -1, count: layerBands.map(\.upperBound).max().map { max($0, 0) } ?? 0)
         for (layer, range) in layerBands.enumerated() {
             for band in range where band >= 0 {
@@ -107,7 +172,8 @@ public struct LevelProcessor: Sendable {
                     }
                 }
                 trackers[layer].update(with: layerMax, dt: dt)
-                globalPeak = max(globalPeak, trackers[layer].peak)
+                agcs[layer].update(heldPeakDB: trackers[layer].peak, currentDB: layerMax, dt: dt)
+                globalPeak = max(globalPeak, agcs[layer].referenceDB)
             }
         }
 
@@ -122,7 +188,7 @@ public struct LevelProcessor: Sendable {
             switch settings.mode {
             case .auto:
                 let layer = band < bandLayers.count ? bandLayers[band] : -1
-                let layerPeak = layer >= 0 ? trackers[layer].peak : Self.floorDB
+                let layerPeak = layer >= 0 ? agcs[layer].referenceDB : Self.floorDB
                 let effectivePeak = max(layerPeak, globalPeak - Self.layerPeakSpreadDB, Self.minPeakDB)
                 let lo = max(effectivePeak - Self.autoRangeDB, Self.noiseFloorDB)
                 x = (db - lo) / max(effectivePeak - lo, 1)
