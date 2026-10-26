@@ -59,6 +59,8 @@ final class AppModel {
     static let applicationsScanDelay: Duration = .milliseconds(500)
     /// Сколько `stop()` ждет удаления tap и агрегата при выходе.
     static let captureTeardownTimeout = 2.0
+    /// Как часто автовыбор источника перечитывает список процессов, с.
+    static let autoProcessInterval = 0.5
 
     let settings: AppSettings
     let store: FrameStore
@@ -179,6 +181,25 @@ final class AppModel {
     @ObservationIgnored private var defaultSourceStale = true
     /// Тесты: свой поиск источника по умолчанию вместо `resolveDefaultSource()`.
     @ObservationIgnored var defaultSourceResolver: (@MainActor () -> AudioSource)?
+    /// Источник, выбранный автоматически («Автовыбор источника», `AutoSourceSwitcher`): пока он
+    /// есть, `effectiveSource` берет его вместо выбора пользователя. В настройки не пишется.
+    private(set) var autoSource: AudioSource?
+    @ObservationIgnored private var autoSwitcher = AutoSourceSwitcher()
+    /// Выбор пользователя (или источник по умолчанию), при котором идет автовыбор: его смена
+    /// сбрасывает переключатель.
+    @ObservationIgnored private var autoChosen: AudioSource?
+    /// Тесты: свой источник для bundle ID кандидата автовыбора вместо `urlForApplication` и
+    /// `applicationSource(at:fallbackBundleID:)`; `nil` у хука значит рабочий путь.
+    @ObservationIgnored var autoSourceResolver: (@MainActor (String) -> AudioSource?)?
+    /// Источники кандидатов автовыбора по bundle ID (`nil`: приложение не нашлось). Сбрасывается
+    /// при запуске и закрытии приложений.
+    @ObservationIgnored private var autoSourceCache: [String: AudioSource?] = [:]
+    /// Последний снимок процессов для автовыбора и момент чтения (`systemUptime`): читается не
+    /// чаще `autoProcessInterval`.
+    @ObservationIgnored private var autoProcesses: (time: Double, list: [AudioProcessInfo])?
+    /// `audioActive` прошлого тика: звучит ли захват автоматически выбранного источника, когда
+    /// Now Playing показывает не его.
+    @ObservationIgnored private var previousAudioActive = false
     @ObservationIgnored private var appliedSource: AudioSource?
     @ObservationIgnored private var sourceAppRunning = false
     /// Когда остановить IOProc в тишине (через 10 с) и когда вернуть.
@@ -461,9 +482,10 @@ final class AppModel {
 
     // MARK: - Источник по умолчанию
 
-    /// Источник, который сейчас используется: выбранный пользователем или по умолчанию.
+    /// Источник, который сейчас используется: выбранный автоматически, иначе выбранный
+    /// пользователем, иначе по умолчанию.
     var effectiveSource: AudioSource {
-        settings.source ?? defaultSource
+        autoSource ?? settings.source ?? defaultSource
     }
 
     private func refreshDefaultSource() {
@@ -551,6 +573,135 @@ final class AppModel {
     /// Для всего звука системы подходит любой.
     nonisolated static func belongs(_ info: NowPlayingInfo, to source: AudioSource) -> Bool {
         info.belongs(to: source)
+    }
+
+    // MARK: - Автовыбор источника
+
+    /// «Автовыбор источника» на момент `now` (секунды `systemUptime`, растут монотонно). Вызывается
+    /// в начале тика, до `applySettings()`: новый `effectiveSource` доходит до конвейера в том же
+    /// тике.
+    ///
+    /// Выбор пользователя `chosen` (`settings.source ?? defaultSource`). Если автовыбор выключен,
+    /// выбран весь звук системы (или приложение без bundle ID) либо пользователь сменил источник,
+    /// переключатель сбрасывается и источник возвращается к выбору. На паузе визуализации
+    /// автовыбор стоит. Кандидат (`AutoSourceSwitcher.candidate`): приложение играющей записи
+    /// Now Playing не из выбранного; он считается играющим, если его процессы выводят звук.
+    /// Выбранное играет по `AutoSourceSwitcher.appPlaying` (Now Playing, если показывает его,
+    /// иначе вывод звука его процессами), автоматическое тоже, только вместо процессов звук
+    /// захвата прошлого тика. Снимок процессов читается лениво, только для кандидата и для
+    /// выбранного во время автоматического выбора, и не чаще `autoProcessInterval`.
+    func updateAutoSource(now: Double) {
+        let chosen = settings.source ?? defaultSource
+        guard settings.autoSource, case .application(let chosenID, _, _) = chosen, !chosenID.isEmpty else {
+            resetAutoSource(chosen: chosen)
+            return
+        }
+        if chosen != autoChosen {
+            resetAutoSource(chosen: chosen)
+            autoChosen = chosen
+        }
+        guard !settings.paused else { return }
+
+        let info = nowPlayingStub ?? adapter.info
+        let before = autoSwitcher.override
+        var playing: String?
+        if let candidate = AutoSourceSwitcher.candidate(nowPlaying: info, chosen: chosenID) {
+            // Запись текущего автоматического переключатель и так отбрасывает: ее вывод звука не
+            // проверяется.
+            let isOverride = before.map { ProcessMatcher.bundleIDBelongs(candidate, to: $0) } ?? false
+            if !isOverride, let source = resolveAutoSource(candidate), appOutputting(source, now: now) {
+                playing = candidate
+            }
+        }
+        // Без автоматического выбора переключатель `chosenPlaying` не читает.
+        let chosenPlaying = before != nil
+            && AutoSourceSwitcher.appPlaying(chosenID, nowPlaying: info, outputRunning: appOutputting(chosen, now: now))
+        let audible = previousAudioActive
+        let overridePlaying = before.map {
+            AutoSourceSwitcher.appPlaying($0, nowPlaying: info, outputRunning: audible)
+        } ?? false
+        let next = autoSwitcher.update(
+            chosen: chosenID,
+            playing: playing,
+            chosenPlaying: chosenPlaying,
+            overridePlaying: overridePlaying,
+            now: now
+        )
+        guard next != before else { return }
+        applyAutoSource(next.flatMap { resolveAutoSource($0) }, chosen: chosen)
+    }
+
+    /// Переключатель и снимок процессов забыты, источник возвращается к выбору `chosen`.
+    private func resetAutoSource(chosen: AudioSource) {
+        autoSwitcher.reset()
+        autoChosen = nil
+        autoProcesses = nil
+        applyAutoSource(nil, chosen: chosen)
+    }
+
+    /// Новый автоматический источник (`nil`: возврат к выбору `chosen`). При смене счет тишины
+    /// политики простоя начинается заново, как в `setPaused`: иначе она продолжила бы счет
+    /// прошлого источника и могла остановить захват нового.
+    private func applyAutoSource(_ source: AudioSource?, chosen: AudioSource) {
+        guard source != autoSource else { return }
+        let previous = autoSource ?? chosen
+        autoSource = source
+        idlePolicy.reset()
+        if let source {
+            log("автовыбор: источник \(source.displayName) (было \(previous.displayName))")
+        } else {
+            log("автовыбор: возврат к \(chosen.displayName)")
+        }
+    }
+
+    /// Источник приложения `bundleID` для автовыбора: хук тестов, иначе `urlForApplication` и
+    /// `applicationSource(at:fallbackBundleID:)` с кэшем.
+    private func resolveAutoSource(_ bundleID: String) -> AudioSource? {
+        if let autoSourceResolver { return autoSourceResolver(bundleID) }
+        if let cached = autoSourceCache[bundleID] { return cached }
+        let source = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map {
+            Self.applicationSource(at: $0, fallbackBundleID: bundleID)
+        }
+        autoSourceCache[bundleID] = .some(source)
+        return source
+    }
+
+    /// Процессы источника `source` выводят звук: `ProcessMatcher.matches` по снимку процессов,
+    /// флаг вывода каждого читается заново (`AudioProcessList.isRunningOutput`).
+    private func appOutputting(_ source: AudioSource, now: Double) -> Bool {
+        ProcessMatcher.matches(source, in: autoProcessSnapshot(now: now)).contains { processList.isRunningOutput($0) }
+    }
+
+    /// Снимок процессов для автовыбора, не чаще `autoProcessInterval`.
+    private func autoProcessSnapshot(now: Double) -> [AudioProcessInfo] {
+        if let cached = autoProcesses, now >= cached.time, now - cached.time < Self.autoProcessInterval {
+            return cached.list
+        }
+        let list = processList.snapshot()
+        autoProcesses = (now, list)
+        return list
+    }
+
+    /// Строка «Автовыбор источника» в диагностике.
+    var autoSourceDescription: String {
+        guard settings.autoSource else { return "выкл" }
+        guard let autoSource else { return "ждет" }
+        return "сейчас \(autoSource.displayName)"
+    }
+
+    /// Свайп над островом (`TrackSwipeDetector`): следующий или предыдущий трек, если свайп
+    /// включен. Команда уходит через `sendPanelCommand`, только пока Now Playing показывает
+    /// источник.
+    func handleSwipe(_ command: TrackSwipeDetector.Command) {
+        guard settings.trackSwipe else { return }
+        switch command {
+        case .next:
+            log("свайп: следующий трек")
+            sendPanelCommand(.nextTrack)
+        case .previous:
+            log("свайп: предыдущий трек")
+            sendPanelCommand(.previousTrack)
+        }
     }
 
     // MARK: - Доступ к звуку
@@ -655,6 +806,7 @@ final class AppModel {
 
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
+        updateAutoSource(now: now)
         applySettings()
 
         let source = effectiveSource
@@ -682,6 +834,7 @@ final class AppModel {
         pipeline.adapterSaysPlaying = sourcePlaying
 
         let audioActive = gate.update(levelDB: store.latest.rawLevelDB, now: now)
+        previousAudioActive = audioActive
         if !settings.paused {
             manageIdleCapture(audioActive: audioActive, sourcePlaying: sourcePlaying, now: now)
         }
@@ -709,11 +862,24 @@ final class AppModel {
         if low != lowPower {
             lowPower = low
         }
+        let workspace = NSWorkspace.shared
+        let options = settings.followDisplayOptions
+            ? DisplayOptions(
+                increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast,
+                reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency
+            )
+            : .standard
+        if options != displayOptions {
+            displayOptions = options
+        }
     }
 
     /// Курсор вошел в зону выреза или вышел из нее: остров пересчитывается сразу, а не в
-    /// следующем тике, и раскрытие наступает через 150 мс, сворачивание через 300 мс
-    /// (`IslandStateMachine`), а не на тик позже.
+    /// следующем тике, и раскрытие наступает через «Задержку раскрытия» (`settings.expandDelay`,
+    /// по умолчанию 0.15 с), сворачивание через 300 мс (`IslandStateMachine`), а не на тик позже.
+    /// С нулевой задержкой остров раскрывается в том же обновлении, а только что появившийся
+    /// остров остается свернутым до следующего обновления (правило первого показа, срок
+    /// `pointerDeadline` наступает сразу): примерно на кадр.
     func setPointerInHoverZone(_ inside: Bool) {
         guard inside != pointerInHoverZone else { return }
         pointerInHoverZone = inside
@@ -726,6 +892,7 @@ final class AppModel {
     private func updateIsland(_ inputs: IslandInputs, now: Double) {
         islandInputs = inputs
         machine.hideDelay = settings.hideDelay
+        machine.expandDelay = settings.expandDelay
         let state = machine.update(inputs, now: now)
         if state != islandState {
             // По этой строке замер CPU в CI убеждается, что остров действительно показан.
@@ -1073,6 +1240,8 @@ final class AppModel {
     /// сразу по bundle ID, каталог `/Applications` просматривается позже вне главного потока.
     private func applicationsChanged() {
         defaultSourceStale = true
+        // Приложение могли установить, удалить или переместить: кандидатов автовыбора ищем заново.
+        autoSourceCache = [:]
         applySettings()
         refreshSourceAppRunning()
         scheduleApplicationsScan()
@@ -1756,7 +1925,7 @@ extension AppModel {
 
     private func audioSection() -> DiagnosticsSection {
         let source = effectiveSource
-        let byDefault = settings.source == nil ? " (по умолчанию)" : ""
+        let byDefault = autoSource != nil ? " (автовыбор)" : settings.source == nil ? " (по умолчанию)" : ""
         var rows: [DiagnosticsRow] = []
         switch source {
         case .systemWide:
@@ -1766,6 +1935,7 @@ extension AppModel {
             rows.append(DiagnosticsRow(label: "Путь источника", value: bundlePath))
             rows.append(DiagnosticsRow(label: "Источник запущен", value: Self.yesNo(sourceAppRunning)))
         }
+        rows.append(DiagnosticsRow(label: "Автовыбор источника", value: autoSourceDescription))
         rows.append(DiagnosticsRow(label: "Статус захвата", value: Self.describe(pipeline.status, timing: pipeline.recoveryTiming)))
         let rate: String
         if case .capturing(.running(let sampleRate, _)) = pipeline.status {
