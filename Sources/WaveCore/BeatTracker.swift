@@ -41,8 +41,10 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    метрик, на показ влияет только через это правило роста;
 /// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): уровень полосы бочки в амплитуде идет
 ///    в короткую огибающую (атака `ambientAttack`, спад `ambientRelease`) и длинное среднее
-///    (`ambientAverage`), энергия это их отношение (0, пока среднее ниже `ambientFloorDB`). Горб пульса
-///    стоит на сетке ФАПЧ с высотой `уверенность × g_E`. На события, уверенность и вес пульс не влияет.
+///    (`ambientAverage`), энергия (`ambientEnergy`) это их отношение (0, пока среднее ниже
+///    `ambientFloorDB`). Она относится к окну шага и идет к рендеру в кадре (`WaveFrame.kickEnergy`) по
+///    слышимой оси. Горб пульса стоит на сетке ФАПЧ с высотой `уверенность × g_E`. На события,
+///    уверенность и вес пульс не влияет.
 ///
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей. Яркость ближайшей доли фиксируется, когда время потока
@@ -330,8 +332,9 @@ public struct BeatTracker: Sendable {
     private var ambientShort = AttackRelease(attack: BeatTracker.ambientAttack, release: BeatTracker.ambientRelease)
     private var ambientLong = AttackRelease(attack: BeatTracker.ambientAverage, release: BeatTracker.ambientAverage)
     private var ambientPrimed = false
-    /// Энергия мягкого пульса последнего шага (`AmbientInfo.energy`).
-    private(set) var ambientEnergy: Float = 0
+    /// Энергия мягкого пульса последнего шага (`AmbientInfo.energy`); относится к окну этого шага.
+    /// Анализ кладет ее в кадр шага (`WaveFrame.kickEnergy`), рендер берет ее из кадра на момент показа.
+    public private(set) var ambientEnergy: Float = 0
 
     /// Прошедшие события по времени, не больше `pastCapacity`.
     private var past: [GlowEvent]

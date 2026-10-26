@@ -62,6 +62,7 @@ nonisolated struct DemoTimeline: Sendable {
                 }
                 tracker.process(result)
                 frame = result.frame
+                frame.kickEnergy = tracker.ambientEnergy
                 nextEnd += hop
             }
             let schedule = tracker.schedule
@@ -72,7 +73,7 @@ nonisolated struct DemoTimeline: Sendable {
             moments.append(DemoMoment(
                 time: time, frame: frame, motion: motion, glow: glow,
                 pulse: BeatPulse.breath(spring: spring, glow: glow, weight: schedule.weight),
-                ambient: BeatGlow.ambient(at: time, info: schedule.ambient)
+                ambient: BeatGlow.ambient(at: time, info: schedule.ambient, frame: frame)
             ))
         }
         self.moments = moments

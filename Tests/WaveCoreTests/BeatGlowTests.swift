@@ -317,6 +317,19 @@ struct BeatGlowTests {
         }
     }
 
+    /// Рендер берет энергию из кадра на момент показа (`WaveFrame.kickEnergy`), а сетку и высоту горба
+    /// из расписания; энергия расписания не используется. Без расписания пульса нет.
+    @Test func ambientTakesEnergyFromTheFrame() {
+        let info = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
+        var frame = WaveFrame.silent
+        #expect(BeatGlow.ambient(at: 1.75, info: info, frame: frame) == 0)
+        frame.kickEnergy = 1.3
+        #expect(abs(BeatGlow.ambient(at: 1.75, info: info, frame: frame) - 0.06) < 1e-6)
+        #expect(BeatGlow.ambient(at: 1.75, info: nil, frame: frame) == 0)
+        let beat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 1, energy: 0)
+        #expect(abs(BeatGlow.ambient(at: 1.5, info: beat, frame: frame) - 0.14) < 1e-6)
+    }
+
     /// `shifted` переносит сетку пульса на ту же ось, что и события; энергия и уверенность те же.
     @Test func shiftMovesTheAmbientAnchor() {
         let info = AmbientInfo(anchor: 2.0, period: 0.5, confidence: 0.7, energy: 1.2)

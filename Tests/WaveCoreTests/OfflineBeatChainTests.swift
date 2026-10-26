@@ -144,6 +144,39 @@ struct OfflineBeatChainTests {
         #expect(locked.count >= 20 && precision >= 0.95, "\(locked.count) locked flashes, precision \(precision)")
     }
 
+    /// Энергия мягкого пульса идет по слышимой оси, как уровни волн: кадр шага публикуется на центр
+    /// окна плюс задержка вывода, рендер берет кадр на момент показа. С задержкой AirPods (210 мс) и с
+    /// наибольшей ручной (500 мс) подъем энергии на каждой бочке (половина пути от фона до пика)
+    /// приходится на слышимый момент бочки с точностью до шага анализа, а пик (окно Ханна 43 мс и
+    /// атака огибающей 10 мс) не дальше 40 мс после нее. Энергия из расписания опережала бы бочку
+    /// почти на всю задержку вывода. Рендер 1000 Гц, чтобы видеть шаг анализа.
+    @Test(arguments: [0.21, 0.5])
+    func ambientEnergyLandsOnTheAudibleKick(latency: Double) async {
+        let (scene, result) = await runOffCooperativePool {
+            let scene = Self.scene()
+            var config = OfflineBeatChain.Config(seed: 3)
+            config.softPulse = true
+            config.renderRate = 1000
+            config.outputLatency = latency
+            return (scene, OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config))
+        }
+        let hop = 1 / AnalysisConfig(sampleRate: scene.sampleRate).framesPerSecond
+        var checked = 0
+        for kick in scene.kicks where kick > 3 && kick < 11 {
+            let audible = kick + latency
+            let around = result.ambientTrace.filter { $0.time > audible - 0.2 && $0.time < audible + 0.2 }
+            guard let peak = around.max(by: { $0.energy < $1.energy }) else { continue }
+            let floor = around.filter { $0.time < audible - 0.1 }.map(\.energy).min() ?? 0
+            let rise = around.first { $0.time <= peak.time && $0.energy >= floor + (peak.energy - floor) / 2 }
+            let riseOffset = (rise?.time ?? -.infinity) - audible
+            #expect(abs(riseOffset) <= hop, "kick \(kick): energy rise \(riseOffset * 1000) ms from the audible kick")
+            #expect(peak.time >= audible && peak.time - audible <= 0.04, "kick \(kick): peak \((peak.time - audible) * 1000) ms")
+            #expect(peak.energy > 1.6)
+            checked += 1
+        }
+        #expect(checked >= 15)
+    }
+
     @Test func silenceNeverFlashesOrLocks() {
         let result = OfflineBeatChain.run(samples: [Float](repeating: 0, count: 48_000 * 3), sampleRate: 48_000, config: .init())
         #expect(result.flashes.isEmpty)

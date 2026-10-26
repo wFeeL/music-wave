@@ -10,7 +10,8 @@ struct FrameStoreTests {
             layers: layers,
             beat: value,
             level: layers.max() ?? 0,
-            rawLevelDB: -60 + 40 * value
+            rawLevelDB: -60 + 40 * value,
+            kickEnergy: 2 * value
         )
     }
 
@@ -35,6 +36,8 @@ struct FrameStoreTests {
         #expect(abs(middle.beat - 0.5) < 1e-6)
         #expect(abs(middle.level - 0.5) < 1e-6)
         #expect(abs(middle.rawLevelDB - -40) < 1e-4)
+        #expect(abs(middle.kickEnergy - 1) < 1e-6)
+        #expect(WaveFrame.silent.kickEnergy == 0)
     }
 
     @Test func interpolatedClampsFraction() {

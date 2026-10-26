@@ -33,7 +33,9 @@ public struct AmbientInfo: Sendable, Equatable {
     /// без бочки горб гаснет вместе с воротом).
     public var confidence: Float
     /// Отношение короткой огибающей уровня полосы бочки (атака 10 мс, спад 150 мс) к его длинному
-    /// среднему (2 с): около 1 при ровном уровне, выше на ударах бочки, 0 в тишине.
+    /// среднему (2 с): около 1 при ровном уровне, выше на ударах бочки, 0 в тишине. В расписании это
+    /// значение последнего шага анализа, то есть звука, который будет слышен только через задержку
+    /// вывода; рендер берет энергию из кадра на момент показа (`BeatGlow.ambient(at:info:frame:)`).
     public var energy: Float
 
     public init(anchor: Double, period: Double, confidence: Float, energy: Float) {
@@ -223,6 +225,17 @@ public struct BeatGlow: Sendable {
             value += ambientBeatScale * confidence * Float(squared * squared * squared)
         }
         return min(max(value, 0), ambientCeiling)
+    }
+
+    /// Мягкий пульс кадра: сетка и высота горба из расписания `info`, энергия из кадра анализа на тот же
+    /// момент показа (`WaveFrame.kickEnergy`, кадр из `FrameStore.frame(at:)`). Кадр публикуется на
+    /// слышимой оси, как уровни волн, поэтому энергия совпадает с бочкой при любой задержке вывода, а
+    /// энергия в расписании опережала бы звук на задержку вывода. Без `info` (пустое расписание,
+    /// метроном) пульса нет.
+    public static func ambient(at time: Double, info: AmbientInfo?, frame: WaveFrame) -> Float {
+        guard var info else { return 0 }
+        info.energy = frame.kickEnergy
+        return ambient(at: time, info: info)
     }
 
     /// Слои волн с акцентом доли: к басу прибавляется `bassAccent × glow`, не выше 1.

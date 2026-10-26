@@ -13,8 +13,11 @@ import Foundation
 /// `renderPhase` или случайная) в момент `tEval` берет последнее расписание, опубликованное до него,
 /// и считает свечение на момент показа `tP = tEval + 2 / renderRate`. Событие свечения это кадр, где
 /// свечение выросло больше чем на `eventRise` против прошлого кадра; его время это `tP` кадра.
-/// Мягкий пульс (`Config.softPulse`, `BeatGlow.ambient` на тот же `tP`) считается отдельно: во вспышки
-/// он не входит, только в итог пульса (`Result.peakAmbient`, `ambientFrames`).
+/// Мягкий пульс (`Config.softPulse`) считается отдельно, как у приложения: энергия бочки каждого шага
+/// (`BeatTracker.ambientEnergy`) публикуется кадром в `FrameStore` на момент центра окна плюс
+/// `outputLatency + syncOffset` (как кадры волн у `AnalysisEngine`), рендер берет кадр на `tP` и
+/// `BeatGlow.ambient(at:info:frame:)`. Во вспышки пульс не входит, только в итог пульса
+/// (`Result.peakAmbient`, `ambientFrames`, `ambientTrace`).
 ///
 /// Ось времени. Все времена результата отсчитываются от первого сэмпла (хост сдвинут на `hostStart`
 /// и вычтен обратно). Вспышки и онсеты бочки даны на слышимой оси: момент звука t в файле слышен в
@@ -94,6 +97,22 @@ public struct OfflineBeatChain: Sendable {
         }
     }
 
+    /// Мягкий пульс на кадре рендера (`Result.ambientTrace`).
+    public struct AmbientPoint: Sendable, Equatable {
+        /// Момент показа кадра, слышимые секунды от первого сэмпла.
+        public var time: Double
+        /// Энергия бочки из кадра на этот момент (`WaveFrame.kickEnergy`).
+        public var energy: Float
+        /// Мягкий пульс кадра.
+        public var value: Float
+
+        public init(time: Double, energy: Float, value: Float) {
+            self.time = time
+            self.energy = energy
+            self.value = value
+        }
+    }
+
     public struct Result: Sendable {
         /// Вспышки по времени, слышимые секунды от первого сэмпла.
         public var flashes: [Flash]
@@ -115,6 +134,8 @@ public struct OfflineBeatChain: Sendable {
         public var peakAmbient: Float = 0
         public var ambientFrames = 0
         public var renderedFrames = 0
+        /// Мягкий пульс на каждом кадре рендера (`Config.softPulse`), иначе пусто.
+        public var ambientTrace: [AmbientPoint] = []
 
         /// Первая публикация с захватом, секунды от первого сэмпла.
         public var lockTime: Double? {
@@ -163,6 +184,9 @@ public struct OfflineBeatChain: Sendable {
         /// Время хоста каждой предсказанной доли в последнем расписании, опубликованном до начала ее
         /// вспышки (`time - BeatGlow.lead`), по id.
         var predicted: [UInt64: Double] = [:]
+        /// `Config.softPulse`: энергия бочки каждого шага, время пробуждения, после которого она видна
+        /// рендеру, и момент ее кадра на оси хоста (центр окна плюс задержка вывода и сдвиг).
+        var energies: [(wake: Double, time: Double, energy: Float)] = []
         var end = 0.0
     }
 
@@ -238,6 +262,11 @@ public struct OfflineBeatChain: Sendable {
                         analysis.kickOnsets.append(kick.time + config.outputLatency)
                     }
                     tracker.process(hop)
+                    if config.softPulse, let centre = clock.hostTime(ofSample: nextHopEnd - fftSize / 2) {
+                        analysis.energies.append(
+                            (wake, centre + config.outputLatency + config.syncOffset, tracker.ambientEnergy)
+                        )
+                    }
                     processed = nextHopEnd
                     nextHopEnd += hopSize
                 }
@@ -271,6 +300,10 @@ public struct OfflineBeatChain: Sendable {
         var flashes: [Flash] = []
         var peakAmbient: Float = 0
         var ambientFrames = 0
+        var ambientTrace: [AmbientPoint] = []
+        // Кадры энергии, как их видит рендер приложения: опубликованные до `tEval`, на слышимой оси.
+        let energyStore = FrameStore()
+        var energy = 0
         var frame = 0
         while true {
             let tEval = hostStart + renderPeriod * (phase + Double(frame))
@@ -293,9 +326,17 @@ public struct OfflineBeatChain: Sendable {
             peak = max(peak, value)
             previous = value
             if config.softPulse {
-                let ambient = BeatGlow.ambient(at: tP, info: published.ambient)
+                while energy < analysis.energies.count, analysis.energies[energy].wake < tEval {
+                    var energyFrame = WaveFrame.silent
+                    energyFrame.kickEnergy = analysis.energies[energy].energy
+                    energyStore.publish(energyFrame, at: analysis.energies[energy].time)
+                    energy += 1
+                }
+                let shown = energyStore.frame(at: tP)
+                let ambient = BeatGlow.ambient(at: tP, info: published.ambient, frame: shown)
                 peakAmbient = max(peakAmbient, ambient)
                 if ambient >= RhythmLog.ambientVisible { ambientFrames += 1 }
+                ambientTrace.append(AmbientPoint(time: tP - hostStart, energy: shown.kickEnergy, value: ambient))
             }
             frame += 1
         }
@@ -309,7 +350,8 @@ public struct OfflineBeatChain: Sendable {
             outputLatency: config.outputLatency,
             peakAmbient: peakAmbient,
             ambientFrames: ambientFrames,
-            renderedFrames: frame
+            renderedFrames: frame,
+            ambientTrace: ambientTrace
         )
     }
 

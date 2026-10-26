@@ -1270,8 +1270,9 @@ final class AppModel {
     /// затем к басу прибавляется акцент доли (`BeatGlow.accented`), уже после пружин, чтобы он
     /// оставался четким. «Вздох» по весу показа расписания (`BeatPulse.breath`): с полным весом
     /// пружина, получившая свечение на 50 мс раньше, без веса само свечение, между ними смесь. Мягкий
-    /// пульс (`BeatGlow.ambient` на тот же момент показа) идет отдельным каналом `ambient`, только с
-    /// включенным «Мягким пульсом». «Уменьшение движения»: ни свечения, ни «вздоха», ни пульса, ни
+    /// пульс (`BeatGlow.ambient(at:info:frame:)` на тот же момент показа: сетка из расписания, энергия
+    /// бочки из кадра `sampled`) идет отдельным каналом `ambient`, только с включенным «Мягким
+    /// пульсом». «Уменьшение движения»: ни свечения, ни «вздоха», ни пульса, ни
     /// акцента. Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр
     /// идет в замер отрисовки (`timelineTime`: дата `TimelineView`), раз в 10 с строки замера пишутся
     /// в лог (`recordRender`), и в запись ритма вместе с пульсом. Уровни, свечение, «вздох» и пульс
@@ -1318,7 +1319,8 @@ final class AppModel {
             let spring = pulse.step(beat: early, dt: dt)
             breath = BeatPulse.breath(spring: spring, glow: glow, weight: schedule.weight)
             if settings.softPulse {
-                ambient = BeatGlow.ambient(at: presented, info: schedule.ambient)
+                // Энергия из кадра на момент показа (слышимая ось), сетка из расписания.
+                ambient = BeatGlow.ambient(at: presented, info: schedule.ambient, frame: sampled)
             }
         }
         let frame = springFrame(sampled, layers: springs, glow: glow)
