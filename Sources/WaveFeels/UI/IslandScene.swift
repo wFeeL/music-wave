@@ -93,13 +93,13 @@ struct IslandBodyView: View, Equatable {
 ///
 /// Волны свернутого острова (крылья или линия капсулы) и полоса раскрытой панели всегда стоят
 /// в дереве и сменяют друг друга прозрачностью под пружиной раскрытия: уходящий слой продолжает
-/// двигаться, пока гаснет. Точки и холсты слоя есть, только пока `layers` (`IslandTransition`)
-/// говорит, что он жив. У неживого слоя остается пустая оболочка (рамка, маска формой острова,
-/// текстура): по ней маска продолжает идти за формой, и входящий слой открывается ее краем, как
-/// если бы стоял целиком. Холсты входят в живой слой без перехода, их проявляет прозрачность
-/// оболочки под той же пружиной. Каждый прямоугольник волн рисуется своей
-/// текстурой (`drawingGroup`) с полем `glowMargin` × «Размер свечения» (не меньше 1×) под
-/// размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
+/// двигаться, пока гаснет. Точки слоя считаются, только пока `layers` (`IslandTransition`)
+/// говорит, что он жив; холсты стоят всегда, у неживого слоя с пустым набором
+/// (`WaveSet(empty:)`), и тогда ничего не рисуют. Оболочка (рамка, маска формой острова,
+/// текстура) тоже стоит всегда: по ней маска продолжает идти за формой, и входящий слой
+/// открывается ее краем, а проявляется прозрачностью оболочки под той же пружиной. Каждый
+/// прямоугольник волн рисуется своей текстурой (`drawingGroup`) с полем `glowMargin` × «Размер
+/// свечения» (не меньше 1×) под размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
 /// Число линий, заливка, толщина, размах, размер и четкость свечения линий берутся из `appearance`; без
 /// прохода свечения (`WaveAppearance.glowPass`, режим энергосбережения) размытой копии линий нет.
 ///
@@ -176,11 +176,11 @@ struct IslandWavesView: View {
         let sets = Self.neededSets(
             wings: wings, panelLayer: layers.panel, bannerLayer: bannerLayer, collapsedStyle: collapsedStyle
         )
-        // nil: слой сейчас не нужен, холстов в нем нет.
-        let panelSet: WaveSet? = sets.panel ? makeSet(.panel) : nil
-        let wingSet: WaveSet? = sets.wing ? makeSet(.wing) : nil
-        let collapsedSet: WaveSet? = wings ? (collapsedStyle == .panel ? panelSet : wingSet) : nil
-        let shownPanelSet: WaveSet? = layers.panel ? panelSet : nil
+        // Пустой набор: слой сейчас не нужен, его холсты ничего не рисуют.
+        let panelSet = sets.panel ? makeSet(.panel) : WaveSet(empty: .panel)
+        let wingSet = sets.wing ? makeSet(.wing) : WaveSet(empty: .wing)
+        let collapsedSet = wings ? (collapsedStyle == .panel ? panelSet : wingSet) : WaveSet(empty: collapsedStyle)
+        let shownPanelSet = layers.panel ? panelSet : WaveSet(empty: .panel)
         let form = banner && state == .collapsed
         // Форма, которой обрезаются волны крыльев и панели.
         let mask = reduceMotion ? false : form
@@ -217,7 +217,7 @@ struct IslandWavesView: View {
     /// крыльях они стоят на своих местах, пока остров раскрывается или прячется, и
     /// открываются или закрываются краем формы.
     @ViewBuilder
-    private func collapsedWaves(_ waves: WaveSet?, maskBanner: Bool) -> some View {
+    private func collapsedWaves(_ waves: WaveSet, maskBanner: Bool) -> some View {
         if geometry.hasNotch {
             let baseline = appearance.lookGeometry.baseline
             ZStack(alignment: .topLeading) {
@@ -242,10 +242,10 @@ struct IslandWavesView: View {
     /// Волны в `rect` и их свечение (размытая копия толстых линий под ними), обе в режиме
     /// `.plusLighter`, плюс точка удара в `accent` (координаты панели). Все рисуется одной
     /// текстурой размером `rect` плюс поле под свечение с каждой стороны и обрезается формой
-    /// острова (`maskBanner`: формой баннера, пока остров свернут). Без `waves` слой пустой:
-    /// ни холстов, ни размытия, ни точки удара, только оболочка с маской.
+    /// острова (`maskBanner`: формой баннера, пока остров свернут). С пустым `waves` холсты ничего
+    /// не рисуют и точки удара нет: остается оболочка с маской.
     private func waveLayer(
-        _ waves: WaveSet?, rect: CGRect, mirrored: Bool, maskBanner: Bool, accent: CGPoint? = nil
+        _ waves: WaveSet, rect: CGRect, mirrored: Bool, maskBanner: Bool, accent: CGPoint? = nil
     ) -> some View {
         let size = CGFloat(appearance.glowSize)
         let blurScale = CGFloat(appearance.glowBlurScale)
@@ -253,24 +253,22 @@ struct IslandWavesView: View {
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
         return ZStack(alignment: .topLeading) {
             ZStack {
-                // Холсты появляются и уходят сразу (`.identity`): в живом слое их проявляет
-                // прозрачность оболочки, переход по умолчанию добавил бы к ней вторую.
-                if let waves {
-                    if glow > 0 && appearance.glowPass {
-                        WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
-                            .blur(radius: Self.glowBlur * size * blurScale)
-                            .opacity(min(Self.glowOpacity * glow * Double(max(size, 1)).squareRoot(), 1))
-                            .blendMode(.plusLighter)
-                            .transition(.identity)
-                    }
-                    WaveCanvas(waves: waves, mirrored: mirrored)
+                // Холст свечения есть, пока его просят настройки (яркость свечения, проход свечения);
+                // если он появится или уйдет вместе с анимированной сменой состояния острова, то
+                // сразу (`.identity`), а не второй прозрачностью поверх прозрачности оболочки.
+                if glow > 0 && appearance.glowPass {
+                    WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
+                        .blur(radius: Self.glowBlur * size * blurScale)
+                        .opacity(min(Self.glowOpacity * glow * Double(max(size, 1)).squareRoot(), 1))
                         .blendMode(.plusLighter)
                         .transition(.identity)
                 }
+                WaveCanvas(waves: waves, mirrored: mirrored)
+                    .blendMode(.plusLighter)
             }
             .frame(width: rect.width, height: rect.height)
             .offset(x: margin, y: margin)
-            if let accent, glow > 0, waves != nil {
+            if let accent, glow > 0, !waves.layers.isEmpty {
                 accentDot(at: CGPoint(x: accent.x - origin.x, y: accent.y - origin.y))
             }
         }
