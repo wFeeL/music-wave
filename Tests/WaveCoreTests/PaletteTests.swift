@@ -430,8 +430,8 @@ struct SpectrumStopsTests {
         }
     }
 
-    /// Кольцо сдвигается на 0.05 в секунду, фаза переливания поворачивает его навстречу: через
-    /// 20 с цвета те же, фаза 0.25 возвращает кольцо на 5 с времени назад (то же, что 15 с вперед).
+    /// Кольцо поворачивается на 0.05 в секунду, фаза переливания поворачивает его туда же: через
+    /// 20 с цвета те же, фаза 0.25 равна 5 с хода.
     @Test func ringShiftPeriod() {
         let palette = WavePreset.rainbow.colors
         for profile in WaveProfile.allCases {
@@ -440,7 +440,7 @@ struct SpectrumStopsTests {
             let flowed = Self.stops(
                 palette, heights: Self.flat(0.4), time: 2, profile: profile, options: WavePaint.Options(flowPhase: 0.25)
             )
-            let shifted = Self.stops(palette, heights: Self.flat(0.4), time: 17, profile: profile)
+            let shifted = Self.stops(palette, heights: Self.flat(0.4), time: 7, profile: profile)
             for index in start.indices {
                 #expect(start[index].color.oklab.distance(to: later[index].color.oklab) < 1e-3)
                 #expect(flowed[index].color.oklab.distance(to: shifted[index].color.oklab) < 1e-3)
@@ -451,8 +451,8 @@ struct SpectrumStopsTests {
     }
 
     /// Кольцо: у выреза (в панели в середине) в момент 0 первый цвет палитры, к краю цвета идут по
-    /// кольцу (0.67 кольца на половину линии), со временем плывут наружу.
-    @Test func ringStartsAtTheFirstColorAndFlowsOutward() {
+    /// кольцу (0.67 кольца на половину линии), со временем узор плывет к вырезу.
+    @Test func ringStartsAtTheFirstColorAndFlowsTowardTheNotch() {
         let palette = WavePreset.rainbow.colors
         let ring = WavePaint.distinct(palette)
         let wing = Self.stops(palette, heights: Self.flat(0), time: 0)
@@ -463,14 +463,14 @@ struct SpectrumStopsTests {
         let panel = Self.stops(palette, heights: Self.flat(0, count: 224), time: 0, profile: .panel)
         let center = panel.first { $0.location == 0.5 }!
         #expect(Self.hueGap(Self.hue(center.color.oklab), Self.hue(ring[0])) < 2)
-        // Через секунду у выреза цвет, который был чуть внутрь кольца (u < 0): цвета плывут наружу,
-        // и точка u = 0.075 (0.05 кольца / 0.67) получает прежний цвет выреза.
-        let hue0 = Self.hue(wing[0].color.oklab)
+        // Через секунду у выреза цвет, который был в точке u = 0.075 (0.05 кольца / 0.67): узор
+        // плывет к вырезу, цвет у выреза идет вперед по кольцу.
+        let outer = wing.first { abs($0.location - 0.0625) < 1e-12 }!
         let later = WavePaint.spectrumStops(
             palette: palette, heights: Self.flat(0), level: 1, time: 1, profile: .wing, options: .standard
         )
-        let moved = later.first { abs($0.location - 0.0625) < 1e-12 }!
-        #expect(Self.hueGap(Self.hue(moved.color.oklab), hue0) < 3, "\(Self.hue(moved.color.oklab)) vs \(hue0)")
+        let hueOuter = Self.hue(outer.color.oklab)
+        #expect(Self.hueGap(Self.hue(later[0].color.oklab), hueOuter) < 3, "\(Self.hue(later[0].color.oklab)) vs \(hueOuter)")
     }
 
     /// «Скорость переливания» ведет цвет у выреза (в панели в середине) по палитре в ту же
@@ -496,6 +496,50 @@ struct SpectrumStopsTests {
             let gapBefore = Self.hueGap(notchHue(0), Self.hue(ring[1]))
             let gapAfter = Self.hueGap(notchHue(0.1), Self.hue(ring[1]))
             #expect(gapAfter < gapBefore - 5, "\(profile): \(gapAfter) vs \(gapBefore)")
+        }
+    }
+
+    /// Ход кольца и переливание идут в одну сторону, ту же, что переливание «Волн» (фаза
+    /// `PaletteFlow` растет, цвет линии баса идет c0, c1, c2): на любой скорости ползунка за каждый
+    /// кадр кольцо поворачивается вперед, на ход без переливания плюс шаг фазы. Средняя скорость
+    /// без переливания 0.05 оборота в секунду и растет со скоростью ползунка, цвета не встают и не
+    /// идут назад.
+    @Test func driftAndFlowAddUp() {
+        let dt = 1.0 / 60
+        let frames = 300
+        // Разность долей оборота в -0.5...0.5: переход через целый оборот не считается скачком.
+        func turn(_ delta: Double) -> Double { delta - delta.rounded() }
+        var previousRate: Double?
+        for step in 0...20 {
+            let speed = Double(step) / 20
+            var flow = PaletteFlow()
+            var time = 3.0
+            var shift = WavePaint.spectrumRingShift(time: time, flowPhase: flow.phase)
+            var turned = 0.0
+            var wavesTurned = 0.0
+            for _ in 0..<frames {
+                let phase = flow.phase
+                flow.advance(dt: dt, speed: speed)
+                time += dt
+                let next = WavePaint.spectrumRingShift(time: time, flowPhase: flow.phase)
+                let delta = turn(next - shift)
+                let wavesDelta = turn(flow.phase - phase)
+                #expect(wavesDelta >= 0)
+                #expect(delta > 0 && delta >= wavesDelta, "скорость \(speed): \(delta) vs \(wavesDelta)")
+                turned += delta
+                wavesTurned += wavesDelta
+                shift = next
+            }
+            let seconds = Double(frames) * dt
+            let rate = turned / seconds
+            #expect(abs(rate - (WavePaint.flowSpeed + wavesTurned / seconds)) < 1e-6, "скорость \(speed)")
+            if step == 0 {
+                #expect(abs(rate - WavePaint.flowSpeed) < 1e-6)
+            }
+            if let previousRate {
+                #expect(rate > previousRate, "скорость \(speed): \(rate) <= \(previousRate)")
+            }
+            previousRate = rate
         }
     }
 

@@ -547,11 +547,13 @@ public enum WavePaint {
     ///
     /// Цвет идет по частотам. Без «Цвета по частотам» цвета палитры (после `distinct`) стоят
     /// кольцом c0 → c1 → c2 → c0, точка на расстоянии u от выреза (в панели от середины) берет
-    /// место кольца `0.67 × u − flowSpeed × time + options.flowPhase`: у выреза цвет баса, к краю
-    /// цвета идут по кольцу и со временем плывут наружу, все три цвета в деле. Фаза переливания
-    /// поворачивает кольцо в другую сторону: цвет у выреза идет c0, c1, c2, как у линии баса
-    /// «Волн» (`PaletteFlow.apply`). Поэтому на самой малой скорости переливания (период 20 с,
-    /// те же 0.05 оборота в секунду) цвета стоят, на большей идут внутрь. С «Цветом по частотам» сдвига нет и кольцо не замыкается:
+    /// место кольца `0.67 × u + spectrumRingShift(time:flowPhase:)`: у выреза цвет баса, к краю
+    /// цвета идут по кольцу, все три цвета в деле. Кольцо само поворачивается на `flowSpeed`
+    /// оборота в секунду, переливание (`options.flowPhase`) поворачивает его туда же: цвет у
+    /// выреза идет c0, c1, c2, как у линии баса «Волн» (`PaletteFlow.apply`) и свечения под
+    /// островом, узор плывет от края к вырезу. Ход и переливание складываются: чем выше
+    /// скорость переливания, тем быстрее, без нее ход 0.05 оборота в секунду, цвета не встают и
+    /// не идут назад. С «Цветом по частотам» сдвига нет и кольцо не замыкается:
     /// цвет баса у выреза, середины в середине, верха у края (палитра после переливания, как у
     /// `sectionStops`). Внутри каждого отрезка между двумя цветами смешение в OKLab по smoothstep
     /// на весь отрезок, без резких краев.
@@ -572,16 +574,13 @@ public enum WavePaint {
         let colors = options.colorByBand ? flowingColors(source, phase: options.flowPhase) : distinct(source)
         let paint = LevelPaint(level: level, options: options)
         let opacity = paint.opacity * layerOpacity[WaveLayer.mid.rawValue]
-        // Переливание поворачивает кольцо навстречу течению: цвет у выреза идет c0, c1, c2, как
-        // цвет линии баса у «Волн» (`PaletteFlow.apply`) и свечение под островом.
-        let flow = options.flowPhase.isFinite ? options.flowPhase : 0
-        let shift = flowShift(time: time) - flow
+        let shift = spectrumRingShift(time: time, flowPhase: options.flowPhase)
 
         for (index, raw) in locations.enumerated() {
             let point = LinePoint(raw, profile: profile)
             let base = options.colorByBand
                 ? pathColor(colors, position: point.u)
-                : ringColor(colors, position: spectrumSpan * point.u - shift)
+                : ringColor(colors, position: spectrumSpan * point.u + shift)
             let height = height(heights, at: point.location)
             let chroma = paint.chroma * (spectrumChromaBase + spectrumChromaLift * height)
             let lab = OKLab(
@@ -610,6 +609,14 @@ public enum WavePaint {
             }
         }
         return output
+    }
+
+    /// Поворот кольца «Спектра» на момент `time` при фазе переливания `flowPhase`, доля оборота:
+    /// собственный ход `flowSpeed × time` плюс фаза. Оба в одну сторону, ту же, что у переливания
+    /// «Волн» (`PaletteFlow.apply`: цвет линии баса идет c0, c1, c2 с ростом фазы). Не конечное
+    /// время или фаза дают 0 своей части.
+    static func spectrumRingShift(time: Double, flowPhase: Double) -> Double {
+        flowShift(time: time) + (flowPhase.isFinite ? flowPhase : 0)
     }
 
     /// Цвет кольца `colors` (c0 → c1 → ... → c0) на месте `position` (любое, берется по модулю 1):
