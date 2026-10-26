@@ -333,6 +333,9 @@ public struct BeatTracker: Sendable {
     static let resumeHistoryBeats = 2.0
     /// Насколько далеко (доля периода) от доли ФАПЧ гребенка октавы показа ищет зубцы.
     static let parityReach = 0.1
+    /// Показ через долю выключается при периоде выше `everyOtherPeriod` в столько раз (0.42 -> 0.43 с):
+    /// у 143 BPM с колебанием периода ±1 % без запаса показ переключался 18 раз за 30 с.
+    static let everyOtherRelease = 1.025
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
@@ -898,7 +901,10 @@ public struct BeatTracker: Sendable {
     /// и `nextBeat − 2T`, `nextBeat − 4T`, ...). Показ остается на прежней четности, пока гребенка
     /// другой не выше больше чем на `everyOtherHold`.
     private mutating func updateDisplayOctave() {
-        guard parameters.everyOtherPeriod > 0, let period, let nextBeat, period < parameters.everyOtherPeriod else {
+        // Гистерезис у порога: включается ниже `everyOtherPeriod`, выключается только выше него в
+        // `everyOtherRelease` раз, иначе темп у порога с дрожанием периода переключал бы показ.
+        let limit = parameters.everyOtherPeriod * (shownParity == nil ? 1 : Self.everyOtherRelease)
+        guard parameters.everyOtherPeriod > 0, let period, let nextBeat, period < limit else {
             shownParity = nil
             return
         }

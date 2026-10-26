@@ -1202,6 +1202,35 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Темп у порога показа через долю (период 0.42 с, около 143 BPM) с колебанием периода ±1 % за
+    /// 4 с: показ через долю, раз включившись, не выключается и не включается снова (у порога
+    /// гистерезис, выключение выше `everyOtherPeriod × everyOtherRelease`).
+    @Test func everyOtherDoesNotToggleNearTheThreshold() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 60 / 0.42)
+        hops.beatODF = [60, 50]
+        var toggles = 0
+        var halving: Bool?
+        var periods: [Double] = []
+        var time = 0.0
+        while time < 40 {
+            time += 0.25
+            hops.bpm = 60 / (0.42 * (1 + 0.01 * sin(2 * Double.pi * time / 4)))
+            hops.feed(&tracker, until: time) { tracker in
+                guard tracker.locked else { return }
+                let now = tracker.shownParity != nil
+                if let was = halving, was != now { toggles += 1 }
+                if halving != nil || now { halving = now }
+            }
+            if time > 10, let period = tracker.period { periods.append(period) }
+        }
+        try #require(halving == true, "never halved")
+        let low = try #require(periods.min())
+        let high = try #require(periods.max())
+        try #require(low < 0.42 && high > 0.42, "tracker period \(low)...\(high) does not cross the threshold")
+        #expect(toggles == 0, "\(toggles) toggles, tracker period \(low)...\(high)")
+    }
+
     /// Бочка раз в 2T и тишина в полосе бочки между ними (160 BPM): удержание ворота тянется на период
     /// показа, и показанные доли с бочкой вспыхивают. С удержанием на T ворот к доле с бочкой уже
     /// закрыт (28 дБ спада) и сетка через долю темнеет; без правила вспыхивают только доли без бочки,
