@@ -199,22 +199,23 @@ struct AppearanceSettingsView: View {
 
     // MARK: - Волны
 
-    /// «Стиль»: «Волны», «Спектр», «Минимал», «Пульс». Подпись под ним только у «Пульса» при
-    /// «Уменьшении движения» (`SettingsText.lookCaption`).
+    /// «Стиль»: «Волны», «Спектр», «Минимал», «Пульс». Подпись только у «Пульса» при
+    /// «Уменьшении движения» (`SettingsText.lookCaption`), отдельной строкой под выбором:
+    /// второй `Text` в метке сегментного `Picker` в `.grouped` форме может не показываться.
+    @ViewBuilder
     private var lookRow: some View {
         let settings = model.settings
-        let caption = SettingsText.lookCaption(settings.look, reduceMotion: reduceMotion)
-        return Picker(selection: Binding(get: { settings.look }, set: { settings.look = $0 })) {
+        Picker("Стиль", selection: Binding(get: { settings.look }, set: { settings.look = $0 })) {
             ForEach(WaveLook.allCases, id: \.self) { look in
                 Text(look.title).tag(look)
             }
-        } label: {
-            Text("Стиль")
-            if let caption {
-                Text(caption)
-            }
         }
         .pickerStyle(.segmented)
+        if let caption = SettingsText.lookCaption(settings.look, reduceMotion: reduceMotion) {
+            Text(caption)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Строки, которые нужны выбранному стилю: у «Пульса» ни одной, у «Минимала» толщина и
