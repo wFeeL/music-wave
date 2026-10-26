@@ -133,6 +133,60 @@ import Testing
         #expect(machine.pointerDeadline == nil)
     }
 
+    @Test func expandDelayIsAdjustable() {
+        var machine = IslandStateMachine()
+        machine.expandDelay = 1.0
+        var hover = playing
+        hover.pointerInHoverZone = true
+        machine.update(hover, now: 0)
+        #expect(machine.update(hover, now: 0.5) == .collapsed)
+        #expect(machine.update(hover, now: 1.0) == .expanded)
+    }
+
+    /// Задержку укоротили, пока курсор уже стоит у выреза: новый срок считается от входа в зону.
+    @Test func shorterDelayAppliesToRunningHover() throws {
+        var machine = IslandStateMachine()
+        machine.expandDelay = 1.0
+        var hover = playing
+        hover.pointerInHoverZone = true
+        machine.update(hover, now: 0)
+        #expect(machine.update(hover, now: 0.4) == .collapsed)
+        machine.expandDelay = 0.3
+        let deadline = try #require(machine.pointerDeadline)
+        #expect(abs(deadline - 0.3) < 1e-9)
+        #expect(machine.update(hover, now: 0.5) == .expanded)
+    }
+
+    /// При нулевой задержке и курсоре у выреза остров в обновлении первого показа свернут,
+    /// раскрывается только в следующем.
+    @Test func zeroDelayShowsCollapsedFirst() {
+        var machine = IslandStateMachine()
+        machine.expandDelay = 0
+        let parked = IslandInputs(pointerInHoverZone: true)
+        #expect(machine.update(parked, now: 0) == .hidden)
+        var playingParked = playing
+        playingParked.pointerInHoverZone = true
+        #expect(machine.update(playingParked, now: 1) == .collapsed)
+        #expect(machine.update(playingParked, now: 1.0001) == .expanded)
+    }
+
+    @Test func expandDelayClamped() {
+        var machine = IslandStateMachine()
+        #expect(machine.expandDelay == IslandStateMachine.defaultExpandDelay)
+        #expect(IslandStateMachine.defaultExpandDelay == 0.15)
+        #expect(IslandStateMachine.expandDelayRange == 0...1)
+        machine.expandDelay = -1
+        #expect(machine.expandDelay == 0)
+        machine.expandDelay = 5
+        #expect(machine.expandDelay == 1)
+        machine.expandDelay = .nan
+        #expect(machine.expandDelay == 0.15)
+        machine.expandDelay = .infinity
+        #expect(machine.expandDelay == 0.15)
+        #expect(IslandStateMachine(expandDelay: 7).expandDelay == 1)
+        #expect(IslandStateMachine(expandDelay: -.infinity).expandDelay == 0.15)
+    }
+
     @Test func silenceTimerResetsWhenMusicResumes() {
         var machine = IslandStateMachine()
         machine.update(playing, now: 0)

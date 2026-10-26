@@ -48,19 +48,36 @@ public struct IslandInputs: Sendable, Equatable {
 /// Все задержки считаются от момента, когда условие стало истинным и держится непрерывно;
 /// при смене условия отсчет сбрасывается. `now` растет монотонно, в секундах.
 public struct IslandStateMachine: Sendable {
+    /// Допустимая задержка раскрытия, секунды.
+    public static let expandDelayRange: ClosedRange<Double> = 0...1
+    /// Задержка раскрытия по умолчанию, секунды.
+    public static let defaultExpandDelay = 0.15
+
     public var hideDelay: Double
-    public let expandDelay: Double
+    /// Сколько курсор держится у выреза до раскрытия. Ограничивается `expandDelayRange`,
+    /// не конечное значение дает `defaultExpandDelay`. Новое значение действует и на уже
+    /// идущий отсчет: срок считается от входа курсора в зону.
+    public var expandDelay: Double {
+        get { storedExpandDelay }
+        set { storedExpandDelay = Self.clampedExpandDelay(newValue) }
+    }
     public let collapseDelay: Double
     public private(set) var state: IslandState = .hidden
 
+    private var storedExpandDelay: Double
     private var contentFalseSince: Double?
     private var pointerInSince: Double?
     private var pointerOutSince: Double?
 
-    public init(hideDelay: Double = 5, expandDelay: Double = 0.15, collapseDelay: Double = 0.3) {
+    public init(hideDelay: Double = 5, expandDelay: Double = defaultExpandDelay, collapseDelay: Double = 0.3) {
         self.hideDelay = hideDelay
-        self.expandDelay = expandDelay
+        self.storedExpandDelay = Self.clampedExpandDelay(expandDelay)
         self.collapseDelay = collapseDelay
+    }
+
+    private static func clampedExpandDelay(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultExpandDelay }
+        return min(max(value, expandDelayRange.lowerBound), expandDelayRange.upperBound)
     }
 
     /// Когда состояние сменится по курсору, если входы не изменятся: раскрытие через
@@ -96,13 +113,18 @@ public struct IslandStateMachine: Sendable {
         pointerInSince = inputs.pointerInHoverZone && canExpand ? (pointerInSince ?? now) : nil
         pointerOutSince = inputs.pointerInHoverZone ? nil : (pointerOutSince ?? now)
 
+        // Правило первого показа: в обновлении, где остров вышел из скрытого в свернутый, он
+        // не раскрывается. Иначе при задержке 0 курсор у выреза раскрыл бы остров в тот же
+        // момент, когда тот появился, и свернутого вида не было бы вовсе.
+        var justShown = false
         if state == .hidden, content {
             state = .collapsed
+            justShown = true
         }
 
         switch state {
         case .hidden, .collapsed:
-            if canExpand, let since = pointerInSince, elapsed(now, since, expandDelay) {
+            if !justShown, canExpand, let since = pointerInSince, elapsed(now, since, expandDelay) {
                 state = .expanded
                 pointerOutSince = nil
             } else if state == .collapsed, let since = contentFalseSince, elapsed(now, since, hideDelay) {
