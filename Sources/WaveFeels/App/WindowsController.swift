@@ -164,6 +164,9 @@ final class WindowsController: NSObject, NSWindowDelegate {
     /// не выполняет (из меню строки меню окно на другом рабочем столе так и не выходило).
     /// Активное приложение с окном на другом столе система переводит на этот стол, если включена
     /// настройка «При переключении на программу переходить в пространство с открытыми окнами».
+    ///
+    /// Между показом и следующим проходом окно могли закрыть: тогда `bringForward` его не
+    /// открывает снова (`.accessory` уже стоит, окно осталось бы без значка в Dock).
     private func present(_ window: NSWindow) {
         NSApp.setActivationPolicy(.regular)
         DispatchQueue.main.async { [weak self] in
@@ -174,6 +177,10 @@ final class WindowsController: NSObject, NSWindowDelegate {
     }
 
     private func bringForward(_ window: NSWindow) {
+        guard presence(of: window)?.isOpen == true else { return }
+        // Закрытие другого окна в этом промежутке могло вернуть `.accessory`: это окно еще не
+        // было видно и в его проверку открытых окон не попало.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         if window.isMiniaturized {
             window.deminiaturize(nil)
