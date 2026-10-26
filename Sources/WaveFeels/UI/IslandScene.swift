@@ -97,9 +97,10 @@ struct IslandBodyView: View, Equatable {
 /// говорит, что он жив; холсты стоят всегда, у неживого слоя с пустым набором
 /// (`WaveSet(empty:)`), и тогда ничего не рисуют. Оболочка (рамка, маска формой острова,
 /// текстура) тоже стоит всегда: по ней маска продолжает идти за формой, и входящий слой
-/// открывается ее краем, а проявляется прозрачностью оболочки под той же пружиной. Каждый
-/// прямоугольник волн рисуется своей текстурой (`drawingGroup`) с полем `glowMargin` × «Размер
-/// свечения» (не меньше 1×) под размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
+/// открывается ее краем, а проявляется прозрачностью оболочки под той же пружиной. Неживой слой
+/// на кадрах не пересчитывается (`WaveLayerView`, `==`). Каждый прямоугольник волн рисуется своей
+/// текстурой (`drawingGroup`) с полем `glowMargin` × «Размер свечения» (не меньше 1×) под
+/// размытую копию линий; линии складываются в ней `.plusLighter` и ложатся на черное тело.
 /// Число линий, заливка, толщина, размах, размер и четкость свечения линий берутся из `appearance`; без
 /// прохода свечения (`WaveAppearance.glowPass`, режим энергосбережения) размытой копии линий нет.
 ///
@@ -239,27 +240,80 @@ struct IslandWavesView: View {
         }
     }
 
-    /// Волны в `rect` и их свечение (размытая копия толстых линий под ними), обе в режиме
-    /// `.plusLighter`, плюс точка удара в `accent` (координаты панели). Все рисуется одной
-    /// текстурой размером `rect` плюс поле под свечение с каждой стороны и обрезается формой
-    /// острова (`maskBanner`: формой баннера, пока остров свернут). С пустым `waves` холсты ничего
-    /// не рисуют и точки удара нет: остается оболочка с маской.
+    /// Волны в `rect` (`WaveLayerView`): линии, их свечение и точка удара в `accent` (координаты
+    /// панели) одной текстурой, обрезанной формой острова (`maskBanner`: формой баннера, пока
+    /// остров свернут). Слой с пустым `waves` на кадрах не пересчитывается (`.equatable()`).
     private func waveLayer(
         _ waves: WaveSet, rect: CGRect, mirrored: Bool, maskBanner: Bool, accent: CGPoint? = nil
     ) -> some View {
-        let size = CGFloat(appearance.glowSize)
-        let blurScale = CGFloat(appearance.glowBlurScale)
-        let margin = Self.glowMargin * max(size, 1) * max(blurScale, 1)
+        WaveLayerView(
+            waves: waves, rect: rect, mirrored: mirrored, geometry: geometry, state: state, maskBanner: maskBanner,
+            glow: glow, glowSize: CGFloat(appearance.glowSize), glowBlurScale: CGFloat(appearance.glowBlurScale),
+            glowPass: appearance.glowPass, accent: accent, beatGlow: visuals.glow,
+            glowSourceColor: visuals.glowSourceColor
+        )
+        .equatable()
+    }
+}
+
+/// Один прямоугольник волн острова (`IslandWavesView.waveLayer`): волны в `rect` и их свечение
+/// (размытая копия толстых линий под ними), обе в режиме `.plusLighter`, плюс точка удара в
+/// `accent` (координаты панели). Все рисуется одной текстурой размером `rect` плюс поле под
+/// свечение с каждой стороны и обрезается формой острова (`maskBanner`: формой баннера, пока
+/// остров свернут). С пустым `waves` холсты ничего не рисуют и точки удара нет: остается
+/// оболочка с маской.
+///
+/// Неживой слой (пустой набор) от кадра не зависит, поэтому `==` сравнивает только оболочку:
+/// прямоугольник, геометрию, состояние, маску и настройки свечения. Тело такого слоя
+/// пересчитывается, только когда они меняются, а маска идет за формой острова анимацией, без
+/// тела. Живой слой меняется на каждом кадре (`==` всегда ложно), как и раньше.
+struct WaveLayerView: View, Equatable {
+    let waves: WaveSet
+    /// Прямоугольник волн в координатах панели.
+    let rect: CGRect
+    /// Крыло слева от выреза: волна идет справа налево.
+    let mirrored: Bool
+    let geometry: IslandGeometry
+    let state: IslandState
+    /// Слой обрезается формой баннера.
+    let maskBanner: Bool
+    /// Яркость свечения из настроек, 0 при «Уменьшении движения».
+    let glow: Double
+    /// «Размер свечения», множитель.
+    let glowSize: CGFloat
+    /// Множитель размытия по «Четкости свечения» (`WaveAppearance.glowBlurScale`).
+    let glowBlurScale: CGFloat
+    /// Есть ли проход свечения линий (`WaveAppearance.glowPass`).
+    let glowPass: Bool
+    /// Точка удара у выреза в координатах панели, `nil` без нее.
+    let accent: CGPoint?
+    /// Свечение доли на кадре (`IslandVisuals.glow`): яркость точки удара.
+    let beatGlow: Float
+    /// Цвет свечения на кадре, с переливанием (`IslandVisuals.glowSourceColor`): цвет точки удара.
+    let glowSourceColor: PaletteColor
+
+    /// Равны только два неживых слоя с одной оболочкой. У них нет ни линий, ни точки удара, и
+    /// `beatGlow` с `glowSourceColor` (кадр) ни на что не влияют.
+    nonisolated static func == (lhs: WaveLayerView, rhs: WaveLayerView) -> Bool {
+        lhs.waves.layers.isEmpty && rhs.waves.layers.isEmpty
+            && lhs.rect == rhs.rect && lhs.mirrored == rhs.mirrored && lhs.geometry == rhs.geometry
+            && lhs.state == rhs.state && lhs.maskBanner == rhs.maskBanner && lhs.glow == rhs.glow
+            && lhs.glowSize == rhs.glowSize && lhs.glowBlurScale == rhs.glowBlurScale
+            && lhs.glowPass == rhs.glowPass && lhs.accent == rhs.accent
+    }
+
+    var body: some View {
+        let margin = IslandWavesView.glowMargin * max(glowSize, 1) * max(glowBlurScale, 1)
         let origin = CGPoint(x: rect.minX - margin, y: rect.minY - margin)
-        return ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
             ZStack {
                 // Холст свечения есть, пока его просят настройки (яркость свечения, проход свечения);
                 // если он появится или уйдет вместе с анимированной сменой состояния острова, то
                 // сразу (`.identity`), а не второй прозрачностью поверх прозрачности оболочки.
-                if glow > 0 && appearance.glowPass {
+                if glow > 0 && glowPass {
                     WaveCanvas(waves: waves, mirrored: mirrored, pass: .glow)
-                        .blur(radius: Self.glowBlur * size * blurScale)
-                        .opacity(min(Self.glowOpacity * glow * Double(max(size, 1)).squareRoot(), 1))
+                        .blur(radius: IslandWavesView.glowBlur * glowSize * glowBlurScale)
+                        .opacity(min(IslandWavesView.glowOpacity * glow * Double(max(glowSize, 1)).squareRoot(), 1))
                         .blendMode(.plusLighter)
                         .transition(.identity)
                 }
@@ -285,16 +339,17 @@ struct IslandWavesView: View {
     /// как у свечения под островом, с переливанием (`IslandVisuals.glowSourceColor`).
     @ViewBuilder
     private func accentDot(at center: CGPoint) -> some View {
-        let opacity = Self.accentOpacity * Double(visuals.glow)
+        let size = IslandWavesView.accentSize
+        let opacity = IslandWavesView.accentOpacity * Double(beatGlow)
         if opacity > 0.005 {
-            let color = WavePaint.glowColor(visuals.glowSourceColor)
+            let color = WavePaint.glowColor(glowSourceColor)
             Circle()
                 .fill(Color(palette: color))
-                .frame(width: Self.accentSize, height: Self.accentSize)
+                .frame(width: size, height: size)
                 .blur(radius: 1)
                 .opacity(opacity)
                 .blendMode(.plusLighter)
-                .offset(x: center.x - Self.accentSize / 2, y: center.y - Self.accentSize / 2)
+                .offset(x: center.x - size / 2, y: center.y - size / 2)
                 .transition(.identity)
         }
     }
