@@ -136,7 +136,7 @@ public enum PaletteExtractor {
     private static let maxClusters = 5
     private static let iterations = 12
     private static let minimumSeparation: Float = 0.08
-    private static let liftedLightness: Float = 0.62
+    static let liftedLightness: Float = 0.62
 
     /// Три акцентных цвета обложки. `rgba` это 4 байта на пиксель, строки подряд.
     public static func extract(rgba: [UInt8], width: Int, height: Int) -> [RGBColor] {

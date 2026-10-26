@@ -61,7 +61,7 @@ struct WaveAppearanceTests {
         )
         let json = String(decoding: try JSONEncoder().encode(appearance), as: UTF8.self)
         #expect(json.contains("\"neon\""))
-        let stored = Data(json.replacingOccurrences(of: "\"neon\"", with: "\"rainbow\"").utf8)
+        let stored = Data(json.replacingOccurrences(of: "\"neon\"", with: "\"plasma\"").utf8)
         let decoded = try JSONDecoder().decode(WaveAppearance.self, from: stored)
         var expected = appearance
         expected.colorMode = .artwork
@@ -148,7 +148,11 @@ struct WaveAppearanceTests {
     }
 
     @Test func presetsAreDistinct() {
-        #expect(WavePreset.allCases.map(\.title) == ["Аврора", "Закат", "Океан", "Неон", "Огонь", "Моно"])
+        #expect(WavePreset.allCases.map(\.title) == [
+            "Аврора", "Закат", "Океан", "Неон", "Огонь", "Моно",
+            "Лаванда", "Мята", "Коралл", "Лес", "Янтарь", "Сакура", "Лед", "Песок", "Радуга",
+        ])
+        #expect(WavePreset.allCases.allSatisfy { !$0.title.contains("ё") && !$0.title.contains(" ") })
         for preset in WavePreset.allCases {
             let labs = preset.colors.map(\.oklab)
             #expect(labs.count == 3)
@@ -160,6 +164,31 @@ struct WaveAppearanceTests {
         }
         #expect(Set(WavePreset.allCases.map { $0.colors.flatMap { [$0.r, $0.g, $0.b] } }).count == WavePreset.allCases.count)
         #expect(WavePreset.aurora.colors == [RGBColor(hex: 0x4BE3C1), RGBColor(hex: 0x5B8CFF), RGBColor(hex: 0xB06CFF)])
+    }
+
+    @Test func newPresetsAreBrightAndDistinct() {
+        let newPresets: [WavePreset] = [.lavender, .mint, .coral, .forest, .amber, .sakura, .ice, .sand, .rainbow]
+        #expect(Array(WavePreset.allCases.suffix(9)) == newPresets)
+        for preset in newPresets {
+            let labs = preset.colors.map(\.oklab)
+            #expect(labs.count == 3)
+            for lab in labs {
+                #expect(lab.l >= PaletteExtractor.liftedLightness, "\(preset) \(lab.l)")
+            }
+            for i in labs.indices {
+                for j in labs.indices where j > i {
+                    #expect(labs[i].distance(to: labs[j]) >= 0.08, "\(preset) \(i) \(j)")
+                }
+            }
+        }
+        #expect(WavePreset.lavender.colors == [RGBColor(hex: 0xB79CFF), RGBColor(hex: 0xF0A6E8), RGBColor(hex: 0x6F9BFF)])
+    }
+
+    @Test func newPresetsDecode() throws {
+        let one = try JSONEncoder().encode(WaveColorMode.preset(.lavender))
+        #expect(String(decoding: one, as: UTF8.self) == "{\"preset\":{\"_0\":\"lavender\"}}")
+        let stored = Data("{\"preset\":{\"_0\":\"lavender\"}}".utf8)
+        #expect(try JSONDecoder().decode(WaveColorMode.self, from: stored) == .preset(.lavender))
     }
 
     @Test func paletteFollowsMode() {

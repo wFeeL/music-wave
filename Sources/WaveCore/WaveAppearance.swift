@@ -3,6 +3,7 @@ import Foundation
 /// Готовая палитра волн: три цвета (бас, середина, верх).
 public enum WavePreset: String, Codable, CaseIterable, Sendable {
     case aurora, sunset, ocean, neon, fire, mono
+    case lavender, mint, coral, forest, amber, sakura, ice, sand, rainbow
 
     public var title: String {
         switch self {
@@ -12,6 +13,15 @@ public enum WavePreset: String, Codable, CaseIterable, Sendable {
         case .neon: "Неон"
         case .fire: "Огонь"
         case .mono: "Моно"
+        case .lavender: "Лаванда"
+        case .mint: "Мята"
+        case .coral: "Коралл"
+        case .forest: "Лес"
+        case .amber: "Янтарь"
+        case .sakura: "Сакура"
+        case .ice: "Лед"
+        case .sand: "Песок"
+        case .rainbow: "Радуга"
         }
     }
 
@@ -23,6 +33,15 @@ public enum WavePreset: String, Codable, CaseIterable, Sendable {
         case .neon: [0x39FF88, 0x29E6FF, 0xFF3DDB]
         case .fire: [0xFF3B1F, 0xFF8C1A, 0xFFD23F]
         case .mono: [0xFFFFFF, 0xD9D9D9, 0xB3B3B3]
+        case .lavender: [0xB79CFF, 0xF0A6E8, 0x6F9BFF]
+        case .mint: [0x3FE0A0, 0xB8F5A0, 0x2FC7D9]
+        case .coral: [0xFF6F61, 0xFFA07A, 0xFF4F9A]
+        case .forest: [0x6BD66B, 0xC2E05A, 0x3FC2A0]
+        case .amber: [0xFFA500, 0xFFD84A, 0xFF6A1A]
+        case .sakura: [0xFF8FB1, 0xFFB8D0, 0xD58CFF]
+        case .ice: [0x8FDCFF, 0xD0F0FF, 0x7F9CFF]
+        case .sand: [0xE8B070, 0xF2D6A6, 0xD27F55]
+        case .rainbow: [0xFF5A5A, 0x52E57A, 0x5A8CFF]
         }
         return hex.map(RGBColor.init(hex:))
     }
