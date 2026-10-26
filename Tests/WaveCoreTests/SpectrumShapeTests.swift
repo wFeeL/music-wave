@@ -89,6 +89,37 @@ struct SpectrumShapeTests {
         #expect(fine[199] == fine[201])
     }
 
+    /// Громкий бас не упирается в плоскую вершину: компенсация пика идет в мягкий предел, а не
+    /// обрезается на 1, поэтому разные громкие уровни дают разные вершины (и при «Размахе» ниже 1,
+    /// где мягкий предел не работает), все в 0...1.
+    @Test func loudInputsStayDistinct() {
+        for sigma in [1.0, 2.25, 3] {
+            for gain in [0.5, 1, 2] {
+                var previous: [Float]?
+                for top in [Float(0.85), 0.9, 1] {
+                    // Басовые полосы 0...5 на уровне `top`, дальше спад × 0.9 на полосу.
+                    let bands = (0..<24).map { band -> Float in
+                        band < 6 ? top : top * Float(pow(0.9, Double(band - 5)))
+                    }
+                    let y = samples(bands, count: 64, gain: gain, smoothing: sigma)
+                    #expect(y.allSatisfy { $0 >= 0 && $0 <= 1 }, "σ \(sigma) gain \(gain) top \(top)")
+                    if let previous {
+                        // Вершина у выреза и вся басовая часть строго выше, чем у более тихого входа.
+                        for i in 0..<16 {
+                            #expect(y[i] > previous[i], "σ \(sigma) gain \(gain) top \(top) #\(i): \(y[i]) <= \(previous[i])")
+                        }
+                    }
+                    // Без плоской вершины: соседние точки у выреза не равны. При «Размахе» 2 мягкий
+                    // предел сам доходит до 1 в пределах точности Float, как и у волн.
+                    if gain <= 1 {
+                        #expect(y[0] != y[8], "σ \(sigma) gain \(gain) top \(top)")
+                    }
+                    previous = y
+                }
+            }
+        }
+    }
+
     /// Удар в одной полосе расходится на соседние (не меньше трех полос заметно выше нуля), без
     /// отрицательных лепестков; бас у выреза.
     @Test func impulseSpreadsWithoutNegativeLobes() {
