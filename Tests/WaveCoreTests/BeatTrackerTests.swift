@@ -834,8 +834,9 @@ struct BeatTrackerTests {
         resumed.feed(&tracker, until: 6) { tracker in
             if lockedAt == nil, tracker.locked { lockedAt = tracker.now }
         }
-        // Сетка с 1 с потока, пять попаданий подряд с доли 1.37: захват не раньше 3.37 с.
-        #expect(lockedAt.map { $0 >= 3.3 } == true, "locked at \(String(describing: lockedAt))")
+        // Сетка с 1 с потока, пять попаданий подряд с доли 1.37: захват на закрытии окна пятой доли
+        // (3.37 + 0.075 с, замер 3.445 с), не раньше и не на долю позже.
+        #expect(lockedAt.map { $0 >= 3.3 && $0 < 3.6 } == true, "locked at \(String(describing: lockedAt))")
     }
 
     /// Вес показа в трекере: 0, пока уверенность не выше `weightLow`, и доходит до 1 не позже чем за
@@ -1338,7 +1339,8 @@ struct BeatTrackerTests {
 }
 
 /// Чей темп помнит трекер (`TrackTempoMemory`): пауза в том же треке сохраняет темп, без трека и
-/// после смены трека нет; трек сменился, пока трекер еще идет по памяти, значит память надо бросить.
+/// после смены трека нет. Смена известного трека на другой известный сбрасывает трекер всегда (сетка
+/// прежнего трека новому не нужна), пропажа или появление трека только пока трекер идет по памяти.
 struct TrackTempoMemoryTests {
     private let first = TrackKey(title: "Первый", artist: "Исполнитель", source: "ru.yandex.desktop.music")
     private let second = TrackKey(title: "Второй", artist: "Исполнитель", source: "ru.yandex.desktop.music")
@@ -1352,25 +1354,51 @@ struct TrackTempoMemoryTests {
         #expect(memory.keepsTempo(current: first))
         #expect(!memory.keepsTempo(current: second))
         #expect(!memory.keepsTempo(current: nil))
+        // Трек пропал посреди звука без памяти: сброса нет, метка остается, сохранять темп без трека
+        // нельзя.
         let dropWithoutTrack = memory.feeding(current: nil, resuming: false)
-        #expect(!dropWithoutTrack && memory.track == nil)
+        #expect(!dropWithoutTrack && memory.track == first)
         #expect(!memory.keepsTempo(current: nil))
+        let backToFirst = memory.feeding(current: first, resuming: false)
+        #expect(!backToFirst && memory.keepsTempo(current: first))
     }
 
-    @Test func trackChangeWhileResumingDropsTheMemory() {
+    @Test(arguments: [false, true])
+    func knownTrackChangeAlwaysDropsTheMemory(resuming: Bool) {
         var memory = TrackTempoMemory()
         _ = memory.feeding(current: first, resuming: false)
-        let sameTrack = memory.feeding(current: first, resuming: true)
+        let sameTrack = memory.feeding(current: first, resuming: resuming)
         #expect(!sameTrack)
-        let nextTrack = memory.feeding(current: second, resuming: true)
-        #expect(nextTrack)
-        let trackLost = memory.feeding(current: nil, resuming: true)
-        #expect(trackLost)
-        // Смена трека посреди звука без памяти трекер не сбрасывает: он сам переходит на новый темп.
-        let backToFirst = memory.feeding(current: first, resuming: false)
-        let midSound = memory.feeding(current: second, resuming: false)
-        #expect(!backToFirst && !midSound)
-        #expect(memory.keepsTempo(current: second))
+        let nextTrack = memory.feeding(current: second, resuming: resuming)
+        #expect(nextTrack && memory.track == second)
+        #expect(memory.keepsTempo(current: second) && !memory.keepsTempo(current: first))
+    }
+
+    /// Пропажа трека и трек после нее: сброс, только пока трекер идет по памяти; без памяти трек после
+    /// пропажи сравнивается с прежней меткой.
+    @Test func trackGapDropsOnlyWhileResumingOrOnANewTrack() {
+        var memory = TrackTempoMemory()
+        _ = memory.feeding(current: first, resuming: false)
+        let lostWhileResuming = memory.feeding(current: nil, resuming: true)
+        #expect(lostWhileResuming && memory.track == nil)
+        let afterReset = memory.feeding(current: second, resuming: false)
+        #expect(!afterReset && memory.track == second)
+        let lostMidSound = memory.feeding(current: nil, resuming: false)
+        #expect(!lostMidSound && memory.track == second)
+        let newAfterGap = memory.feeding(current: first, resuming: false)
+        #expect(newAfterGap && memory.track == first)
+        var fresh = TrackTempoMemory()
+        let appeared = fresh.feeding(current: first, resuming: true)
+        #expect(appeared && fresh.track == first)
+    }
+
+    /// Ключ трека только у источника-приложения: у всего звука системы Now Playing может описывать
+    /// плеер на паузе, пока играет другой звук.
+    @Test func keyOnlyForApplicationSources() {
+        let yandex = AudioSource.application(bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Яндекс Музыка.app", displayName: "Яндекс Музыка")
+        #expect(TrackTempoMemory.key(first, source: yandex) == first)
+        #expect(TrackTempoMemory.key(nil, source: yandex) == nil)
+        #expect(TrackTempoMemory.key(first, source: .systemWide) == nil)
     }
 }
 
