@@ -91,7 +91,10 @@ public enum BeatAnnotations {
 /// - аннотации файла сдвигаются на задержку вывода (`Result.audible`);
 /// - lockedPrecision: доля вспышек при захвате, попавших в окно (один к одному);
 /// - F, meanOffset и непрерывность: по всем вспышкам;
-/// - lockedCoverage: доля времени файла, на которой опубликован захват.
+/// - lockedCoverage: доля времени файла, на которой опубликован захват;
+/// - longestDarkBeats: самая длинная серия размеченных долей подряд без вспышки (любой, с захватом или
+///   без) в окне; longestDarkBeatsAfterLock: то же только по долям, слышимым после первого захвата
+///   (без холодного старта); lockFlipsPerMinute и unlocks: смены захвата и его потери по причинам.
 public enum BeatEvaluation {
     /// Вспышки ближе этого друг к другу (секунды) считаются одной.
     public static let dedupeGap = 0.05
@@ -143,6 +146,15 @@ public enum BeatEvaluation {
         /// Первый захват, секунды от начала файла.
         public var lockTime: Double?
         public var tempoBPM: Double?
+        /// Самая длинная серия размеченных долей подряд без вспышки в окне (темные доли).
+        public var longestDarkBeats = 0
+        /// То же по долям, слышимым не раньше первого захвата (`lockTime` плюс задержка вывода): темнота
+        /// посреди песни без холодного старта. `nil`, если захвата не было.
+        public var longestDarkBeatsAfterLock: Int?
+        /// Смены захвата (появился или пропал) в минуту оцениваемого отрезка.
+        public var lockFlipsPerMinute = 0.0
+        /// Потери захвата по причинам.
+        public var unlocks: [UnlockReason: Int] = [:]
     }
 
     /// Слияние вспышек: идут по времени, каждая ближе `gap` к последней оставленной выпадает; если
@@ -193,6 +205,13 @@ public enum BeatEvaluation {
         let unlockedOffsets = BeatMetrics.offsets(detections: unlockedTimes, annotations: audibleBeats, window: window)
         let continuity = BeatMetrics.continuity(detections: times, annotations: audibleBeats)
         let coverage = Self.coverage(states: result.states, from: skip, duration: duration)
+        let lockChanges = BeatMetrics.lockChanges(states: result.states, from: skip, through: duration)
+        let span = duration - skip
+        // `lockTime` это момент публикации по часам хоста, доли на слышимой оси: доля после захвата
+        // слышна не раньше `lockTime + latency`.
+        let darkAfterLock = result.lockTime.map { lock in
+            BeatMetrics.longestDarkRun(detections: times, annotations: audibleBeats.filter { $0 >= lock + latency }, window: window)
+        }
 
         return FileScore(
             path: path, group: group, heldout: heldout, duration: duration, annotationCount: beats.count,
@@ -203,7 +222,10 @@ public enum BeatEvaluation {
             offsetLockedSumMs: lockedOffsets.reduce(0, +) * 1000, offsetLockedCount: lockedOffsets.count,
             offsetUnlockedSumMs: unlockedOffsets.reduce(0, +) * 1000, offsetUnlockedCount: unlockedOffsets.count,
             cmlt: continuity.cmlt, amlt: continuity.amlt,
-            lockedCoverage: coverage, lockTime: result.lockTime, tempoBPM: result.tempoBPM
+            lockedCoverage: coverage, lockTime: result.lockTime, tempoBPM: result.tempoBPM,
+            longestDarkBeats: BeatMetrics.longestDarkRun(detections: times, annotations: audibleBeats, window: window),
+            longestDarkBeatsAfterLock: darkAfterLock,
+            lockFlipsPerMinute: span > 0 ? Double(lockChanges.changes) * 60 / span : 0, unlocks: lockChanges.unlocks
         )
     }
 
@@ -254,6 +276,20 @@ public enum BeatEvaluation {
         public var wrongLockFiles: Int
         /// Вспышки при захвате мимо долей в этих файлах.
         public var wrongLockFlashes: Int
+        /// Медиана и 90-й процентиль самой длинной темной серии файла (ближайший ранг по файлам), долей;
+        /// 0 без файлов.
+        public var darkRunMedian: Double
+        public var darkRunP90: Double
+        /// Медиана и 90-й процентиль `longestDarkBeatsAfterLock` по `darkAfterLockFiles` файлам, у которых
+        /// был захват (ближайший ранг); 0 без таких файлов. Реже захватывать значит выкинуть файлы из
+        /// этого числа: смотреть вместе с `darkAfterLockFiles`, recall и lockedCov.
+        public var darkRunAfterLockMedian: Double
+        public var darkRunAfterLockP90: Double
+        public var darkAfterLockFiles: Int
+        /// Среднее по файлам смен захвата в минуту.
+        public var lockFlipsPerMinute: Double
+        /// Потери захвата по причинам, сумма по файлам.
+        public var unlocks: [UnlockReason: Int]
     }
 
     public static let wrongLockMinFlashes = 10
@@ -274,6 +310,7 @@ public enum BeatEvaluation {
         func sum(_ value: (FileScore) -> Int) -> Int { scores.reduce(0) { $0 + value($1) } }
         func ratio(_ matched: Int, _ total: Int) -> Double? { total == 0 ? nil : Double(matched) / Double(total) }
         func offset(_ total: Double, _ count: Int) -> Double? { count == 0 ? nil : total / Double(count) }
+        let afterLock = scores.compactMap(\.longestDarkBeatsAfterLock).map { Double($0) }
         return Summary(
             name: name, files: scores.count, lockedFiles: scores.filter { $0.lockedPrecision != nil }.count,
             lockedPrecision: optionalMean(scores.map(\.lockedPrecision)),
@@ -287,7 +324,14 @@ public enum BeatEvaluation {
             cmlt: mean(scores.map(\.cmlt)), amlt: mean(scores.map(\.amlt)),
             lockedCoverage: mean(scores.map(\.lockedCoverage)),
             wrongLockFiles: scores.filter(isWrongLock).count,
-            wrongLockFlashes: scores.filter(isWrongLock).reduce(0) { $0 + $1.lockedFlashCount - $1.lockedMatched }
+            wrongLockFlashes: scores.filter(isWrongLock).reduce(0) { $0 + $1.lockedFlashCount - $1.lockedMatched },
+            darkRunMedian: BeatMetrics.percentile(scores.map { Double($0.longestDarkBeats) }, 0.5) ?? 0,
+            darkRunP90: BeatMetrics.percentile(scores.map { Double($0.longestDarkBeats) }, 0.9) ?? 0,
+            darkRunAfterLockMedian: BeatMetrics.percentile(afterLock, 0.5) ?? 0,
+            darkRunAfterLockP90: BeatMetrics.percentile(afterLock, 0.9) ?? 0,
+            darkAfterLockFiles: afterLock.count,
+            lockFlipsPerMinute: mean(scores.map(\.lockFlipsPerMinute)),
+            unlocks: scores.reduce(into: [:]) { total, score in total.merge(score.unlocks, uniquingKeysWith: +) }
         )
     }
 
@@ -329,6 +373,10 @@ public enum BeatEvaluation {
         "wrongLock = files with >= 10 locked flashes and locked precision < 0.5 (locked mostly off the beat); wrongLockFl = their locked flashes that miss",
         "CMLt omits mir_eval's previous-beat-also-correct condition, so it is more lenient than mir_eval and not comparable to published numbers",
         "flashes lead the beat by design (BeatGlow.lead 15 ms): a negative meanOffset is expected",
+        "recall = mean over files of annotated beats matched one-to-one by a flash (beat coverage)",
+        "dark beat = annotated beat with no flash (rise above 0.2, locked or not) within the window; dark50 / dark90 = median / 90th percentile (nearest rank) over files of the longest run of dark beats in a file",
+        "darkL50 / darkL90 = the same over beats heard after the file's first lock only (no cold start), over files that locked (darkAfterLockFiles in JSON); locking fewer files drops them from it, read with recall and lockedCov",
+        "flips/min = lock changes (gained or lost) per minute, mean over files; unlocks t/p/m = lock losses by tempo switch / phase jump / misses, summed over files (reset never happens offline)",
     ]
 
     private static func fraction(_ value: Double?) -> String {
@@ -349,7 +397,8 @@ public enum BeatEvaluation {
         var lines = [title]
         let heads = [
             "files", "lockedFiles", "LPpool", "lockedPrec", "prec", "unlockedPrec", "F", "meanOff", "offLocked",
-            "offUnlocked", "AMLt", "CMLt", "lockedCov", "wrongLock", "wrongLockFl",
+            "offUnlocked", "AMLt", "CMLt", "lockedCov", "wrongLock", "wrongLockFl", "recall", "dark50", "dark90",
+            "darkL50", "darkL90", "flips/min", "unlocks t/p/m",
         ]
         lines.append(pad("group", width) + "  " + heads.map { right($0, max($0.count, 7)) }.joined(separator: " "))
         for row in summaries {
@@ -358,6 +407,10 @@ public enum BeatEvaluation {
                 fraction(row.precisionPooled), fraction(row.unlockedPrecisionPooled), fraction(row.f), milliseconds(row.meanOffsetMs),
                 milliseconds(row.meanOffsetLockedMs), milliseconds(row.meanOffsetUnlockedMs), fraction(row.amlt),
                 fraction(row.cmlt), fraction(row.lockedCoverage), String(row.wrongLockFiles), String(row.wrongLockFlashes),
+                fraction(row.recall), String(format: "%.0f", row.darkRunMedian), String(format: "%.0f", row.darkRunP90),
+                row.darkAfterLockFiles == 0 ? "-" : String(format: "%.0f", row.darkRunAfterLockMedian),
+                row.darkAfterLockFiles == 0 ? "-" : String(format: "%.0f", row.darkRunAfterLockP90),
+                String(format: "%.2f", row.lockFlipsPerMinute), unlockCounts(row.unlocks),
             ]
             lines.append(
                 pad(row.name, width) + "  "
@@ -367,19 +420,26 @@ public enum BeatEvaluation {
         return lines.joined(separator: "\n")
     }
 
+    /// Потери захвата `t/p/m`: смена темпа, скачок фазы, промахи.
+    private static func unlockCounts(_ unlocks: [UnlockReason: Int]) -> String {
+        [UnlockReason.tempoSwitch, .phaseJump, .misses].map { String(unlocks[$0] ?? 0) }.joined(separator: "/")
+    }
+
     private static func milliseconds(_ value: Double?) -> String {
         value.map { String(format: "%+.1f", $0) } ?? "-"
     }
 
     /// Таблица по файлам.
     public static func perFileTable(_ scores: [FileScore]) -> String {
-        let heads = ["lockedPrec", "F", "meanOff ms", "AMLt", "CMLt", "lockedCov"]
+        let heads = ["lockedPrec", "F", "meanOff ms", "AMLt", "CMLt", "lockedCov", "recall", "dark", "darkL", "flips/min", "t/p/m"]
         var lines = [pad("file", 26) + " " + pad("group", 10) + " " + heads.map { right($0, 10) }.joined(separator: " ")]
         for score in scores {
             let cells = [
                 fraction(score.lockedPrecision), fraction(score.f),
                 score.meanOffsetMs.map { String(format: "%+.1f", $0) } ?? "-", fraction(score.amlt),
-                fraction(score.cmlt), fraction(score.lockedCoverage),
+                fraction(score.cmlt), fraction(score.lockedCoverage), fraction(score.recall), String(score.longestDarkBeats),
+                score.longestDarkBeatsAfterLock.map(String.init) ?? "-",
+                String(format: "%.2f", score.lockFlipsPerMinute), unlockCounts(score.unlocks),
             ]
             let name = (score.path as NSString).lastPathComponent
             lines.append(pad(name, 26) + " " + pad(score.group, 10) + " " + cells.map { right($0, 10) }.joined(separator: " "))

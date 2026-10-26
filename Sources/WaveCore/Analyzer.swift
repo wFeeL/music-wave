@@ -13,6 +13,10 @@ public struct WaveFrame: Sendable, Equatable {
     public var level: Float
     /// Максимальный уровень полосы в dBFS до нормализации.
     public var rawLevelDB: Float
+    /// Энергия бочки для мягкого пульса (`BeatTracker.ambientEnergy`, `AmbientInfo.energy`) на момент
+    /// кадра: анализ кладет ее в кадр, чтобы она шла по слышимой оси вместе с уровнями
+    /// (`BeatGlow.ambient(at:info:frame:)`). 0 без трекера.
+    public var kickEnergy: Float
 
     public static let silent = WaveFrame(
         bands: [Float](repeating: 0, count: BandMapper.bandCount),
@@ -22,12 +26,13 @@ public struct WaveFrame: Sendable, Equatable {
         rawLevelDB: -120
     )
 
-    public init(bands: [Float], layers: [Float], beat: Float, level: Float, rawLevelDB: Float) {
+    public init(bands: [Float], layers: [Float], beat: Float, level: Float, rawLevelDB: Float, kickEnergy: Float = 0) {
         self.bands = bands
         self.layers = layers
         self.beat = beat
         self.level = level
         self.rawLevelDB = rawLevelDB
+        self.kickEnergy = kickEnergy
     }
 
     /// Линейное смешение всех чисел кадра: `fraction` 0 дает `from`, 1 дает `to`, значения вне
@@ -49,7 +54,8 @@ public struct WaveFrame: Sendable, Equatable {
             layers: mix(from.layers, to.layers),
             beat: mix(from.beat, to.beat),
             level: mix(from.level, to.level),
-            rawLevelDB: mix(from.rawLevelDB, to.rawLevelDB)
+            rawLevelDB: mix(from.rawLevelDB, to.rawLevelDB),
+            kickEnergy: mix(from.kickEnergy, to.kickEnergy)
         )
     }
 }

@@ -12,7 +12,13 @@ struct OfflineBeatChainTests {
     /// Прогон, записанный со старым `SyncHarness` до переноса цепочки в WaveCore (четыре на пол
     /// 120 BPM, 12 с, `seed` 3, фаза рендера 0.3): перенос не должен менять ни одной вспышки. Записан
     /// заново при настройке 1.1 (захват после пяти попаданий, смесь за долю, приглушенные онсеты без
-    /// захвата): вспышки те же, захват на 0.5 с позже, пик свечения от доли, а не от онсета.
+    /// захвата): вспышки те же, захват на 0.5 с позже, пик свечения от доли, а не от онсета. В B4 две
+    /// вспышки перед захватом (около 4.0 и 4.5 с) идут от предсказанных долей, а не от онсетов: вес
+    /// показа растет по уверенности еще до захвата. Они на 50 мс раньше, с тем же опережением доли, что
+    /// и вспышки с захватом; остальное без изменений. С `weightHits` 3 вес растет на долю позже: доля
+    /// около 4.0 с светится предсказанной с яркостью 0.26, которая набиралась уже во время атаки (рост
+    /// за кадр меньше 0.2, вспышкой не считается), а онсет бочки на ней отброшен (вес выше 0.5), так что
+    /// вспышек 24.
     @Test func matchesRecordedHarnessRun() async {
         let result = await runOffCooperativePool {
             let scene = Self.scene()
@@ -22,7 +28,7 @@ struct OfflineBeatChainTests {
         }
         let recorded = [
             0.555000000000291, 1.055000000000291, 1.555000000000291, 2.055000000000291, 2.555000000000291,
-            3.055000000000291, 3.555000000000291, 4.055000000000291, 4.555000000000291, 5.005000000000109,
+            3.055000000000291, 3.555000000000291, 4.505000000000109, 5.005000000000109,
             5.505000000000109, 6.005000000000109, 6.505000000000109, 7.005000000000109, 7.505000000000109,
             8.00500000000011, 8.50500000000011, 9.00500000000011, 9.50500000000011, 10.00500000000011,
             10.50500000000011, 11.00500000000011, 11.50500000000011, 12.00500000000011, 12.50500000000011,
@@ -87,6 +93,90 @@ struct OfflineBeatChainTests {
             #expect(phased.kickOnsets == single.kickOnsets)
             #expect(phased.predictedTimes == single.predictedTimes)
         }
+    }
+
+    /// Замедление 80 -> 72 BPM за 30 с с громкой слабой долей (малый на «и» с громкостью 0.1), как в
+    /// журнале ритма 2 владельца: после первого захвата свечение не темнеет дольше 2 долей подряд. На
+    /// 1.1 захват верный (около 6 с), но на 24.3 с оценка темпа уходит в удвоенный (около 145 BPM),
+    /// захват теряется по смене темпа, самая длинная темная серия 4 доли, после 26 с захват на 147 BPM,
+    /// точность вспышек с захватом ниже 0.95. При громкости 0.12 и выше захват с самого начала на
+    /// удвоенном темпе и вспышки на «и»; 0.06 и тише без смены темпа; без слабой доли все три проверки
+    /// проходят и на 1.1. Защита октавы при дрейфе (B2) этот случай не меняет: удвоенные оценки
+    /// 148-150 BPM лежат в 1.3 % от 2 × 75.1 и держатся 3.5 с, так что 12 из 16 набираются по правилу
+    /// кратных; захват сбрасывает сама смена темпа. B3 этого не меняет нарочно: удвоение темпа по-прежнему
+    /// сбрасывает захват (перенос сразу показывал удвоенную сетку, вспышки шли на «и», темная серия 6
+    /// долей, точность с захватом 0.73), так что после B3 числа те же, что в 1.1 (4 доли, захват на
+    /// 147 BPM с 26.3 с, точность 0.81). Нужен выбор октавы для показа или строже правило кратных.
+    /// После B4 темная серия 6 долей: на замедлении сетка с захватом уходит раньше долей (с -35 до
+    /// -70 мс к 24 с, период оценки отстает от темпа), после смены на удвоенный темп вес держит
+    /// предсказанные доли вместо поздних онсетов бочки, и они ложатся чуть дальше окна ±70 мс.
+    @Test(.disabled("needs the octave display rule (B8): exact double at 24.3 s; after B4 the early ramp grid leaves 6 dark beats"))
+    func ritardandoKeepsGlow() async throws {
+        let (scene, result) = await runOffCooperativePool {
+            let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)
+            return (scene, OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: .init()))
+        }
+        let lock = try #require(result.lockTime)
+        // Последние полсекунды не считаются: анализ кончился, расписание еще предсказывает доли.
+        let beats = result.audible(scene.beats.filter { $0 >= lock && $0 <= 29.5 })
+        let dark = BeatMetrics.longestDarkRun(
+            detections: result.flashes.map(\.time), annotations: beats, window: BeatEvaluation.Options().window
+        )
+        #expect(dark <= 2, "longest dark run after the first lock at \(lock) s: \(dark) beats")
+        // Захват на удвоенном темпе светил бы и на каждой доле, и на каждом «и» (темных долей нет),
+        // поэтому темп каждой публикации с захватом в пределах 10 % от темпа сцены в этот момент, а
+        // вспышки с захватом почти все в долях.
+        func rampBPM(_ time: Double) -> Double { 80 + (72 - 80) * min(max(time / 30, 0), 1) }
+        let offTempo = result.states.filter { state in
+            guard state.locked, state.time <= 29.5 else { return false }
+            guard let bpm = state.bpm else { return true }
+            return abs(bpm / rampBPM(state.time) - 1) > 0.1
+        }
+        let offTempoCount = offTempo.count
+        #expect(
+            offTempoCount == 0,
+            "locked states off the ramp tempo, first at \(offTempo.first?.time ?? 0) s: \(offTempo.first?.bpm ?? 0) BPM"
+        )
+        let locked = result.flashes.filter { $0.locked && $0.time <= 29.5 + result.outputLatency }.map(\.time)
+        let precision = BeatMetrics.fMeasure(
+            detections: locked, annotations: result.audible(scene.beats), window: BeatEvaluation.Options().window
+        ).precision
+        #expect(locked.count >= 20 && precision >= 0.95, "\(locked.count) locked flashes, precision \(precision)")
+    }
+
+    /// Энергия мягкого пульса идет по слышимой оси, как уровни волн: кадр шага публикуется на центр
+    /// окна плюс задержка вывода, рендер берет кадр на момент показа. С задержкой AirPods (210 мс) и с
+    /// наибольшей ручной (500 мс) подъем энергии на каждой бочке (половина пути от фона до пика)
+    /// приходится на слышимый момент бочки с точностью до шага анализа, а пик (окно Ханна 43 мс и
+    /// атака огибающей 10 мс) не дальше 40 мс после нее и выше 1.4. Энергия из расписания опережала бы бочку
+    /// почти на всю задержку вывода. Рендер 1000 Гц, чтобы видеть шаг анализа.
+    @Test(arguments: [0.21, 0.5])
+    func ambientEnergyLandsOnTheAudibleKick(latency: Double) async {
+        let (scene, result) = await runOffCooperativePool {
+            let scene = Self.scene()
+            var config = OfflineBeatChain.Config(seed: 3)
+            config.softPulse = true
+            config.recordAmbientTrace = true
+            config.renderRate = 1000
+            config.outputLatency = latency
+            return (scene, OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config))
+        }
+        let hop = 1 / AnalysisConfig(sampleRate: scene.sampleRate).framesPerSecond
+        var checked = 0
+        for kick in scene.kicks where kick > 3 && kick < 11 {
+            let audible = kick + latency
+            let around = result.ambientTrace.filter { $0.time > audible - 0.2 && $0.time < audible + 0.2 }
+            guard let peak = around.max(by: { $0.energy < $1.energy }) else { continue }
+            let floor = around.filter { $0.time < audible - 0.1 }.map(\.energy).min() ?? 0
+            let rise = around.first { $0.time <= peak.time && $0.energy >= floor + (peak.energy - floor) / 2 }
+            let riseOffset = (rise?.time ?? -.infinity) - audible
+            #expect(abs(riseOffset) <= hop, "kick \(kick): energy rise \(riseOffset * 1000) ms from the audible kick")
+            #expect(peak.time >= audible && peak.time - audible <= 0.04, "kick \(kick): peak \((peak.time - audible) * 1000) ms")
+            // Ясный горб энергии: среднее идет за огибающей, поэтому пик 1.49-2.0, а не около 2.
+            #expect(peak.energy > 1.4)
+            checked += 1
+        }
+        #expect(checked >= 15)
     }
 
     @Test func silenceNeverFlashesOrLocks() {

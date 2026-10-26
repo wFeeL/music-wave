@@ -401,6 +401,10 @@ struct SettingsView: View {
     private var islandRows: some View {
         let settings = model.settings
         Toggle("Вздох на битах", isOn: Binding(get: { settings.beatPulse }, set: { settings.beatPulse = $0 }))
+        Toggle(isOn: Binding(get: { settings.softPulse }, set: { settings.softPulse = $0 })) {
+            Text("Мягкий пульс")
+            Text("Слабое свечение в такт, когда ритм не ясен")
+        }
         SettingsSliderRow(
             "Скрывать через",
             value: Binding(get: { settings.hideDelay }, set: { settings.hideDelay = $0.rounded() }),

@@ -51,8 +51,9 @@ public struct TempoEstimator: Sendable {
     public static let historySeconds = 6.0
     public static let updateInterval = 0.25
     public static let minimumHistory = 2.0
-    /// Сколько из последних `relatedWindow` оценок должны совпасть с кандидатом (в пределах 4 %), чтобы
-    /// сменить установившийся темп на кратный ему (2, ½, 3/2, 2/3, 4/3, 3/4 в пределах 4 %).
+    /// Сколько из последних `relatedWindow` оценок должны совпасть с кандидатом (октава до 6 %, 3:2 и
+    /// 4:3 до 4 %), чтобы сменить установившийся темп на кратный ему (2, ½, 3/2, 2/3, 4/3, 3/4 в
+    /// пределах 4 %, октава с поправкой на дрейф до 10 %).
     public static let relatedSwitchUpdates = 12
     public static let relatedWindow = 16
     /// Через столько секунд потока после первой оценки темп считается установившимся.
@@ -64,9 +65,14 @@ public struct TempoEstimator: Sendable {
     /// Далекая некратная оценка принимается, когда следующая совпадает с ней в пределах этой доли.
     static let switchTolerance = 0.03
     static let harmonics = 4
-    /// Кратные отношения, переход на которые сдерживается; допуск к ним и к согласию с кандидатом.
+    /// Кратные отношения, переход на которые сдерживается, и допуск к ним.
     static let relatedRatios: [Double] = [2, 0.5, 1.5, 2.0 / 3, 4.0 / 3, 0.75]
     static let relatedTolerance = 0.04
+    /// Насколько оценка рядом с октавой (2 или ½) может уйти от точной октавы текущего периода, если
+    /// она продолжает уже принятые кратные оценки: темп мог уплыть, пока период держался. Только для
+    /// октав: соседние 4/3 и 3/2 отстоят друг от друга на 12.5 %, окно 10 % вокруг них накрыло бы весь
+    /// диапазон 1.2-1.65, и обычная смена темпа (100 -> 140, 90 -> 128) ждала бы правила кратных.
+    static let octaveDriftTolerance = 0.10
     /// Отношения, спор которых решает функция бочки, и насколько соперник может уступать лучшему.
     static let kickTieRatios: [Double] = [1.5, 2.0 / 3, 4.0 / 3, 0.75]
     static let kickTieMargin = 0.15
@@ -84,8 +90,14 @@ public struct TempoEstimator: Sendable {
     public private(set) var period: Double?
     /// Прошлая далекая оценка (для некратной смены темпа по двум согласным).
     private var previousFar: Double?
+    /// `previousFar` была признана кратной: с ней не образует пару оценка в окне той же октавы.
+    private var previousFarRelated = false
     /// Кольцо последних `relatedWindow` оценок после первой.
     private var recent: [Double]
+    /// Оценка в том же слоте `recent` была признана кратной текущему периоду.
+    private var recentRelated: [Bool]
+    /// Рабочий буфер медианы кратных оценок, `relatedWindow` мест.
+    private var medianScratch: [Double]
     private var recentCount = 0
     private var recentIndex = 0
     /// Шагов функции онсетов с `reset` и номер шага первой оценки.
@@ -128,6 +140,8 @@ public struct TempoEstimator: Sendable {
         history = [Float](repeating: 0, count: capacity)
         kickHistory = history
         recent = [Double](repeating: 0, count: Self.relatedWindow)
+        recentRelated = [Bool](repeating: false, count: Self.relatedWindow)
+        medianScratch = recent
         let rate = framesPerSecond / 2
         decimatedRate = rate
         halfLagMin = max(Int((2 * rate * 60 / Self.maxBPM).rounded()), 4)
@@ -172,9 +186,13 @@ public struct TempoEstimator: Sendable {
     /// далекое некратное принимается, когда следующее совпадает с ним до 3 %. Когда темп установился
     /// (`establishedAfter` секунд потока после первой оценки), кратное ему значение (`relatedRatios`)
     /// принимается, только когда `relatedSwitchUpdates` из последних `relatedWindow` оценок совпадают с
-    /// ним до 4 %: переброс октавы или 3:2 сбрасывает захват трекера. Оценки, которые еще идут за
-    /// старым темпом, счет не обнуляют. Значение не больше нуля или не конечное пропускается:
-    /// возвращается текущий период (без него 0.5 с) без переключения.
+    /// ним (октава до 6 %, `followTolerance`: кандидат плывет вместе с музыкой так же, как период
+    /// следует за своими оценками; 3:2 и 4:3 до 4 %): переброс октавы или 3:2 сбрасывает захват. Кратной считается и
+    /// оценка рядом с октавой, ушедшая от нее до 10 % вместе с уже принятыми кратными оценками
+    /// (`continuesDriftingOctave`): иначе при замедлении удвоенная оценка выходила из допуска 4 % и
+    /// переключала темп по правилу двух далеких. Оценки, которые еще идут за старым темпом, счет не
+    /// обнуляют. Значение не больше нуля или не конечное пропускается: возвращается текущий период
+    /// (без него 0.5 с) без переключения.
     public mutating func accept(period estimate: Double) -> TempoEstimate {
         guard estimate.isFinite, estimate > 0 else {
             return TempoEstimate(period: period ?? 60 / Self.priorBPM, switched: false)
@@ -185,7 +203,9 @@ public struct TempoEstimator: Sendable {
             clearRecent()
             return TempoEstimate(period: estimate, switched: true)
         }
-        recent[recentIndex] = estimate
+        let slot = recentIndex
+        recent[slot] = estimate
+        recentRelated[slot] = false
         recentIndex = (recentIndex + 1) % recent.count
         recentCount = min(recentCount + 1, recent.count)
 
@@ -193,12 +213,17 @@ public struct TempoEstimator: Sendable {
             let moved = current + Self.followRate * (estimate - current)
             period = moved
             previousFar = nil
+            previousFarRelated = false
             return TempoEstimate(period: moved, switched: false)
         }
-        if isEstablished, Self.isRelated(estimate, to: current) {
+        if isEstablished, Self.isRelated(estimate, to: current) || continuesDriftingOctave(estimate, current: current) {
+            recentRelated[slot] = true
             previousFar = estimate
+            previousFarRelated = true
+            // Октава плывет вместе с музыкой: согласие до `followTolerance`; 3:2 и 4:3 до 4 %.
+            let agreement = Self.isNearOctave(estimate, to: current) ? Self.followTolerance : Self.relatedTolerance
             var agreeing = 0
-            for index in 0..<recentCount where abs(recent[index] - estimate) / estimate < Self.relatedTolerance {
+            for index in 0..<recentCount where abs(recent[index] - estimate) / estimate < agreement {
                 agreeing += 1
             }
             guard agreeing >= Self.relatedSwitchUpdates else {
@@ -210,6 +235,7 @@ public struct TempoEstimator: Sendable {
             return switchTo(estimate)
         }
         previousFar = estimate
+        previousFarRelated = false
         return TempoEstimate(period: current, switched: false)
     }
 
@@ -239,15 +265,55 @@ public struct TempoEstimator: Sendable {
         return TempoEstimate(period: estimate, switched: true)
     }
 
+    /// Оценка в пределах `octaveDriftTolerance` от октавы текущего периода, которая продолжает ряд
+    /// кратных: идет сразу за кратной оценкой или совпадает (до `followTolerance`, как период следует
+    /// за своими оценками) с медианой кратных оценок той же октавы в окне `recent`. Первое условие
+    /// нужно при быстром дрейфе, когда медиана отстает: иначе такая оценка шла бы в правило двух
+    /// далеких и образовала пару с прошлой кратной (158, 158, 158, 158, 151, 148.5 при 78.5 BPM
+    /// переключали на 148.5). Ряд кратных начинается только с оценки в пределах `relatedTolerance`,
+    /// поэтому скачок прямо на 1.9× (80 -> 150 BPM, 6.25 % от удвоения) остается далеким и
+    /// принимается по двум согласным. Журнал 2 владельца: 157.9 при 78.8 кратная, затем 149.0 (5.5 %
+    /// от удвоения) и 150.7 ее продолжают, и темп не уходит на 150.
+    private mutating func continuesDriftingOctave(_ estimate: Double, current: Double) -> Bool {
+        guard Self.isNearOctave(estimate, to: current) else { return false }
+        if previousFarRelated { return true }
+        let target = (estimate > current ? 2 : 0.5) * current
+        var count = 0
+        for index in 0..<recentCount where recentRelated[index] {
+            let value = recent[index]
+            guard abs(value / target - 1) < Self.octaveDriftTolerance else { continue }
+            // Вставкой по возрастанию: не больше `relatedWindow` значений раз в `updateInterval`.
+            var position = count
+            while position > 0, medianScratch[position - 1] > value {
+                medianScratch[position] = medianScratch[position - 1]
+                position -= 1
+            }
+            medianScratch[position] = value
+            count += 1
+        }
+        guard count > 0 else { return false }
+        let median = count % 2 == 1
+            ? medianScratch[count / 2]
+            : 0.5 * (medianScratch[count / 2 - 1] + medianScratch[count / 2])
+        return abs(estimate - median) / median < Self.followTolerance
+    }
+
     private mutating func clearRecent() {
         recentCount = 0
         recentIndex = 0
         previousFar = nil
+        previousFarRelated = false
     }
 
     private var isEstablished: Bool {
         guard let firstEstimateFrame else { return false }
         return Double(framesAppended - firstEstimateFrame) / framesPerSecond >= Self.establishedAfter
+    }
+
+    /// Оценка в пределах `octaveDriftTolerance` от удвоенного или половинного текущего периода.
+    private static func isNearOctave(_ estimate: Double, to current: Double) -> Bool {
+        let octave: Double = estimate > current ? 2 : 0.5
+        return abs(estimate / (octave * current) - 1) < octaveDriftTolerance
     }
 
     private static func isRelated(_ estimate: Double, to current: Double) -> Bool {

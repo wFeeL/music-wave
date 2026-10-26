@@ -121,6 +121,23 @@ struct IslandPreviewTests {
         #expect(livelyPulse > 0)
     }
 
+    /// Мягкий пульс предпросмотра берется из демо; при выключенном «Мягком пульсе» и при
+    /// «Уменьшении движения» его нет.
+    @Test func previewSoftPulseFollowsTheSetting() {
+        let cache = PreviewTimelineCache()
+        let base = Self.timeline(seconds: 2) { _ in (level: 0.6, glow: 0, pulse: 0) }
+        cache.timeline = DemoTimeline(moments: base.moments.map {
+            DemoMoment(time: $0.time, frame: $0.frame, motion: $0.motion, glow: $0.glow, pulse: $0.pulse, ambient: 0.1)
+        })
+        let palette = PaletteExtractor.fallback
+        let on = PreviewPlayer(cache: cache).visuals(now: 100, palette: palette, reduceMotion: false)
+        #expect(on.ambient == 0.1)
+        let off = PreviewPlayer(cache: cache).visuals(now: 100, palette: palette, reduceMotion: false, softPulse: false)
+        #expect(off.ambient == 0)
+        let calm = PreviewPlayer(cache: cache).visuals(now: 100, palette: palette, reduceMotion: true)
+        #expect(calm.ambient == 0)
+    }
+
     /// Шов круга: демо прыгает с уровня 1 на 0, а предпросмотр нет. Уровни идут через пружины,
     /// фазы волн двигаются своим ходом (в демо они нарочно бегут всемеро быстрее, и прыжок к ним
     /// был бы виден).

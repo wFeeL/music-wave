@@ -383,9 +383,14 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                     )
                 }
             }
+            // Энергия мягкого пульса идет в кадр шага: кадр стоит на слышимой оси (центр окна плюс
+            // задержка вывода и сдвиг), и рендер берет ее на момент показа вместе с уровнями. В простое
+            // трекер стоит, энергии нет.
+            var frame = result.frame
+            frame.kickEnergy = idle ? 0 : tracker.ambientEnergy
             let time = centre + offset
-            store.publish(result.frame, at: time)
-            observer?(result.frame, time)
+            store.publish(frame, at: time)
+            observer?(frame, time)
             processed += 1
             lastEnd = hopEnd
             if idle { break }

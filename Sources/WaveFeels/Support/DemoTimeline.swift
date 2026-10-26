@@ -11,14 +11,16 @@ nonisolated struct DemoMoment: Sendable {
     let glow: Float
     /// «Вздох» 0...1.
     let pulse: Float
+    /// Мягкий пульс 0...`BeatGlow.ambientCeiling` (`BeatGlow.ambient`).
+    var ambient: Float = 0
 }
 
 /// Прогон демо по шагам через `StreamAnalyzer` и `BeatTracker` вне реального времени, момент
 /// каждые 1/60 с: последний кадр анализа, свечение доли по расписанию трекера на этот момент
-/// (ось потока, без задержек вывода и показа) и «вздох» как у острова: при захвате ритма пружина
-/// со свечением на 50 мс раньше, без захвата само свечение. После `mutedFrom` секунд звук
-/// обнуляется. Из него берут кадры снимки (`SnapshotRenderer`) и живой предпросмотр во вкладке
-/// «Вид» (`PreviewPlayer`).
+/// (ось потока, без задержек вывода и показа), «вздох» как у острова (по весу показа между
+/// пружиной со свечением на 50 мс раньше и самим свечением, `BeatPulse.breath`) и мягкий пульс
+/// (`BeatGlow.ambient`). После `mutedFrom` секунд звук обнуляется. Из него берут кадры снимки
+/// (`SnapshotRenderer`) и живой предпросмотр во вкладке «Вид» (`PreviewPlayer`).
 nonisolated struct DemoTimeline: Sendable {
     static let step = 1.0 / 60
 
@@ -60,6 +62,7 @@ nonisolated struct DemoTimeline: Sendable {
                 }
                 tracker.process(result)
                 frame = result.frame
+                frame.kickEnergy = tracker.ambientEnergy
                 nextEnd += hop
             }
             let schedule = tracker.schedule
@@ -68,7 +71,9 @@ nonisolated struct DemoTimeline: Sendable {
             let spring = pulse.step(beat: early, dt: Self.step)
             motion.advance(layers: frame.layers, dt: Self.step)
             moments.append(DemoMoment(
-                time: time, frame: frame, motion: motion, glow: glow, pulse: schedule.locked ? spring : glow
+                time: time, frame: frame, motion: motion, glow: glow,
+                pulse: BeatPulse.breath(spring: spring, glow: glow, weight: schedule.weight),
+                ambient: BeatGlow.ambient(at: time, info: schedule.ambient, frame: frame)
             ))
         }
         self.moments = moments

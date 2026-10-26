@@ -65,6 +65,39 @@ struct BeatGlowTests {
         #expect(abs(lockedPeak - 0.9) < 1e-6)
     }
 
+    /// Приглушение онсета бочки идет по весу показа, а не по захвату: `reactiveScale + (1 − reactiveScale)
+    /// × weight`. Захват без веса (вес 0) приглушает, вес без захвата нет. Изменяемый вариант берет вес
+    /// первого кадра, на котором онсет виден, и дальше его не меняет.
+    @Test func reactiveScaleFollowsWeight() {
+        let onset = GlowEvent(id: BeatTracker.onsetIDFlag | 5, time: 10, amplitude: 0.8, predicted: false)
+        let peakTime = 10.0 - BeatGlow.lead - Self.refresh / 2
+        func schedule(locked: Bool, weight: Float) -> BeatSchedule {
+            BeatSchedule(events: [onset], bpm: 120, period: 0.5, confidence: 0.5, locked: locked, weight: weight)
+        }
+        let half = BeatGlow.value(at: peakTime, schedule: schedule(locked: false, weight: 0.5), refreshPeriod: Self.refresh)
+        #expect(abs(half - 0.6) < 1e-6)
+        let lockedNoWeight = BeatGlow.value(at: peakTime, schedule: schedule(locked: true, weight: 0), refreshPeriod: Self.refresh)
+        #expect(abs(lockedNoWeight - 0.4) < 1e-6)
+        let full = BeatGlow.value(at: peakTime, schedule: schedule(locked: false, weight: 1), refreshPeriod: Self.refresh)
+        #expect(abs(full - 0.8) < 1e-6)
+
+        var glow = BeatGlow()
+        #expect(glow.value(at: peakTime - 0.1, schedule: schedule(locked: false, weight: 0.2), refreshPeriod: Self.refresh) == 0)
+        let peak = glow.value(at: peakTime, schedule: schedule(locked: true, weight: 1), refreshPeriod: Self.refresh)
+        #expect(abs(peak - 0.8 * 0.6) < 1e-6)
+    }
+
+    /// Без явного веса расписание берет его из захвата (1 с захватом, 0 без), чтобы старые места
+    /// создания расписания показывали как раньше; `shifted` вес не трогает.
+    @Test func weightDefaultsFromLock() {
+        #expect(BeatSchedule(events: [], bpm: nil, period: nil, confidence: 1, locked: true).weight == 1)
+        #expect(BeatSchedule(events: [], bpm: nil, period: nil, confidence: 1, locked: false).weight == 0)
+        #expect(BeatSchedule.empty.weight == 0)
+        let weighted = BeatSchedule(events: [], bpm: 120, period: 0.5, confidence: 0.4, locked: false, weight: 0.3)
+        #expect(weighted.weight == 0.3)
+        #expect(weighted.shifted(by: 0.02).weight == 0.3)
+    }
+
     @Test func lateEventStartsBright() {
         let event = Self.event(id: 7, time: 10, amplitude: 0.8)
         let schedule = Self.schedule([event])
@@ -172,6 +205,143 @@ struct BeatGlowTests {
         #expect(shifted.bpm == schedule.bpm && shifted.period == schedule.period)
         #expect(shifted.confidence == schedule.confidence && shifted.locked == schedule.locked)
         #expect(BeatSchedule.empty.events.isEmpty && BeatSchedule.empty.period == nil && !BeatSchedule.empty.locked)
+    }
+
+    // MARK: Мягкий пульс
+
+    /// Горб на доле: при энергии 0 пульс равен `0.08 × confidence × ((1 + cos 2πφ) / 2)^6`, максимум на
+    /// доле сетки (t = 1.5 при anchor 1.0 и периоде 0.5), ноль посередине между долями (t = 1.75).
+    @Test func ambientPeaksOnBeat() {
+        let info = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 1, energy: 0)
+        let peak = BeatGlow.ambient(at: 1.5, info: info)
+        #expect(abs(peak - 0.08) < 1e-6)
+        #expect(BeatGlow.ambient(at: 1.75, info: info) < 1e-6)
+        var t = 1.25
+        while t <= 1.75 {
+            #expect(BeatGlow.ambient(at: t, info: info) <= peak + 1e-7, "t \(t)")
+            t += 0.001
+        }
+        // Горб узкий: через 0.15 периода от доли меньше трети пика.
+        #expect(BeatGlow.ambient(at: 1.575, info: info) < peak / 3)
+        // Тот же горб на каждой доле сетки, в том числе до `anchor`.
+        #expect(abs(BeatGlow.ambient(at: 0.5, info: info) - peak) < 1e-6)
+        #expect(abs(BeatGlow.ambient(at: 3.0, info: info) - peak) < 1e-6)
+    }
+
+    /// Любые входы, в том числе нечисловые и вне диапазонов, дают пульс в 0...0.18, ниже порога
+    /// вспышки `OfflineBeatChain.eventRise`.
+    @Test func ambientStaysBelowFlashThreshold() {
+        #expect(BeatGlow.ambientCeiling == 0.18)
+        #expect(BeatGlow.ambientCeiling < OfflineBeatChain.eventRise)
+        let energies: [Float] = [-1, 0, 1, 1.3, 1.6, 2, 100, .infinity, .nan]
+        let confidences: [Float] = [-1, 0, 0.5, 1, 2, .infinity, .nan]
+        let anchors: [Double] = [0, 1.0, 7_345.25, .nan, .infinity]
+        let periods: [Double] = [0.5, 0.33, 0, -0.5, .nan, .infinity]
+        let times: [Double] = [0, 0.1, 1.0, 1.5, 7_345.75, .nan, -.infinity]
+        var highest: Float = 0
+        for energy in energies {
+            for confidence in confidences {
+                for anchor in anchors {
+                    for period in periods {
+                        let info = AmbientInfo(anchor: anchor, period: period, confidence: confidence, energy: energy)
+                        for time in times {
+                            let value = BeatGlow.ambient(at: time, info: info)
+                            #expect(value >= 0 && value <= 0.18, "\(info) at \(time): \(value)")
+                            highest = max(highest, value)
+                        }
+                    }
+                }
+            }
+        }
+        // Полная энергия на доле упирается в потолок, а не в 0.2.
+        #expect(highest == BeatGlow.ambientCeiling)
+        let full = AmbientInfo(anchor: 1, period: 0.5, confidence: 1, energy: 2)
+        #expect(BeatGlow.ambient(at: 1, info: full) == BeatGlow.ambientCeiling)
+    }
+
+    /// Без энергии и без уверенности пульса нет; энергия одна дает ровный слой по
+    /// `0.12 × smoothstep(1.2, 1.6, energy)` на любой фазе.
+    @Test func ambientFadesWithEnergyAndConfidence() {
+        let quiet = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0)
+        var t = 0.0
+        while t < 2 {
+            #expect(BeatGlow.ambient(at: t, info: quiet) == 0)
+            t += 0.01
+        }
+        #expect(BeatGlow.ambient(at: 1.5, info: nil) == 0)
+        let level = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
+        #expect(abs(BeatGlow.ambient(at: 1.5, info: level) - 0.12) < 1e-6)
+        #expect(abs(BeatGlow.ambient(at: 1.75, info: level) - 0.12) < 1e-6)
+        let half = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.4)
+        #expect(abs(BeatGlow.ambient(at: 1.6, info: half) - 0.06) < 1e-6)
+        let flat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.0)
+        #expect(BeatGlow.ambient(at: 1.5, info: flat) == 0)
+        // Нижний край 1.2: ровный шум с отношением до 1.2 слоя не дает.
+        #expect(BeatGlow.ambientEnergyLow == 1.2)
+        let swell = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.2)
+        #expect(BeatGlow.ambient(at: 1.5, info: swell) == 0)
+        // Уверенность вдвое меньше: горб вдвое ниже.
+        let unsure = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0.5, energy: 0)
+        #expect(abs(BeatGlow.ambient(at: 1.5, info: unsure) - 0.04) < 1e-6)
+        // Без темпа (период 0) горба нет, энергия остается.
+        let noTempo = AmbientInfo(anchor: 0, period: 0, confidence: 1, energy: 1.6)
+        #expect(abs(BeatGlow.ambient(at: 1.5, info: noTempo) - 0.12) < 1e-6)
+    }
+
+    /// Пульс отдельный канал: в `BeatGlow.value` не входит, и офлайн-цепочка с пульсом дает те же
+    /// вспышки, что без него, хотя сам пульс на синтетике есть.
+    @Test(.enabled(if: TestPlatform.isLinux))
+    func ambientNotInFlashChannel() async {
+        let (plain, pulsed) = await runOffCooperativePool {
+            let scene = Drums.fourOnFloor(bpm: 120, seconds: 12, hats: .eighths)
+            var config = OfflineBeatChain.Config(seed: 3)
+            config.renderPhase = 0.3
+            let plain = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            config.softPulse = true
+            let pulsed = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            return (plain, pulsed)
+        }
+        #expect(plain.flashes.count > 10)
+        #expect(pulsed.flashes == plain.flashes)
+        #expect(pulsed.peakGlow == plain.peakGlow)
+        #expect(plain.peakAmbient == 0 && plain.ambientFrames == 0)
+        #expect(pulsed.peakAmbient > 0.05 && pulsed.peakAmbient <= BeatGlow.ambientCeiling)
+        #expect(pulsed.ambientFrames > 0 && pulsed.ambientFrames < pulsed.renderedFrames)
+        // Расписание с пульсом и то же без него светятся одинаково.
+        let schedule = BeatSchedule(
+            events: [GlowEvent(id: 1, time: 10, amplitude: 0.7, predicted: true)], bpm: 120, period: 0.5, confidence: 1,
+            locked: true, ambient: AmbientInfo(anchor: 10, period: 0.5, confidence: 1, energy: 2)
+        )
+        var bare = schedule
+        bare.ambient = nil
+        var t = 9.8
+        while t < 10.3 {
+            #expect(BeatGlow.value(at: t, schedule: schedule, refreshPeriod: Self.refresh) == BeatGlow.value(at: t, schedule: bare, refreshPeriod: Self.refresh))
+            t += 0.005
+        }
+    }
+
+    /// Рендер берет энергию из кадра на момент показа (`WaveFrame.kickEnergy`), а сетку и высоту горба
+    /// из расписания; энергия расписания не используется. Без расписания пульса нет.
+    @Test func ambientTakesEnergyFromTheFrame() {
+        let info = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
+        var frame = WaveFrame.silent
+        #expect(BeatGlow.ambient(at: 1.75, info: info, frame: frame) == 0)
+        frame.kickEnergy = 1.4
+        #expect(abs(BeatGlow.ambient(at: 1.75, info: info, frame: frame) - 0.06) < 1e-6)
+        #expect(BeatGlow.ambient(at: 1.75, info: nil, frame: frame) == 0)
+        let beat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 1, energy: 0)
+        #expect(abs(BeatGlow.ambient(at: 1.5, info: beat, frame: frame) - 0.14) < 1e-6)
+    }
+
+    /// `shifted` переносит сетку пульса на ту же ось, что и события; энергия и уверенность те же.
+    @Test func shiftMovesTheAmbientAnchor() {
+        let info = AmbientInfo(anchor: 2.0, period: 0.5, confidence: 0.7, energy: 1.2)
+        let schedule = BeatSchedule(events: [], bpm: 120, period: 0.5, confidence: 0.7, locked: false, ambient: info)
+        let shifted = schedule.shifted(by: 0.25)
+        #expect(shifted.ambient == AmbientInfo(anchor: 2.25, period: 0.5, confidence: 0.7, energy: 1.2))
+        #expect(BeatSchedule.empty.ambient == nil)
+        #expect(BeatSchedule.empty.shifted(by: 1).ambient == nil)
     }
 
     @Test func forgetsOldIds() {

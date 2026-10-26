@@ -278,6 +278,19 @@ public struct BeatPulse: Sendable {
         value = Float(min(max(position, 0), 1))
         return value
     }
+
+    /// «Вздох» кадра по весу показа (`BeatSchedule.weight`): с весом 1 пружина `spring` (свечение с
+    /// упреждением `AppModel.breathLead`), с весом 0 само свечение `glow`, между ними смесь
+    /// `glow + weight × (spring − glow)`. Вес вне 0...1 обрезается, нечисловой считается нулем;
+    /// нечисловые `spring` или `glow` дают 0 (в итоге 0...1).
+    public static func breath(spring: Float, glow: Float, weight: Float) -> Float {
+        let spring = spring.isFinite ? min(max(spring, 0), 1) : 0
+        let glow = glow.isFinite ? min(max(glow, 0), 1) : 0
+        let weight = weight.isFinite ? weight : 0
+        if weight >= 1 { return spring }
+        if weight <= 0 { return glow }
+        return glow + weight * (spring - glow)
+    }
 }
 
 /// Цвет и прозрачность вдоль одной волны.

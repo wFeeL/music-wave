@@ -267,10 +267,11 @@ struct IslandWavesView: View {
 }
 
 /// Мягкое свечение цвета `color`, поднятого до светлого и насыщенного, под нижним краем
-/// острова. Яркость по свечению доли `glow` с пиком 0.45 на темной строке меню и 0.25 на
-/// светлой при яркости по умолчанию, у раскрытой панели и баннера втрое слабее. Размытие и высота
-/// эллипса растут с «Радиусом свечения». Рисуется поверх строки меню само, вне текстур волн;
-/// когда его почти не видно (`isVisible`), его не строят.
+/// острова. Яркость по большему из свечения доли `glow` и мягкого пульса `ambient` (`brightness`)
+/// с пиком 0.45 на темной строке меню и 0.25 на светлой при яркости по умолчанию, у раскрытой
+/// панели и баннера втрое слабее. Размытие и высота эллипса растут с «Радиусом свечения».
+/// Рисуется поверх строки меню само, вне текстур волн; когда его почти не видно (`isVisible` по
+/// `brightness`), его не строят.
 struct BeatGlowView: View {
     /// Размытие и высота эллипса при радиусе 1×.
     static let blur: CGFloat = 14
@@ -292,6 +293,8 @@ struct BeatGlowView: View {
     let scale: CGFloat
     /// Свечение доли 0...1 на кадре.
     let glow: Float
+    /// Мягкий пульс на кадре (`IslandVisuals.ambient`), 0 без него.
+    var ambient: Float = 0
     /// Яркость свечения из настроек.
     let intensity: Double
     /// «Радиус свечения» из настроек, множитель.
@@ -306,6 +309,11 @@ struct BeatGlowView: View {
         Double(glow) * intensity >= threshold
     }
 
+    /// Яркость эллипса: мягкий пульс лежит под вспышками, видно большее из двух.
+    static func brightness(glow: Float, ambient: Float) -> Float {
+        max(glow, ambient)
+    }
+
     var body: some View {
         let rect = geometry.island(for: state, banner: banner)
         let anchorY = geometry.notch.minY
@@ -313,7 +321,7 @@ struct BeatGlowView: View {
         let relative = intensity / AppSettings.Default.glowIntensity
         let panelLike = state == .expanded || (banner && state == .collapsed)
         let expanded = panelLike ? Self.expandedFactor : 1
-        let opacity = min(Double(glow) * peak * relative * expanded, 1)
+        let opacity = min(Double(Self.brightness(glow: glow, ambient: ambient)) * peak * relative * expanded, 1)
         let width = rect.width * Self.widthFraction
         let height = Self.height * CGFloat(radius)
         let bottom = anchorY + (rect.maxY - anchorY) * scale

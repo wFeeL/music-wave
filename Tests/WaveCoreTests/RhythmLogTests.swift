@@ -271,6 +271,107 @@ struct RhythmLogTests {
         #expect(schedules[1]["bpm"] as? Double == 128)
     }
 
+    /// Журнал 1.1 без поля причины потери захвата читается, причина у его расписаний `nil`; новый
+    /// журнал пишет причину только у расписаний без захвата после его потери.
+    @Test func rhythmLogDecodesWithoutUnlockReason() throws {
+        let old = Data(
+            """
+            {"schemaVersion": 1, "kicks": [0.5], "onsets": [0.5], "flashes": [],
+             "meta": {"appVersion": "1.1.0", "build": "1", "commit": "abc1234", "swiftVersion": "6.2.3",
+                      "deviceName": "d", "deviceUID": "u", "latencyMode": "auto", "outputLatency": 0.02,
+                      "syncOffset": 0, "sampleRate": 48000, "renderPeriod": 0.0166, "reduceMotion": false,
+                      "glowIntensity": 1, "beatPulse": true, "lowPower": false, "clippedSamples": 0,
+                      "startHostSeconds": 100, "duration": 30, "audioSeconds": 30, "renderedFrames": 1800,
+                      "renderedUntil": 30, "endReason": "complete"},
+             "schedules": [{"time": 1, "bpm": 120, "confidence": 0.7, "locked": true, "beats": [1.2]},
+                           {"time": 2, "bpm": 120, "confidence": 0.2, "locked": false, "beats": [2.2]}]}
+            """.utf8
+        )
+        let log = try RhythmLog.decode(old)
+        #expect(log.schedules.count == 2)
+        #expect(log.schedules.allSatisfy { $0.unlockReason == nil })
+
+        var recorder = RhythmRecorder(duration: 10, meta: Self.meta())
+        Self.hop(&recorder, endSample: 600)
+        recorder.appendSchedule(Self.schedule(locked: true, bpm: 120, confidence: 0.7, beats: [501]), publishedAtHost: 500.3)
+        var lost = Self.schedule(locked: false, bpm: 120, confidence: 0.2, beats: [501.5])
+        lost.unlockReason = .phaseJump
+        recorder.appendSchedule(lost, publishedAtHost: 500.8)
+        var reset = Self.schedule(locked: false, bpm: nil, confidence: 0, beats: [])
+        reset.unlockReason = .reset
+        recorder.appendSchedule(reset, publishedAtHost: 501.2)
+        let data = try recorder.finish().encoded()
+        let decoded = try RhythmLog.decode(data)
+        #expect(decoded.schedules.map(\.unlockReason) == [nil, .phaseJump, .reset])
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let schedules = try #require(object["schedules"] as? [[String: Any]])
+        #expect(schedules[0]["unlockReason"] == nil)
+        #expect(schedules[1]["unlockReason"] as? String == "phaseJump")
+        #expect(schedules[2]["unlockReason"] as? String == "reset")
+    }
+
+    /// Вес показа пишется в расписания (новое расписание, когда вес сменился на 0.02 и больше), мягкий
+    /// пульс кадров в итог записи (кадров с пульсом от `ambientVisible` и пик), выключатель пульса в
+    /// meta. Журнал без этих полей (1.1 и B4) читается с `nil`, ключи `nil` не пишутся.
+    @Test func weightAndSoftPulseAreOptional() throws {
+        let old = Data(
+            """
+            {"schemaVersion": 1, "kicks": [], "onsets": [], "flashes": [],
+             "meta": {"appVersion": "1.1.0", "build": "1", "commit": "abc1234", "swiftVersion": "6.2.3",
+                      "deviceName": "d", "deviceUID": "u", "latencyMode": "auto", "outputLatency": 0.02,
+                      "syncOffset": 0, "sampleRate": 48000, "renderPeriod": 0.0166, "reduceMotion": false,
+                      "glowIntensity": 1, "beatPulse": true, "lowPower": false, "clippedSamples": 0,
+                      "startHostSeconds": 100, "duration": 30, "audioSeconds": 30, "renderedFrames": 1800,
+                      "renderedUntil": 30, "endReason": "complete"},
+             "schedules": [{"time": 1, "bpm": 120, "confidence": 0.7, "locked": true, "beats": [1.2]}]}
+            """.utf8
+        )
+        let decodedOld = try RhythmLog.decode(old)
+        #expect(decodedOld.schedules.map(\.weight) == [nil])
+        #expect(decodedOld.meta.softPulse == nil)
+        #expect(decodedOld.meta.ambientFrames == nil && decodedOld.meta.ambientPeak == nil)
+
+        var meta = Self.meta()
+        meta.softPulse = true
+        var recorder = RhythmRecorder(duration: 10, meta: meta)
+        Self.hop(&recorder, endSample: 600)
+        func weighted(_ weight: Float) -> BeatSchedule {
+            var schedule = Self.schedule(locked: false, bpm: 120, confidence: 0.4, beats: [501])
+            schedule.weight = weight
+            return schedule
+        }
+        recorder.appendSchedule(weighted(0.3), publishedAtHost: 500.2)
+        // Вес сдвинулся меньше чем на 0.02: картина та же.
+        recorder.appendSchedule(weighted(0.31), publishedAtHost: 500.21)
+        recorder.appendSchedule(weighted(0.35), publishedAtHost: 500.22)
+        recorder.appendFrame(presentedHost: 500.3, glowRise: 0, schedule: .empty, refreshPeriod: 1.0 / 60, ambient: 0.12)
+        recorder.appendFrame(presentedHost: 500.32, glowRise: 0, schedule: .empty, refreshPeriod: 1.0 / 60, ambient: 0.01)
+        recorder.appendFrame(presentedHost: 500.34, glowRise: 0, schedule: .empty, refreshPeriod: 1.0 / 60, ambient: .nan)
+        recorder.appendFrame(presentedHost: 500.36, glowRise: 0, schedule: .empty, refreshPeriod: 1.0 / 60)
+        let log = recorder.finish()
+        #expect(log.schedules.map(\.weight) == [0.3, 0.35])
+        #expect(log.meta.softPulse == true)
+        #expect(log.meta.renderedFrames == 4)
+        #expect(log.meta.ambientFrames == 1)
+        #expect(log.meta.ambientPeak == 0.12)
+        let data = try log.encoded()
+        #expect(try RhythmLog.decode(data) == log)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let schedules = try #require(object["schedules"] as? [[String: Any]])
+        #expect(schedules[0]["weight"] != nil)
+        let encodedMeta = try #require(object["meta"] as? [String: Any])
+        #expect(encodedMeta["softPulse"] as? Bool == true)
+
+        // Без пульса на кадрах (старые вызовы) итога пульса нет.
+        var plain = RhythmRecorder(duration: 10, meta: Self.meta())
+        Self.hop(&plain, endSample: 600)
+        plain.appendFrame(presentedHost: 500.3, glowRise: 0, schedule: .empty, refreshPeriod: 1.0 / 60)
+        let plainData = try plain.finish().encoded()
+        let plainObject = try #require(try JSONSerialization.jsonObject(with: plainData) as? [String: Any])
+        let plainMeta = try #require(plainObject["meta"] as? [String: Any])
+        #expect(plainMeta["softPulse"] == nil && plainMeta["ambientFrames"] == nil && plainMeta["ambientPeak"] == nil)
+    }
+
     @Test func otherSchemaVersionsAreRejected() throws {
         var log = RhythmRecorder(duration: 1, meta: Self.meta()).finish()
         log.schemaVersion = 2
@@ -357,15 +458,38 @@ struct RhythmLogTests {
         let schedules = [
             RhythmLog.Schedule(time: 0.5, bpm: nil, confidence: 0.1, locked: false, beats: []),
             RhythmLog.Schedule(time: 2, bpm: 120, confidence: 0.5, locked: true, beats: []),
-            RhythmLog.Schedule(time: 6, bpm: 124, confidence: 0.2, locked: false, beats: []),
+            RhythmLog.Schedule(time: 6, bpm: 124, confidence: 0.2, locked: false, beats: [], unlockReason: .misses),
             RhythmLog.Schedule(time: 8, bpm: 122, confidence: 0.6, locked: true, beats: []),
+            RhythmLog.Schedule(time: 9, bpm: 122, confidence: 0.3, locked: false, beats: []),
+            RhythmLog.Schedule(time: 9.5, bpm: 122, confidence: 0.8, locked: true, beats: []),
+            RhythmLog.Schedule(time: 9.8, bpm: 122, confidence: 0, locked: false, beats: [], unlockReason: .reset),
         ]
         let timeline = RhythmReplay.Timeline(schedules: schedules, end: 10)
         #expect(timeline.firstLock == 2)
-        #expect(abs(timeline.lockedShare - 0.6) < 1e-12)
-        #expect(timeline.lockChanges == 3)
+        #expect(abs(timeline.lockedShare - 0.53) < 1e-12)
+        #expect(timeline.lockChanges == 6)
         #expect(timeline.lastBPM == 122)
-        #expect(timeline.medianLockedBPM == 121)
+        #expect(timeline.medianLockedBPM == 122)
+        // Потери захвата по времени; у журнала 1.1 причины нет.
+        #expect(
+            timeline.unlocks == [.init(time: 6, reason: .misses), .init(time: 9, reason: nil), .init(time: 9.8, reason: .reset)]
+        )
+    }
+
+    /// Средний вес показа за `[0, end]` по времени, до первого расписания 0; без веса хотя бы у одного
+    /// расписания (журнал до B5) среднего нет.
+    @Test func timelineMeanWeight() {
+        let schedules = [
+            RhythmLog.Schedule(time: 2, bpm: 120, confidence: 0.5, locked: false, beats: [], weight: 0.5),
+            RhythmLog.Schedule(time: 6, bpm: 120, confidence: 0.8, locked: true, beats: [], weight: 1),
+            RhythmLog.Schedule(time: 12, bpm: 120, confidence: 0.8, locked: true, beats: [], weight: 0),
+        ]
+        let timeline = RhythmReplay.Timeline(schedules: schedules, end: 10)
+        #expect(timeline.meanWeight.map { abs($0 - 0.6) < 1e-12 } == true)
+        var old = schedules
+        old[1].weight = nil
+        #expect(RhythmReplay.Timeline(schedules: old, end: 10).meanWeight == nil)
+        #expect(RhythmReplay.Timeline(schedules: [], end: 10).meanWeight == nil)
     }
 
     @Test func timelineWithoutSchedules() {
@@ -401,7 +525,9 @@ struct RhythmLogTests {
             kicks: device.kickOnsets,
             onsets: [],
             schedules: device.states.map {
-                RhythmLog.Schedule(time: $0.time, bpm: $0.bpm, confidence: $0.confidence, locked: $0.locked, beats: [])
+                RhythmLog.Schedule(
+                    time: $0.time, bpm: $0.bpm, confidence: $0.confidence, locked: $0.locked, beats: [], weight: $0.weight
+                )
             },
             flashes: device.flashes.map { RhythmLog.Flash(time: $0.time, predicted: $0.predicted, locked: $0.locked) }
         )
@@ -414,7 +540,17 @@ struct RhythmLogTests {
         #expect(report.all.meanDifference.map { abs($0) < 0.017 } == true)
         #expect(report.device.firstLock != nil)
         #expect(report.replay.firstLock != nil)
+        // Вес показа и мягкий пульс: прогон с другой фазой дает тот же средний вес, пульс у прогона
+        // считается всегда, у записи без итога пульса его нет.
+        let deviceWeight = try #require(report.device.meanWeight)
+        let replayWeight = try #require(report.replay.meanWeight)
+        #expect(abs(deviceWeight - replayWeight) < 0.05, "mean weight \(deviceWeight) vs \(replayWeight)")
+        #expect(report.replayAmbientShare > 0 && report.replayAmbientShare < 1)
+        #expect(report.replayAmbientPeak > 0 && report.replayAmbientPeak <= BeatGlow.ambientCeiling)
         let text = report.text
+        #expect(text.contains("soft pulse: device not logged"))
+        #expect(text.contains("mean weight"))
+        #expect(text.contains("unlocks replay:"))
         #expect(text.contains("matched"))
         #expect(text.contains("device"))
         #expect(text.contains("replay"))

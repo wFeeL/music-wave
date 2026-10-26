@@ -38,8 +38,8 @@ final class AppModel {
     static let renderPeriodRefreshFrames = 15
     /// Пределы `renderPeriod`, с: от ProMotion 120 Гц до энергосбережения 30 Гц.
     static let renderPeriodRange = (1.0 / 120)...(1.0 / 30)
-    /// На сколько раньше доли «вздох» получает ее свечение при захвате ритма, с: время пружины
-    /// `BeatPulse` до пика (`beat-sync.md` 2.8).
+    /// На сколько раньше доли «вздох» получает ее свечение при уверенной сетке (вес показа), с:
+    /// время пружины `BeatPulse` до пика (`beat-sync.md` 2.8).
     nonisolated static let breathLead = 0.05
     /// Как часто строки «Отрисовки» пишутся в файл лога, с: «Раскрытый», пока остров раскрыт, в
     /// замере CPU (`--settings-suite`) «Свернутый» и «Раскрытый» (`RenderBucket.logged`).
@@ -1268,14 +1268,17 @@ final class AppModel {
     /// расписанию (`BeatGlow`, с памятью о вспышках). Уровни слоев и общий уровень идут через пружины
     /// (`LevelSpring`), фазы волн по сглаженным уровням (при «Уменьшении движения» вдвое медленнее),
     /// затем к басу прибавляется акцент доли (`BeatGlow.accented`), уже после пружин, чтобы он
-    /// оставался четким. «Вздох»: при захвате ритма пружина получает свечение на 50 мс раньше, без
-    /// захвата равен свечению. «Уменьшение движения»: ни свечения, ни «вздоха», ни акцента.
-    /// Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр идет в
-    /// замер отрисовки (`timelineTime`: дата `TimelineView`), раз в 10 с строки замера пишутся в
-    /// лог (`recordRender`). Уровни, свечение, «вздох» и переход палитры кадра идут в детектор
-    /// простоя (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после
-    /// кадра. Снимки (`previewing`) получают
-    /// заданные кадр, свечение и «вздох» без шага, детектор не трогают.
+    /// оставался четким. «Вздох» по весу показа расписания (`BeatPulse.breath`): с полным весом
+    /// пружина, получившая свечение на 50 мс раньше, без веса само свечение, между ними смесь. Мягкий
+    /// пульс (`BeatGlow.ambient(at:info:frame:)` на тот же момент показа: сетка из расписания, энергия
+    /// бочки из кадра `sampled`) идет отдельным каналом `ambient`, только с включенным «Мягким
+    /// пульсом». «Уменьшение движения»: ни свечения, ни «вздоха», ни пульса, ни
+    /// акцента. Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр
+    /// идет в замер отрисовки (`timelineTime`: дата `TimelineView`), раз в 10 с строки замера пишутся
+    /// в лог (`recordRender`), и в запись ритма вместе с пульсом. Уровни, свечение, «вздох» и пульс
+    /// (через `max`) и переход палитры кадра идут в детектор простоя (`feedRenderIdle`): `renderIdle`
+    /// по нему ставит тик, выход из простоя сразу после кадра. Снимки (`previewing`) получают
+    /// заданные кадр, свечение и «вздох» без шага, без пульса, детектор не трогают.
     func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
         let period = renderPeriod
         let presented = now + LatencyCalculator.presentationLead(refreshPeriod: period)
@@ -1306,6 +1309,7 @@ final class AppModel {
 
         var glow: Float = 0
         var breath: Float = 0
+        var ambient: Float = 0
         var shownSchedule: BeatSchedule?
         if !reduceMotion {
             let schedule = store.schedule
@@ -1313,21 +1317,28 @@ final class AppModel {
             glow = glowState.value(at: presented, schedule: schedule, refreshPeriod: period)
             let early = BeatGlow.value(at: presented + Self.breathLead, schedule: schedule, refreshPeriod: period)
             let spring = pulse.step(beat: early, dt: dt)
-            breath = schedule.locked ? spring : glow
+            breath = BeatPulse.breath(spring: spring, glow: glow, weight: schedule.weight)
+            if settings.softPulse {
+                // Энергия из кадра на момент показа (слышимая ось), сетка из расписания.
+                ambient = BeatGlow.ambient(at: presented, info: schedule.ambient, frame: sampled)
+            }
         }
         let frame = springFrame(sampled, layers: springs, glow: glow)
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
             rhythmRecording.frame(
-                presented: presented, glow: glow, schedule: shownSchedule, refreshPeriod: period, reduceMotion: reduceMotion
+                presented: presented, glow: glow, ambient: ambient, schedule: shownSchedule, refreshPeriod: period,
+                reduceMotion: reduceMotion
             )
         }
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
-        // Другой пульс (мягкий, когда появится) идет в `pulse` через `max` с «вздохом».
-        feedRenderIdle(level: max(springs.max() ?? 0, levelSpring.value), glow: glow, pulse: breath, now: now)
+        feedRenderIdle(
+            level: max(springs.max() ?? 0, levelSpring.value), glow: glow, pulse: max(breath, ambient), now: now
+        )
         return IslandVisuals(
-            frame: frame, sampled: sampled, motion: motion, palette: shown, glow: glow, pulse: breath, time: now
+            frame: frame, sampled: sampled, motion: motion, palette: shown, glow: glow, pulse: breath, ambient: ambient,
+            time: now
         )
     }
 
@@ -1496,6 +1507,10 @@ struct IslandVisuals {
     var glow: Float
     /// «Вздох» 0...1: масштаб свернутого острова.
     var pulse: Float
+    /// Мягкий пульс 0...`BeatGlow.ambientCeiling` на момент показа кадра (`BeatGlow.ambient`), 0 при
+    /// выключенном «Мягком пульсе» и «Уменьшении движения». Свечение под островом рисуется по
+    /// `max(glow, ambient)` (`BeatGlowView.brightness`), точки у выреза и акцент баса только по `glow`.
+    var ambient: Float = 0
     /// Время кадра, с: по нему течет градиент волн.
     var time: Double
 }
@@ -1543,8 +1558,9 @@ extension AppModel {
 
     /// «Записать 30 с»: запись ритма с версией, сборкой, устройством вывода, режимом задержки,
     /// периодом отрисовки и настройками, от которых зависит видимое свечение («Уменьшение
-    /// движения» системы, яркость свечения, «вздох», энергосбережение). Задержку, сдвиг и частоту
-    /// берет сама запись у анализа, «Уменьшение движения» на кадрах отмечает `islandVisuals`.
+    /// движения» системы, яркость свечения, «вздох», мягкий пульс, энергосбережение). Задержку,
+    /// сдвиг и частоту берет сама запись у анализа, «Уменьшение движения» и пульс на кадрах
+    /// отмечает `islandVisuals`.
     func startRhythmRecording() {
         let info = Bundle.main.infoDictionary ?? [:]
         let latencyMode: String
@@ -1564,6 +1580,7 @@ extension AppModel {
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
             glowIntensity: settings.glowIntensity,
             beatPulse: settings.beatPulse,
+            softPulse: settings.softPulse,
             lowPower: lowPower
         )
         rhythmRecording.start(meta: meta)

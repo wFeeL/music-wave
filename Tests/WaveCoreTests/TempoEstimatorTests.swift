@@ -118,6 +118,78 @@ struct TempoStickinessTests {
         #expect(tempo.period == 1.0)
     }
 
+    /// Сырые оценки журнала ритма 2 владельца, как их видел код 1.1 (BPM, каждые 0.25 с с 5.26 с
+    /// потока; снято зондом по записи журнала): захват на 78.8 BPM,
+    /// музыка замедляется к ~72, оценка уходит в удвоенный темп, который плывет вместе с музыкой
+    /// (157.9, затем 149.0 и 150.7, то есть 5.5 % и 4.4 % от 2 × 78.8 при допуске 4 %), потом
+    /// возвращается к основному темпу. На 1.1 оценка 149.0 считалась далекой некратной, и две такие
+    /// оценки подряд переключали темп на 150.7 на 7.01 с; обратно к 72 он шел 12 оценок из 16.
+    private static let ownerLog2: [Double] = [
+        77.7, 78.6, 77.7, 79.1, 79.0, 157.9, 149.0, 150.7, 157.5, 151.9, 151.0, 151.0, 151.9, 150.5, 151.5, 150.5,
+        145.1, 73.4, 145.1, 72.9, 72.9, 72.9, 72.9, 72.9, 72.6, 72.8, 72.6, 72.4, 72.4, 72.3, 71.8, 72.0, 71.8,
+    ]
+
+    /// Удвоенная оценка, которая плывет вместе с замедлением, остается кратной: темп не уходит на ~150,
+    /// а переходит к основному ~72, как только оценки к нему вернулись.
+    @Test func driftDoesNotFlipOctave() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 60 / 78.8)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 1)
+        var switches: [Double] = []
+        for bpm in Self.ownerLog2 {
+            let estimate = tempo.accept(period: 60 / bpm)
+            #expect(60 / estimate.period < 100, "raw \(bpm) BPM gave \(60 / estimate.period) BPM")
+            if estimate.switched { switches.append(60 / estimate.period) }
+        }
+        #expect(switches.count <= 1, "switches to \(switches) BPM")
+        let final = 60 / (tempo.period ?? 0)
+        #expect(abs(final / 72 - 1) < 0.04, "final \(final) BPM")
+    }
+
+    /// Верная удвоенная оценка, которая плывет (GTZAN metal.00052 с 12.01 с: 162.0 -> 155.0 при
+    /// захвате на 81.0 BPM, разброс 4.5 %), все равно набирает 12 согласных из 16: согласие считается
+    /// до 6 %, а не до 4 %. На 1.1 этот файл переключался по правилу двух далеких на 14.26 с.
+    @Test func driftingOctaveStillSwitchesAfterTwelve() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 60 / 81.0)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 1)
+        let doubled: [Double] = [162.0, 162.1, 161.8, 160.8, 160.3, 160.1, 159.4, 159.7, 156.2, 155.0, 156.0, 155.2]
+        #expect(doubled.count == TempoEstimator.relatedSwitchUpdates)
+        for (index, bpm) in doubled.enumerated() {
+            let estimate = tempo.accept(period: 60 / bpm)
+            #expect(estimate.switched == (index == doubled.count - 1), "#\(index + 1): \(bpm) BPM")
+        }
+        #expect(abs(60 / (tempo.period ?? 0) - 155.2) < 0.01)
+    }
+
+    /// Быстрый дрейф удвоенной оценки: медиана кратных (158) отстает, 148.5 уходит от нее больше чем на
+    /// 6 %, но остается в окне октавы. Она не должна образовать пару «две далекие» с прошлой кратной
+    /// оценкой 151 (1.7 % от нее): на 1.1 и на первой версии защиты здесь темп уходил на 148.5.
+    @Test func fastDriftDoesNotPairAsFar() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 60 / 78.5)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 1)
+        for bpm in [158.0, 158, 158, 158, 151, 148.5, 148.5, 147] {
+            let estimate = tempo.accept(period: 60 / bpm)
+            #expect(!estimate.switched, "\(bpm) BPM switched to \(60 / estimate.period) BPM")
+        }
+        #expect(abs(60 / (tempo.period ?? 0) - 78.5) < 0.01)
+    }
+
+    /// Согласие до 6 % только для октавы: кандидаты 3:2 по-прежнему должны совпадать до 4 %. Оценки
+    /// по очереди 1.455 и 1.545 периода (каждая в 3 % от 3:2, друг от друга 5.8 %): из 12 согласны
+    /// только 6, переключения нет.
+    @Test func nonOctaveAgreementStaysAtFourPercent() {
+        var tempo = TempoEstimator(framesPerSecond: 187.5)
+        _ = tempo.accept(period: 0.5)
+        Self.advance(&tempo, seconds: TempoEstimator.establishedAfter + 1)
+        for index in 0..<TempoEstimator.relatedSwitchUpdates {
+            let ratio: Double = index % 2 == 0 ? 1.455 : 1.545
+            #expect(!tempo.accept(period: 0.5 * ratio).switched, "#\(index + 1)")
+        }
+        #expect(tempo.period == 0.5)
+    }
+
     /// Импульсы ровно на 120 BPM при 187.5 шагах в секунду (93.75 шага на долю).
     private static func impulses(seconds: Double, bpm: Double = 120) -> [Float] {
         let fps = 187.5
@@ -275,14 +347,31 @@ struct TempoEstimatorTests {
     /// Смена темпа на кратный принимается не позже чем через `limit` секунд, а до нее темп держится.
     @Test(arguments: [(120.0, 160.0, 5.0), (120, 90, 5.5)])
     func relatedTempoChangeIsAcceptedInTime(from: Double, to: Double, limit: Double) async {
+        await Self.checkJump(from: from, to: to, limit: limit)
+    }
+
+    /// Настоящий скачок темпа на некратный (или почти кратный) принимается не позже, чем в 1.1: допуск
+    /// дрейфа для октавы не должен задерживать его правилом кратных. `limit` в секундах после скачка
+    /// снят с кода 1.1 на этой же сцене (2.0, 2.0 и 1.504 с). 100 -> 140 и 90 -> 128 лежат между 4/3
+    /// и 3/2 (1.40 и 1.42), 80 -> 150 в 6.25 % от удвоения (за окном допуска 4 %, внутри окна дрейфа
+    /// октавы 10 %).
+    @Test(arguments: [(100.0, 140.0, 2.001), (90, 128, 2.001), (80, 150, 1.505)])
+    func realJumpStillSwitches(from: Double, to: Double, limit: Double) async {
+        await Self.checkJump(from: from, to: to, limit: limit)
+    }
+
+    /// Скачок `from` -> `to` на 12 с (сцена 18 с): с 4 с ровно одно переключение, на `to` и не позже
+    /// чем через `limit` секунд после скачка, а до скачка все оценки в пределах 4 % от `from`.
+    private static func checkJump(from: Double, to: Double, limit: Double) async {
         let run = await runOffCooperativePool {
             Self.run(Drums.tempoJump(from: from, to: to, at: 12, seconds: 18).samples)
         }
         let switches = run.estimates.filter { $0.time >= 4 && $0.estimate.switched }
-        #expect(switches.count == 1)
+        let described = switches.map { ($0.time, 60 / $0.estimate.period) }
+        #expect(switches.count == 1, "switches \(described)")
         let target = 60 / to
         let change = switches.first { abs($0.estimate.period - target) / target < 0.04 }
-        #expect(change.map { $0.time > 12 && $0.time - 12 <= limit } == true, "switches \(switches.map(\.time))")
+        #expect(change.map { $0.time > 12 && $0.time - 12 <= limit } == true, "switches \(described)")
         for (time, estimate) in run.estimates where time >= 4 && time < 12 {
             #expect(abs(estimate.period * from / 60 - 1) < 0.04, "t \(time): \(60 / estimate.period) BPM")
         }

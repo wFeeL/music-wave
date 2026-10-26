@@ -83,11 +83,17 @@ struct EvalArgumentsTests {
         let defaults = BeatTracker.Parameters()
         for name in BeatTracker.Parameters.names {
             var changed = defaults
-            let accepted = changed.set(name, to: 3)
+            // 3 бывает и значением по умолчанию (`raceVotes`), тогда пробуется 7.
+            var value = 3.0
+            var accepted = changed.set(name, to: value)
+            if changed == defaults {
+                value = 7
+                accepted = changed.set(name, to: value)
+            }
             #expect(accepted)
             #expect(changed != defaults, "\(name) changed nothing")
             var again = changed
-            _ = again.set(name, to: 3)
+            _ = again.set(name, to: value)
             #expect(again == changed)
         }
         var probe = defaults

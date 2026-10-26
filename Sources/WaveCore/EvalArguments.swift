@@ -237,7 +237,9 @@ extension BeatTracker.Parameters {
     /// Имена полей, которые можно менять по имени (`--tracker name=value`).
     public static let names: [String] = [
         "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
-        "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "crossfadeBeats",
+        "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "weightLow",
+        "weightHigh", "weightRiseBeats", "weightFallBeats", "weightHits", "kickConfirmFloor", "kickConfirmLow",
+        "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceDim", "coastGate",
         "gateFallPerBeatDB", "gateFallNoTempoDB",
     ]
 
@@ -255,14 +257,31 @@ extension BeatTracker.Parameters {
         case "phaseJump": phaseJump = value
         case "phaseJumpMargin": phaseJumpMargin = value
         case "dropWindow": dropWindow = value
-        case "crossfadeBeats": crossfadeBeats = value
+        case "weightLow": weightLow = value
+        case "weightHigh": weightHigh = value
+        case "weightRiseBeats": weightRiseBeats = value
+        case "weightFallBeats": weightFallBeats = value
+        case "kickConfirmFloor": kickConfirmFloor = Float(value)
+        case "kickConfirmLow": kickConfirmLow = Float(value)
+        case "carryTolerance": carryTolerance = value
+        case "carryPhase": carryPhase = value
+        case "raceMargin": raceMargin = value
         case "offGridScale": offGridScale = Float(value)
         case "onsetFloor": onsetFloor = Float(value)
+        case "coastGate": coastGate = Float(value)
+        case "raceDim": raceDim = Float(value)
         case "gateFallPerBeatDB": gateFallPerBeatDB = Float(value)
         case "gateFallNoTempoDB": gateFallNoTempoDB = Float(value)
-        case "lockHits", "phaseJumpChecks":
+        case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes", "weightHits":
             guard value == value.rounded(), abs(value) < 1e9 else { return false }
-            if name == "lockHits" { lockHits = Int(value) } else { phaseJumpChecks = Int(value) }
+            switch name {
+            case "lockHits": lockHits = Int(value)
+            case "phaseJumpChecks": phaseJumpChecks = Int(value)
+            case "raceBeats": raceBeats = Int(value)
+            case "raceLimit": raceLimit = Int(value)
+            case "weightHits": weightHits = Int(value)
+            default: raceVotes = Int(value)
+            }
         default: return false
         }
         return true

@@ -11,7 +11,9 @@ import Foundation
 /// остановился и сбросил расписание вскоре после последнего сэмпла, поэтому `until` не дальше
 /// `audioSeconds`: вспышки устройства позже этого могли пропасть. Прогон начинает с холодного трекера, а устройство к началу записи уже
 /// могло держать ритм, поэтому есть и строка "after lock": только вспышки после того, как оба
-/// захватили ритм.
+/// захватили ритм. Средний вес показа (`Timeline.meanWeight`) и мягкий пульс (доля кадров с пульсом и
+/// его пик: у устройства из итога записи, у прогона всегда считается) печатаются рядом, на сравнение
+/// вспышек они не влияют.
 public enum RhythmReplay {
     public enum Error: Swift.Error, Equatable {
         case sampleRateMismatch(log: Double, wav: Double)
@@ -52,6 +54,18 @@ public enum RhythmReplay {
 
     /// Темп и захват по времени.
     public struct Timeline: Sendable, Equatable {
+        /// Потеря захвата: момент публикации без захвата (секунды оси) и причина; у журналов 1.1
+        /// причины нет.
+        public struct Unlock: Sendable, Equatable {
+            public var time: Double
+            public var reason: UnlockReason?
+
+            public init(time: Double, reason: UnlockReason?) {
+                self.time = time
+                self.reason = reason
+            }
+        }
+
         /// Первая публикация с захватом, секунды оси.
         public var firstLock: Double?
         /// Доля времени `[0, end]` с захватом (до первой публикации захвата нет).
@@ -61,27 +75,46 @@ public enum RhythmReplay {
         public var lastBPM: Double?
         /// Медиана темпа по публикациям с захватом.
         public var medianLockedBPM: Double?
+        /// Каждая потеря захвата до `end` по времени.
+        public var unlocks: [Unlock]
+        /// Средний по времени вес показа за `[0, end]` (до первой публикации 0); `nil` без публикаций
+        /// или если хоть у одной нет веса (журналы до 1.2).
+        public var meanWeight: Double?
 
         public init(schedules: [RhythmLog.Schedule], end: Double) {
-            self.init(points: schedules.map { ($0.time, $0.locked, $0.bpm) }, end: end)
+            self.init(points: schedules.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason, $0.weight) }, end: end)
         }
 
         public init(states: [OfflineBeatChain.State], end: Double) {
-            self.init(points: states.map { ($0.time, $0.locked, $0.bpm) }, end: end)
+            self.init(points: states.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason, $0.weight) }, end: end)
         }
 
-        private init(points: [(time: Double, locked: Bool, bpm: Double?)], end: Double) {
+        private init(
+            points: [(time: Double, locked: Bool, bpm: Double?, reason: UnlockReason?, weight: Float?)], end: Double
+        ) {
             firstLock = points.first(where: \.locked)?.time
             var locked = 0.0
+            var weighted = 0.0
             var changes = 0
+            var unlocks: [Unlock] = []
             for (index, point) in points.enumerated() where point.time < end {
-                if index > 0, points[index - 1].locked != point.locked { changes += 1 }
-                guard point.locked else { continue }
+                if index > 0, points[index - 1].locked != point.locked {
+                    changes += 1
+                    if !point.locked { unlocks.append(Unlock(time: point.time, reason: point.reason)) }
+                }
                 let next = index + 1 < points.count ? min(points[index + 1].time, end) : end
-                locked += max(next - max(point.time, 0), 0)
+                let span = max(next - max(point.time, 0), 0)
+                if let weight = point.weight, weight.isFinite {
+                    weighted += Double(min(max(weight, 0), 1)) * span
+                }
+                guard point.locked else { continue }
+                locked += span
             }
             lockedShare = end > 0 ? min(locked / end, 1) : 0
+            let complete = !points.isEmpty && points.allSatisfy { $0.weight != nil }
+            meanWeight = complete && end > 0 ? min(weighted / end, 1) : nil
             lockChanges = changes
+            self.unlocks = unlocks
             lastBPM = points.last(where: { $0.time < end })?.bpm
             let tempos = points.filter { $0.locked && $0.time < end }.compactMap(\.bpm).sorted()
             if tempos.isEmpty {
@@ -109,6 +142,9 @@ public enum RhythmReplay {
         /// Вспышки устройства и прогона на отрезке сравнения.
         public var deviceFlashes: [RhythmLog.Flash]
         public var replayFlashes: [OfflineBeatChain.Flash]
+        /// Мягкий пульс прогона за весь прогон: доля кадров с пульсом от `RhythmLog.ambientVisible` и пик.
+        public var replayAmbientShare: Double
+        public var replayAmbientPeak: Float
     }
 
     /// Пары один к одному: каждая вспышка устройства по порядку берет ближайшую свободную
@@ -150,6 +186,7 @@ public enum RhythmReplay {
             config.renderRate = 1 / meta.renderPeriod
         }
         config.trackerParameters = options.trackerParameters
+        config.softPulse = true
         return config
     }
 
@@ -192,16 +229,15 @@ public enum RhythmReplay {
         }
         return Report(
             meta: meta, options: options, until: until, all: all, afterLock: afterLock, afterLockFrom: afterLockFrom,
-            device: device, replay: replay, deviceFlashes: deviceFlashes, replayFlashes: replayFlashes
+            device: device, replay: replay, deviceFlashes: deviceFlashes, replayFlashes: replayFlashes,
+            replayAmbientShare: result.renderedFrames > 0 ? Double(result.ambientFrames) / Double(result.renderedFrames) : 0,
+            replayAmbientPeak: result.peakAmbient
         )
     }
 
     /// Ближайший ранг: значение с номером `ceil(0.95 n)` по возрастанию.
     static func percentile95(_ values: [Double]) -> Double? {
-        guard !values.isEmpty else { return nil }
-        let sorted = values.sorted()
-        let rank = Int((0.95 * Double(sorted.count)).rounded(.up))
-        return sorted[min(max(rank - 1, 0), sorted.count - 1)]
+        BeatMetrics.percentile(values, 0.95)
     }
 }
 
@@ -321,10 +357,13 @@ extension RhythmReplay.Report {
             "predicted flashes: device \(devicePredicted) of \(deviceFlashes.count), replay \(replayPredicted) of \(replayFlashes.count); "
                 + "locked flashes: device \(deviceFlashes.filter(\.locked).count), replay \(replayFlashes.filter(\.locked).count)"
         )
+        lines.append(softPulseLine)
         lines.append("")
-        lines.append(Self.row(["tempo/lock", "first lock s", "locked share", "lock changes", "median BPM", "last BPM"]))
+        lines.append(Self.row(["tempo/lock", "first lock s", "locked share", "lock changes", "median BPM", "last BPM", "mean weight"]))
         lines.append(Self.timelineRow("device", device))
         lines.append(Self.timelineRow("replay", replay))
+        lines.append(Self.unlockLine("device", device))
+        lines.append(Self.unlockLine("replay", replay))
         if options.listFlashes {
             lines.append("")
             lines.append(Self.row(["device s", "kind", "nearest replay s", "diff ms"]))
@@ -363,6 +402,12 @@ extension RhythmReplay.Report {
         ])
     }
 
+    /// Каждая потеря захвата с временем и причиной (`unknown` у журналов без причины).
+    private static func unlockLine(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {
+        let items = timeline.unlocks.map { String(format: "%.2f s ", $0.time) + ($0.reason?.rawValue ?? "unknown") }
+        return "unlocks \(name): " + (items.isEmpty ? "none" : items.joined(separator: ", "))
+    }
+
     private static func timelineRow(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {
         let bpm = { (value: Double?) in value.map { String(format: "%.1f", $0) } ?? "-" }
         return row([
@@ -372,6 +417,23 @@ extension RhythmReplay.Report {
             "\(timeline.lockChanges)",
             bpm(timeline.medianLockedBPM),
             bpm(timeline.lastBPM),
+            timeline.meanWeight.map { String(format: "%.3f", $0) } ?? "-",
         ])
+    }
+
+    /// Мягкий пульс: выключатель и итог кадров устройства (если журнал его пишет) и прогона.
+    private var softPulseLine: String {
+        let share = { (frames: Int) in
+            String(format: "%.1f", self.meta.renderedFrames > 0 ? 100 * Double(frames) / Double(self.meta.renderedFrames) : 0)
+        }
+        let threshold = String(format: "%.2f", RhythmLog.ambientVisible)
+        let replay = "replay \(String(format: "%.1f", replayAmbientShare * 100)) % of frames >= \(threshold), "
+            + "peak \(String(format: "%.3f", replayAmbientPeak))"
+        guard let frames = meta.ambientFrames else {
+            return "soft pulse: device not logged; " + replay
+        }
+        let setting = meta.softPulse.map { $0 ? "on" : "off" } ?? "unknown"
+        return "soft pulse: device \(setting), \(share(frames)) % of frames >= \(threshold), "
+            + "peak \(String(format: "%.3f", meta.ambientPeak ?? 0)); " + replay
     }
 }

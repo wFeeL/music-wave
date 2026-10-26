@@ -98,8 +98,9 @@ final class PreviewPlayer {
 
     /// Кадр предпросмотра на `now` секунд. Первый кадр встает на `loopStart` с пружинами на его
     /// уровнях; дальше шаг не длиннее `AppModel.maxVisualStep`. Без демо: тихий остров.
-    /// «Уменьшение движения»: ни свечения, ни «вздоха», волны вдвое медленнее.
-    func visuals(now: Double, palette: [PaletteColor], reduceMotion: Bool) -> IslandVisuals {
+    /// «Уменьшение движения»: ни свечения, ни «вздоха», ни мягкого пульса, волны вдвое медленнее.
+    /// `softPulse`: «Мягкий пульс» из настроек, без него пульса нет.
+    func visuals(now: Double, palette: [PaletteColor], reduceMotion: Bool, softPulse: Bool = true) -> IslandVisuals {
         guard let timeline, now.isFinite else {
             return IslandVisuals(
                 frame: .silent, sampled: .silent, motion: motion, palette: palette, glow: 0, pulse: 0, time: 0
@@ -135,7 +136,8 @@ final class PreviewPlayer {
         frame.level = levelSpring.value
         return IslandVisuals(
             frame: frame, sampled: sampled, motion: motion, palette: palette,
-            glow: glow, pulse: reduceMotion ? 0 : moment.pulse, time: now
+            glow: glow, pulse: reduceMotion ? 0 : moment.pulse, ambient: reduceMotion || !softPulse ? 0 : moment.ambient,
+            time: now
         )
     }
 }
@@ -164,9 +166,9 @@ extension PreviewPlayer {
 
 /// Свернутый остров на фоне строки меню, как на снимках (`SnapshotBackdrop`): условный вырез
 /// 185×32 pt посреди полосы 640 × 150 pt, полоса уменьшена до ширины формы. Вид волн, яркость
-/// свечения и «вздох» из настроек, крыло не шире, чем позволит экран острова (`wingLimit`).
-/// Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с частотой экрана
-/// острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
+/// свечения, «вздох» и мягкий пульс из настроек, крыло не шире, чем позволит экран острова
+/// (`wingLimit`). Кадры только из демо (`PreviewPlayer`), никогда из `AppModel.islandVisuals`, с
+/// частотой экрана острова (`RenderPacing.timelineInterval`), а не чаще. Пока предпросмотр не активен
 /// (`PreviewPlayer.isActive`, у калибровки окно настроек не видно), `TimelineView` стоит.
 ///
 /// С игроком калибровки (`PreviewPlayer.isCalibrating`) часы кадров это часы хоста, как у острова,
@@ -210,6 +212,7 @@ struct IslandPreview: View {
             ? max(settings.glowIntensity, AppSettings.Default.glowIntensity)
             : reduceMotion ? 0 : settings.glowIntensity
         let breathes = settings.beatPulse && !reduceMotion && !calibrating
+        let softPulse = settings.softPulse
         let layout = Self.layout(appearance: appearance, wingLimit: wingLimit)
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         let size = Self.stripSize
@@ -234,7 +237,7 @@ struct IslandPreview: View {
                                 )
                                 : player.visuals(
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,
-                                    reduceMotion: reduceMotion
+                                    reduceMotion: reduceMotion, softPulse: softPulse
                                 )
                             PreviewScene(
                                 visuals: visuals, geometry: geometry, glow: glow, appearance: appearance,
@@ -268,10 +271,13 @@ private struct PreviewScene: View {
         let state = IslandState.collapsed
         let anchor = geometry.anchor
         ZStack(alignment: .topLeading) {
-            if BeatGlowView.isVisible(glow: visuals.glow, intensity: glow) {
+            if BeatGlowView.isVisible(
+                glow: BeatGlowView.brightness(glow: visuals.glow, ambient: visuals.ambient), intensity: glow
+            ) {
                 BeatGlowView(
-                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, intensity: glow,
-                    radius: appearance.glowRadius, color: visuals.palette.first ?? PaletteExtractor.fallback[0]
+                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, ambient: visuals.ambient,
+                    intensity: glow, radius: appearance.glowRadius,
+                    color: visuals.palette.first ?? PaletteExtractor.fallback[0]
                 )
             }
             ZStack(alignment: .topLeading) {

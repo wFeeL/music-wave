@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Действующие настройки вида из набора `--settings-suite` (после ограничения диапазонов) и
     /// то, что еще меняет нагрузку: крыло, которое рисуется на самом деле (по раскладке панели,
     /// не шире предела экрана; у капсулы без выреза крыльев нет), режим энергосбережения
-    /// (30 кадров в секунду) и «Уменьшение движения» (без «вздоха» и свечения). По этой строке
+    /// (30 кадров в секунду) и «Уменьшение движения» (без «вздоха», пульса и свечения). По этой строке
     /// cpu-probe.sh проверяет, на чем шел замер, и переносит ее в шапку отчета.
     private static func logSettings(_ settings: AppSettings, suite: String, layout: NotchLayout?) {
         func number(_ value: Double) -> String { String(format: "%g", value) }
@@ -247,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "толщина \(number(settings.lineThickness))",
             "амплитуда \(number(settings.waveAmplitude))",
             "вздох \(yesNo(settings.beatPulse))",
+            "мягкий пульс \(yesNo(settings.softPulse))",
             "пауза \(yesNo(settings.paused))",
             "энергосбережение \(yesNo(ProcessInfo.processInfo.isLowPowerModeEnabled))",
             "уменьшение движения \(yesNo(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion))",
