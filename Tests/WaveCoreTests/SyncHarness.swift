@@ -54,9 +54,6 @@ struct SyncResult: Sendable {
         times.map { $0 + outputLatency }
     }
 
-    /// F-мера вспышек против `reference` (слышимые моменты) при взаимно однозначном жадном
-    /// сопоставлении: пары в пределах `tolerance` берутся от самой близкой. Учитываются вспышки и
-    /// эталоны с момента `from`.
     /// Точность и полнота вспышек против `reference` с момента `from` (сопоставление один к одному).
     func precisionAndRecall(reference: [Double], tolerance: Double, from: Double) -> (precision: Double, recall: Double) {
         let seen = events.filter { $0 >= from }
@@ -65,6 +62,9 @@ struct SyncResult: Sendable {
         return (seen.isEmpty ? 1 : matched / Double(seen.count), truth.isEmpty ? 1 : matched / Double(truth.count))
     }
 
+    /// F-мера вспышек против `reference` (слышимые моменты) при взаимно однозначном жадном
+    /// сопоставлении: пары в пределах `tolerance` берутся от самой близкой. Учитываются вспышки и
+    /// эталоны с момента `from`.
     func fMeasure(reference: [Double], tolerance: Double, from: Double) -> Double {
         let seen = events.filter { $0 >= from }
         let truth = reference.filter { $0 >= from }
