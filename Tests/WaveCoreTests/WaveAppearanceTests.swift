@@ -205,10 +205,16 @@ struct WaveAppearanceTests {
         #expect(try JSONDecoder().decode(WaveAppearance.self, from: stored).look == .waves)
     }
 
-    /// Линии каждого стиля в крыле (свернутый остров) и в панели.
+    /// Линии каждого стиля в крыле (свернутый остров) и в панели. У «Спектра» над линией призрак
+    /// пика (`spectrumPeaks`, по умолчанию включен): прозрачность 0.35, толщина × 0.7, без
+    /// свечения и без заливки.
     @Test func lookTable() {
         let overall = WaveLine(source: .overall, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
         let spectrum = WaveLine(source: .spectrum, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
+        let ghost = WaveLine(
+            source: .spectrumPeak, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 0.35, widthScale: 0.7
+        )
+        #expect(WaveAppearance.standard.spectrumPeaks)
         for count in 1...6 {
             var appearance = WaveAppearance.standard
             appearance.lineCount = count
@@ -218,11 +224,41 @@ struct WaveAppearanceTests {
             #expect(appearance.lines == appearance.lines(for: .wing))
             appearance.look = .spectrum
             for profile in WaveProfile.allCases {
+                #expect(appearance.lines(for: profile) == [spectrum, ghost])
+            }
+            appearance.spectrumPeaks = false
+            for profile in WaveProfile.allCases {
                 #expect(appearance.lines(for: profile) == [spectrum])
             }
+            // «Волнам» призрак не нужен.
+            appearance.look = .waves
+            appearance.spectrumPeaks = true
+            #expect(!appearance.lines.contains { $0.source == .spectrumPeak })
         }
-        #expect(overall.glows)
-        #expect(spectrum.glows)
+        #expect(overall.glows && overall.fills && overall.widthScale == 1)
+        #expect(spectrum.glows && spectrum.fills && spectrum.widthScale == 1)
+        #expect(!ghost.glows && !ghost.fills)
+        #expect(WaveLine.lines(count: 6).allSatisfy { $0.fills && $0.widthScale == 1 })
+    }
+
+    /// Призрак пика сохраняется; настройки 1.2 без поля дают его включенным, поле не того типа тоже.
+    @Test func spectrumPeaksDecodesAndDefaultsOn() throws {
+        var appearance = WaveAppearance.standard
+        appearance.look = .spectrum
+        appearance.spectrumPeaks = false
+        let data = try JSONEncoder().encode(appearance)
+        #expect(String(decoding: data, as: UTF8.self).contains("\"spectrumPeaks\":false"))
+        #expect(try JSONDecoder().decode(WaveAppearance.self, from: data) == appearance)
+        let old = Data(#"{"wingWidth": 120, "lineCount": 5, "look": "spectrum", "colorByBand": true}"#.utf8)
+        let decoded = try JSONDecoder().decode(WaveAppearance.self, from: old)
+        #expect(decoded.spectrumPeaks && decoded.look == .spectrum && decoded.lineCount == 5)
+        let broken = Data(#"{"spectrumPeaks": "yes"}"#.utf8)
+        #expect(try JSONDecoder().decode(WaveAppearance.self, from: broken).spectrumPeaks)
+        let built = WaveAppearance(
+            wingWidth: 64, colorMode: .artwork, glowSize: 1, lineCount: 3, fill: 0, thickness: 1, amplitude: 1,
+            spectrumPeaks: false
+        )
+        #expect(!built.spectrumPeaks)
     }
 
     @Test func lookGeometryTable() {

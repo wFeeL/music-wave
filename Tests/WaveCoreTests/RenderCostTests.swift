@@ -193,6 +193,8 @@ struct RenderCostTests {
 
     /// Каждый стиль на тех же настройках стоит не больше «Волн»: и на свернутом острове (`.wing`),
     /// и в раскрытой панели (`.panel`), со свечением и без него, с опциями экрана и без них.
+    /// «Спектр» здесь без призрака пика: призрак это отдельная тонкая обводка
+    /// (`spectrumPeakCostsOneThinStroke`), с ним «Спектр» дороже только одной волны общего уровня.
     @Test func everyLookCostsNoMoreThanWaves() {
         var checked = 0
         for lineCount in 1...6 {
@@ -212,6 +214,7 @@ struct RenderCostTests {
                                     for look in WaveLook.allCases {
                                         var styled = appearance
                                         styled.look = look
+                                        styled.spectrumPeaks = false
                                         let cost = styled.renderCost(for: profile)
                                         #expect(cost > 0, "\(look) \(profile)")
                                         #expect(
@@ -235,14 +238,54 @@ struct RenderCostTests {
         var appearance = WaveAppearance.standard
         #expect(appearance.renderCost(for: .wing) == appearance.renderCost)
         #expect(appearance.renderCost(for: .panel) == 1)
-        // «Спектр» стоит как одна волна общего уровня.
+        // «Спектр» без призрака стоит как одна волна общего уровня.
         var one = appearance
         one.lineCount = 1
         appearance.look = .spectrum
+        appearance.spectrumPeaks = false
         for profile in WaveProfile.allCases {
             #expect(abs(appearance.renderCost(for: profile) - one.renderCost(for: profile)) < 1e-12)
         }
         #expect(appearance.renderCost == appearance.renderCost(for: .wing))
+    }
+
+    /// Призрак пика «Спектра» считается через `lines(for:)`: еще одна обводка толщиной × 0.7, без
+    /// свечения и без заливки. «Спектр» с призраком дешевле «Волн» по умолчанию.
+    @Test func spectrumPeakCostsOneThinStroke() {
+        for fill in [0.0, 0.6] {
+            for thickness in [0.5, 1, 2] {
+                var plain = WaveAppearance.standard
+                plain.look = .spectrum
+                plain.fill = fill
+                plain.thickness = thickness
+                plain.spectrumPeaks = false
+                var ghost = plain
+                ghost.spectrumPeaks = true
+                // Работа вида по умолчанию в крыле: три обводки и два свечения. Крыло 64 pt и панель
+                // без множителя ширины.
+                let unit = 3 * (0.75 + 0.25) + 2 * (0.75 + 0.25)
+                for profile in WaveProfile.allCases {
+                    let extra = (0.75 + 0.25 * thickness * 0.7) / unit
+                    #expect(abs(ghost.renderCost(for: profile) - plain.renderCost(for: profile) - extra) < 1e-12)
+                }
+            }
+        }
+        // С призраком «Спектр» не дороже «Волн» от двух линий, дороже только одной волны.
+        for lineCount in 1...6 {
+            var waves = WaveAppearance.standard
+            waves.lineCount = lineCount
+            var spectrum = waves
+            spectrum.look = .spectrum
+            for profile in WaveProfile.allCases {
+                #expect((spectrum.renderCost(for: profile) <= waves.renderCost(for: profile)) == (lineCount >= 2))
+            }
+        }
+        var spectrum = WaveAppearance.standard
+        spectrum.look = .spectrum
+        #expect(spectrum.renderCost < WaveAppearance.standard.renderCost)
+        // В облегченном виде призрак остается, свечения нет.
+        let light = spectrum.lightened()
+        #expect(light.lines(for: .wing).count == 2)
     }
 
     /// Проход свечения не сохраняется: в настройках его нет, прочитанный вид всегда со свечением.

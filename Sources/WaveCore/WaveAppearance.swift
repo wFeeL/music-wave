@@ -101,7 +101,8 @@ public struct WaveLookGeometry: Sendable, Equatable {
 }
 
 /// Одна нарисованная линия волны. Основные линии идут от уровня своего слоя, эхо повторяет
-/// основную линию тише и прозрачнее со сдвигом фазы, чтобы читаться как глубина.
+/// основную линию тише и прозрачнее со сдвигом фазы, чтобы читаться как глубина. Призрак пика
+/// «Спектра» тоньше и прозрачнее линии спектра и лежит над ней.
 public struct WaveLine: Sendable, Equatable {
     /// Чей уровень двигает линию.
     public enum Source: Sendable, Equatable {
@@ -110,6 +111,9 @@ public struct WaveLine: Sendable, Equatable {
         case overall
         /// Уровни 24 полос: форма `SpectrumShape.samples`, а не `WaveShape`.
         case spectrum
+        /// Призрак пика над линией спектра: та же форма `SpectrumShape.samples` через пики полос
+        /// (`SpectrumMotion.peaks`), точки градиента линии спектра.
+        case spectrumPeak
     }
 
     public var source: Source
@@ -122,20 +126,31 @@ public struct WaveLine: Sendable, Equatable {
     public var amplitudeScale: Float
     /// Множитель прозрачности.
     public var opacity: Float
+    /// Множитель толщины линии.
+    public var widthScale: Double
 
     public init(
-        source: Source, shape: WaveLayer, phaseOffset: Double, amplitudeScale: Float, opacity: Float
+        source: Source, shape: WaveLayer, phaseOffset: Double, amplitudeScale: Float, opacity: Float,
+        widthScale: Double = 1
     ) {
         self.source = source
         self.shape = shape
         self.phaseOffset = phaseOffset
         self.amplitudeScale = amplitudeScale
         self.opacity = opacity
+        self.widthScale = widthScale
     }
 
     /// Есть ли у линии свечение (размытая копия толстой линии под ней): только у основных линий
-    /// баса и середины. Верх должен быть четким, эхо тоже.
-    public var glows: Bool { phaseOffset == 0 && shape != .high }
+    /// баса и середины. Верх должен быть четким, эхо и призрак пика тоже.
+    public var glows: Bool { phaseOffset == 0 && shape != .high && source != .spectrumPeak }
+
+    /// Заливается ли линия при «Заливке» больше 0: все, кроме призрака пика.
+    public var fills: Bool { source != .spectrumPeak }
+
+    /// Призрак пика «Спектра»: прозрачность и множитель толщины.
+    static let spectrumPeakOpacity: Float = 0.35
+    static let spectrumPeakWidthScale = 0.7
 
     /// Сдвиг фазы эха, рад.
     static let echoPhase = 0.6
@@ -257,6 +272,9 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     public var colorByBand: Bool
     /// Стиль волн: по умолчанию «Волны», неизвестный сохраненный стиль тоже дает «Волны».
     public var look: WaveLook
+    /// Призрак пика над линией «Спектра» (`WaveLine.Source.spectrumPeak`). По умолчанию включен,
+    /// настройки без поля тоже дают его включенным.
+    public var spectrumPeaks: Bool
     /// Рисуется ли свечение линий (размытая копия под ними). Не настройка и не сохраняется:
     /// выключают его только `lightened()` и `adapted(to:)` при «Уменьшить прозрачность».
     public private(set) var glowPass = true
@@ -284,7 +302,7 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         wingWidth: Double, colorMode: WaveColorMode, glowSize: Double,
         lineCount: Int, fill: Double, thickness: Double, amplitude: Double,
         colorFlow: Double = 0, colorByBand: Bool = false, look: WaveLook = .waves,
-        glowSharpness: Double = 0.4
+        glowSharpness: Double = 0.4, spectrumPeaks: Bool = true
     ) {
         self.wingWidth = Self.clamped(wingWidth, Limits.wingWidth, Defaults.wingWidth)
         self.colorMode = colorMode
@@ -297,10 +315,12 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
         self.colorFlow = Self.clamped(colorFlow, Limits.colorFlow, Defaults.colorFlow)
         self.colorByBand = colorByBand
         self.look = look
+        self.spectrumPeaks = spectrumPeaks
     }
 
     private enum CodingKeys: String, CodingKey {
         case wingWidth, colorMode, glowSize, glowSharpness, lineCount, fill, thickness, amplitude, colorFlow, colorByBand, look
+        case spectrumPeaks
     }
 
     /// Ключ 1.2: «Радиус свечения» читается как размер (запись его больше не пишет).
@@ -329,7 +349,8 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
             colorFlow: value(.colorFlow, standard.colorFlow),
             colorByBand: value(.colorByBand, standard.colorByBand),
             look: value(.look, standard.look),
-            glowSharpness: value(.glowSharpness, standard.glowSharpness)
+            glowSharpness: value(.glowSharpness, standard.glowSharpness),
+            spectrumPeaks: value(.spectrumPeaks, standard.spectrumPeaks)
         )
     }
 
@@ -349,13 +370,20 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     /// капсула без выреза, у «Волн» и «Спектра» линии в обоих случаях одни и те же),
     /// `.panel` это раскрытая панель.
     /// - «Волны»: `WaveLine.lines(count: lineCount)`.
-    /// - «Спектр»: одна линия `.spectrum` формы середины.
+    /// - «Спектр»: линия `.spectrum` формы середины и, при `spectrumPeaks`, призрак пика
+    ///   `.spectrumPeak` над ней (прозрачность 0.35, толщина × 0.7, без свечения и заливки).
     public func lines(for profile: WaveProfile) -> [WaveLine] {
         switch look {
         case .waves:
             return WaveLine.lines(count: lineCount)
         case .spectrum:
-            return [WaveLine(source: .spectrum, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)]
+            let line = WaveLine(source: .spectrum, shape: .mid, phaseOffset: 0, amplitudeScale: 1, opacity: 1)
+            guard spectrumPeaks else { return [line] }
+            let peak = WaveLine(
+                source: .spectrumPeak, shape: .mid, phaseOffset: 0, amplitudeScale: 1,
+                opacity: WaveLine.spectrumPeakOpacity, widthScale: WaveLine.spectrumPeakWidthScale
+            )
+            return [line, peak]
         }
     }
 
@@ -415,10 +443,11 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
     /// одному ползунку и годится для сравнения видов, а не для процентов процессора. Грубая
     /// модель по замеру и профилю на M2 (60 Гц): кадр стоит столько, сколько проходов по путям
     /// линий (построение, разбиение кривых, закраска) и размытия свечения.
-    /// - Обводка линии: `0.75 + 0.25 × толщина`. Точек у линии постоянное число, путь строится
-    ///   одинаково, с толщиной растет только закрашиваемая полоса.
-    /// - Заливка (любая больше 0): еще `0.5` на линию. Путь общий с обводкой, но маска и цвет это
-    ///   две закраски площади.
+    /// - Обводка линии: `0.75 + 0.25 × толщина` (× множитель толщины линии `WaveLine.widthScale`).
+    ///   Точек у линии постоянное число, путь строится одинаково, с толщиной растет только
+    ///   закрашиваемая полоса.
+    /// - Заливка (любая больше 0): еще `0.5` на линию, которая заливается (`WaveLine.fills`). Путь
+    ///   общий с обводкой, но маска и цвет это две закраски площади.
     /// - Свечение (основные бас и середина, `WaveLine.glows`): обводка × «Размер свечения».
     ///   Размытие разделимое, его цена на пиксель растет линейно с радиусом (поле текстуры тоже).
     ///   Без прохода свечения (`lightened()`) ноль.
@@ -443,9 +472,10 @@ public struct WaveAppearance: Codable, Equatable, Sendable {
 
     private static func work(_ appearance: WaveAppearance, profile: WaveProfile) -> Double {
         let lines = appearance.lines(for: profile)
-        let stroke = 0.75 + 0.25 * appearance.thickness * appearance.lookGeometry.widthScale
-        let strokes = Double(lines.count) * stroke
-        let fills = appearance.fill > 0 ? 0.5 * Double(lines.count) : 0
+        let width = appearance.thickness * appearance.lookGeometry.widthScale
+        let stroke = 0.75 + 0.25 * width
+        let strokes = lines.reduce(0) { $0 + 0.75 + 0.25 * width * $1.widthScale }
+        let fills = appearance.fill > 0 ? 0.5 * Double(lines.filter(\.fills).count) : 0
         let glows = appearance.glowPass
             ? Double(lines.filter(\.glows).count) * stroke * appearance.glowSize
             : 0
