@@ -335,7 +335,7 @@ extension AppSettingsTests {
         Self.withDefaults { defaults in
             defaults.set(Data("x".utf8), forKey: "wf.colorMode")
             #expect(AppSettings(defaults: defaults).colorMode == .artwork)
-            defaults.set(Data(#"{"preset":{"_0":"rainbow"}}"#.utf8), forKey: "wf.colorMode")
+            defaults.set(Data(#"{"preset":{"_0":"plasma"}}"#.utf8), forKey: "wf.colorMode")
             #expect(AppSettings(defaults: defaults).colorMode == .artwork)
             defaults.set("не данные", forKey: "wf.colorMode")
             #expect(AppSettings(defaults: defaults).colorMode == .artwork)
