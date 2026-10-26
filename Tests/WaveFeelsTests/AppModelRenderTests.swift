@@ -73,6 +73,109 @@ struct AppModelRenderTests {
         #expect(off.ambient == 0)
     }
 
+    /// Мягкая остановка: после последнего кадра со звуком показанные уровни и полосы угасают за
+    /// 0.6 с от показанных (на 0.3 с ровно вдвое), пружины падают своим ходом, вспышки по
+    /// расписанию, пока тихо, не проходят. С выключенной настройкой уровни идут за пружинами.
+    @Test func softStopFadesShownValuesOnSilence() throws {
+        func run(softStop: Bool) throws -> (loud: IslandVisuals, middle: IslandVisuals, end: IslandVisuals) {
+            let (model, defaults, suite) = try Self.makeModel("render-soft-stop-\(softStop)")
+            defer { defaults.removePersistentDomain(forName: suite) }
+            #expect(model.settings.softStop)
+            model.settings.softStop = softStop
+            let t = 4_000.0
+            let lead = LatencyCalculator.presentationLead(refreshPeriod: model.renderPeriod)
+            model.store.publish(Self.frame(bass: 0.8), at: t)
+            model.store.publish(Self.frame(bass: 0.8), at: t + 1 + lead)
+            var loud = model.islandVisuals(now: t, timelineTime: 0, reduceMotion: false)
+            for step in 1...60 {
+                loud = model.islandVisuals(now: t + Double(step) / 60, timelineTime: 0, reduceMotion: false)
+            }
+            // Тишина с ближайшего кадра, а на нем по расписанию полная вспышка.
+            model.store.publish(.silent, at: t + 1 + lead + 1.0 / 60)
+            let beat = GlowEvent(id: 1, time: t + 1 + 10.0 / 60 + lead + BeatGlow.lead, amplitude: 1, predicted: true)
+            model.store.publishSchedule(BeatSchedule(events: [beat], bpm: 120, period: 0.5, confidence: 0.9, locked: true))
+            var middle = loud
+            var end = loud
+            for step in 1...42 {
+                let visuals = model.islandVisuals(now: t + 1 + Double(step) / 60, timelineTime: 0, reduceMotion: false)
+                if step == 10, softStop {
+                    #expect(visuals.glow == 0)
+                    #expect(visuals.pulse == 0)
+                }
+                if step == 18 { middle = visuals }
+                end = visuals
+            }
+            return (loud, middle, end)
+        }
+
+        let on = try run(softStop: true)
+        let loudLevel = on.loud.frame.level
+        #expect(loudLevel > 0.7)
+        #expect(abs(on.middle.frame.level - loudLevel * 0.5) < 1e-3)
+        #expect(abs(on.middle.frame.layers[1] - on.loud.frame.layers[1] * 0.5) < 1e-3)
+        #expect(on.middle.frame.bands.allSatisfy { abs($0 - 0.4) < 1e-3 })
+        #expect(on.middle.sampled == .silent)
+        #expect(on.end.frame.bands.allSatisfy { $0 == 0 })
+        #expect(on.end.frame.level < 0.05)
+
+        let off = try run(softStop: false)
+        #expect(off.middle.frame.level < loudLevel * 0.2)
+        #expect(off.middle.frame.bands.allSatisfy { $0 == 0 })
+    }
+
+    /// Пауза по Now Playing считается для мягкой остановки только у источника-приложения; полоса
+    /// панели гаснет по `nowPlayingPaused` у любого источника.
+    @Test func sourcePausedOnlyForApplications() throws {
+        let (model, defaults, suite) = try Self.makeModel("render-source-paused")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var paused = NowPlayingInfo(bundleIdentifier: "ru.yandex.desktop.music", title: "Трек", artist: nil, isPlaying: false)
+        model.showPreview(
+            state: .collapsed, track: paused, palette: nil, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
+            glow: 0, pulse: 0, time: 1, nowPlayingAvailable: true
+        )
+        model.settings.source = .systemWide
+        #expect(model.nowPlayingPaused)
+        #expect(!model.sourcePaused)
+        model.settings.source = .application(
+            bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Яндекс Музыка.app", displayName: "Яндекс Музыка"
+        )
+        #expect(model.sourcePaused)
+        paused.isPlaying = true
+        model.showPreview(
+            state: .collapsed, track: paused, palette: nil, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
+            glow: 0, pulse: 0, time: 1, nowPlayingAvailable: true
+        )
+        #expect(!model.nowPlayingPaused)
+        #expect(!model.sourcePaused)
+    }
+
+    /// Переливание двигается на ограниченный шаг (`maxVisualStep`: после сна цвет не прыгает),
+    /// «Уменьшение движения» его останавливает; снимки держат заданную фазу. Палитра кадра без
+    /// течения, свечение берет первый цвет с течением.
+    @Test func paletteFlowAdvancesWithCappedStep() throws {
+        let (model, defaults, suite) = try Self.makeModel("render-flow")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.store.publish(Self.frame(bass: 0.5), at: 0)
+        model.settings.colorFlow = 1
+        let first = model.islandVisuals(now: 5, timelineTime: 0, reduceMotion: false)
+        #expect(first.flowPhase == 0)
+        #expect(first.glowSourceColor == first.palette[0])
+        // Час без кадров (сон): шаг не длиннее 0.1 с, период на скорости 1 равен 8 с.
+        let woke = model.islandVisuals(now: 3_605, timelineTime: 0, reduceMotion: false)
+        #expect(abs(woke.flowPhase - AppModel.maxVisualStep / PaletteFlow.fastestPeriod) < 1e-9)
+        let calm = model.islandVisuals(now: 3_605.05, timelineTime: 0, reduceMotion: true)
+        #expect(calm.flowPhase == woke.flowPhase)
+        #expect(calm.palette == woke.palette)
+        #expect(woke.glowSourceColor == PaletteFlow.apply(woke.palette, phase: woke.flowPhase)[0])
+
+        model.showPreview(
+            state: .collapsed, track: nil, palette: nil, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
+            glow: 0, pulse: 0, time: 10, nowPlayingAvailable: true, flowPhase: 0.4
+        )
+        #expect(model.islandVisuals(now: 10, timelineTime: 10, reduceMotion: false).flowPhase == 0.4)
+        #expect(model.islandVisuals(now: 11, timelineTime: 11, reduceMotion: false).flowPhase == 0.4)
+    }
+
     @Test func previewKeepsFrameValues() throws {
         let (model, defaults, suite) = try Self.makeModel("render-preview")
         defer { defaults.removePersistentDomain(forName: suite) }

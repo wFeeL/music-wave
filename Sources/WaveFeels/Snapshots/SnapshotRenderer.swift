@@ -404,7 +404,8 @@ enum SnapshotRenderer {
             time: moment.time,
             nowPlayingAvailable: scene.nowPlaying,
             showsBanner: scene.banner,
-            displayOptions: scene.displayOptions
+            displayOptions: scene.displayOptions,
+            flowPhase: scene.flowPhase
         )
         // Рамка панели по крылу и радиусу свечения сцены, как у окна в работе.
         var sized = scene.pill ? pillLayout : notchLayout
@@ -584,6 +585,9 @@ private struct SnapshotScene {
     /// Системные «Увеличить контраст» и «Уменьшить прозрачность» снимка: не те, что на машине,
     /// где его снимают. По умолчанию обе выключены.
     let displayOptions: DisplayOptions
+    /// Фаза переливания снимка (`PaletteFlow.phase`): у снимков она не двигается, кадр повторяем.
+    /// По умолчанию 0, цвета без течения.
+    let flowPhase: Double
 
     init(
         name: String, state: IslandState, moment: DemoMoment, palette: [PaletteColor]?,
@@ -591,7 +595,7 @@ private struct SnapshotScene {
         track: NowPlayingInfo? = SnapshotRenderer.track, nowPlaying: Bool = true,
         appearance: WaveAppearance = .standard, banner: Bool = false,
         progressLine: Bool = false, artworkGlow: Bool = false, softStop: Bool = false,
-        displayOptions: DisplayOptions = .standard
+        displayOptions: DisplayOptions = .standard, flowPhase: Double = 0
     ) {
         self.name = name
         self.state = state
@@ -607,6 +611,7 @@ private struct SnapshotScene {
         self.artworkGlow = artworkGlow
         self.softStop = softStop
         self.displayOptions = displayOptions
+        self.flowPhase = flowPhase
     }
 }
 

@@ -1,59 +1,89 @@
 import Foundation
 
-/// Мягкая остановка на паузе: когда звук пропал, показанные волны, полосы, уровень и свечение
-/// не обрываются, а затихают за `duration` секунд.
+/// Мягкая остановка на паузе: когда звук пропал, показанные волны, полосы, уровень, свечение,
+/// «вздох» и мягкий пульс не обрываются, а затихают за `duration` секунд.
 ///
-/// Пока звук идет, вход проходит как есть, а его значения запоминаются (последний кадр со звуком).
-/// После перехода в тишину слои, полосы и уровень считаются как
-/// `max(вход, удержанное × (1 − smoothstep(0, duration, t)))`, где `t` отсчитывается от последнего
-/// кадра со звуком; свечение как удержанное × тот же множитель, поэтому новые вспышки, пока тихо,
-/// не проходят. Множитель зависит только от времени, не от частоты кадров. Буферы удержания
-/// выделяются один раз: на кадре нет выделений, а значения, которые не меняются, не записываются
-/// (массив вызывающего не копируется). Слои и полосы другой длины, чем при запоминании, проходят
-/// как есть. Часы ведут себя как в `PaletteFade`: назад, и угасание начинается заново с того же
-/// места; не конечное время кончает угасание.
+/// Пока звук идет, показанные значения запоминаются (последний кадр со звуком). После перехода в
+/// тишину слои, полосы и уровень считаются как `max(вход, удержанное × (1 − smoothstep(0, duration,
+/// t)))`, где `t` отсчитывается от последнего кадра со звуком; свечение, «вздох» и мягкий пульс как
+/// удержанное × тот же множитель, поэтому новые вспышки, вздохи и горбы пульса, пока тихо, не
+/// проходят (расписание доли может предсказывать удары и после того, как звук пропал).
+/// Если звук вернулся посреди угасания, пол угасания (удержанное × множитель) идет дальше по тем же
+/// часам, и все значения, в том числе свечение, «вздох» и пульс, считаются как `max(вход, пол)`, пока множитель не
+/// дойдет до нуля: пружины поднимаются от нуля не сразу, и без пола показанное провалилось бы на
+/// кадр. Новая тишина в это время угасает от того, что было показано на последнем кадре со звуком.
+/// Множитель зависит только от времени, не от частоты кадров. Буферы удержания выделяются один
+/// раз: на кадре нет выделений, а значения, которые не меняются, не записываются (массив
+/// вызывающего не копируется). Слои и полосы другой длины, чем при запоминании, проходят как есть.
+/// Часы ведут себя как в `PaletteFade`: назад, и угасание начинается заново с того же места; не
+/// конечное время кончает угасание.
 public struct SoftStop: Sendable {
     /// Время угасания, с.
     public static let duration = 0.6
 
-    private var heldLayers: [Float] = []
-    private var heldBands: [Float] = []
-    private var heldLevel: Float = 0
-    private var heldGlow: Float = 0
+    /// Значения, от которых идет текущее угасание.
+    private var held = Values()
+    /// Показанные значения последнего кадра со звуком: от них пойдет следующее угасание.
+    private var recent = Values()
     /// Время последнего кадра со звуком, пока звук идет; `nil` без звука или с не конечным временем.
     private var lastSound: Double?
-    /// Начало угасания; `nil`, пока звук идет или когда угасание кончилось.
+    /// Начало угасания; `nil`, пока угасания нет или когда оно кончилось.
     private var fadeStart: Double?
 
     public init() {}
 
-    /// Угасание идет: последний `apply` был в тишине, и множитель еще больше нуля. Остров по нему
-    /// не уходит в редкие кадры простоя, пока волны затихают.
+    /// Угасание идет: множитель еще больше нуля (тишина или звук, вернувшийся посреди угасания).
+    /// Остров по нему не уходит в редкие кадры простоя, пока волны затихают.
     public var isFading: Bool { fadeStart != nil }
 
-    /// Пропускает показанные значения одного кадра. `silent`: звука нет (тишина или пауза
-    /// источника), `now`: время кадра, с.
+    /// Пропускает показанные значения одного кадра без «вздоха» и мягкого пульса. `silent`: звука
+    /// нет (тишина или пауза источника), `now`: время кадра, с.
     public mutating func apply(
         layers: inout [Float], bands: inout [Float], level: inout Float, glow: inout Float, silent: Bool, now: Double
     ) {
+        var pulse: Float = 0
+        var ambient: Float = 0
+        apply(
+            layers: &layers, bands: &bands, level: &level, glow: &glow, pulse: &pulse, ambient: &ambient,
+            silent: silent, now: now
+        )
+    }
+
+    /// Пропускает показанные значения одного кадра вместе с «вздохом» `pulse` и мягким пульсом
+    /// `ambient`.
+    public mutating func apply(
+        layers: inout [Float], bands: inout [Float], level: inout Float, glow: inout Float, pulse: inout Float,
+        ambient: inout Float, silent: Bool, now: Double
+    ) {
         guard silent else {
-            Self.hold(layers, into: &heldLayers)
-            Self.hold(bands, into: &heldBands)
-            heldLevel = Self.finite(level)
-            heldGlow = Self.finite(glow)
+            if fadeStart != nil {
+                let factor = Float(fadeFactor(now: now))
+                if factor > 0 {
+                    Self.fade(&layers, held: held.layers, factor: factor)
+                    Self.fade(&bands, held: held.bands, factor: factor)
+                    level = Self.faded(level, held: held.level, factor: factor)
+                    glow = Self.faded(glow, held: held.glow, factor: factor)
+                    pulse = Self.faded(pulse, held: held.pulse, factor: factor)
+                    ambient = Self.faded(ambient, held: held.ambient, factor: factor)
+                }
+            }
+            recent.store(layers: layers, bands: bands, level: level, glow: glow, pulse: pulse, ambient: ambient)
             lastSound = now.isFinite ? now : nil
-            fadeStart = nil
             return
         }
         if let lastSound {
+            // Буферы меняются местами: без копий и выделений.
+            swap(&held, &recent)
             fadeStart = lastSound
             self.lastSound = nil
         }
         let factor = Float(fadeFactor(now: now))
-        Self.fade(&layers, held: heldLayers, factor: factor)
-        Self.fade(&bands, held: heldBands, factor: factor)
-        level = Self.faded(level, held: heldLevel, factor: factor)
-        glow = heldGlow * factor
+        Self.fade(&layers, held: held.layers, factor: factor)
+        Self.fade(&bands, held: held.bands, factor: factor)
+        level = Self.faded(level, held: held.level, factor: factor)
+        glow = held.glow * factor
+        pulse = held.pulse * factor
+        ambient = held.ambient * factor
     }
 
     /// `1 − smoothstep(0, duration, t)` на момент `now`; 0, когда угасание кончилось или его не было.
@@ -77,17 +107,6 @@ public struct SoftStop: Sendable {
         return 1 - WavePaint.smoothstep(0, Self.duration, elapsed)
     }
 
-    /// Копирует `values` в `held` без нового выделения, если длина та же.
-    private static func hold(_ values: [Float], into held: inout [Float]) {
-        if held.count != values.count {
-            held.removeAll(keepingCapacity: true)
-            held.append(contentsOf: repeatElement(0, count: values.count))
-        }
-        for index in values.indices {
-            held[index] = finite(values[index])
-        }
-    }
-
     private static func fade(_ values: inout [Float], held: [Float], factor: Float) {
         guard values.count == held.count else { return }
         for index in values.indices {
@@ -102,7 +121,37 @@ public struct SoftStop: Sendable {
         return value.isFinite ? max(value, floor) : floor
     }
 
-    private static func finite(_ value: Float) -> Float {
+    fileprivate static func finite(_ value: Float) -> Float {
         value.isFinite ? value : 0
+    }
+
+    /// Запомненные значения одного кадра; не конечные хранятся как 0.
+    private struct Values: Sendable {
+        var layers: [Float] = []
+        var bands: [Float] = []
+        var level: Float = 0
+        var glow: Float = 0
+        var pulse: Float = 0
+        var ambient: Float = 0
+
+        mutating func store(layers: [Float], bands: [Float], level: Float, glow: Float, pulse: Float, ambient: Float) {
+            Self.copy(layers, into: &self.layers)
+            Self.copy(bands, into: &self.bands)
+            self.level = SoftStop.finite(level)
+            self.glow = SoftStop.finite(glow)
+            self.pulse = SoftStop.finite(pulse)
+            self.ambient = SoftStop.finite(ambient)
+        }
+
+        /// Копирует `values` в `stored` без нового выделения, если длина та же.
+        private static func copy(_ values: [Float], into stored: inout [Float]) {
+            if stored.count != values.count {
+                stored.removeAll(keepingCapacity: true)
+                stored.append(contentsOf: repeatElement(0, count: values.count))
+            }
+            for index in values.indices {
+                stored[index] = SoftStop.finite(values[index])
+            }
+        }
     }
 }

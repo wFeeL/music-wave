@@ -197,6 +197,14 @@ final class AppModel {
     @ObservationIgnored private var previewGlow: Float = 0
     @ObservationIgnored private var previewPulse: Float = 0
     @ObservationIgnored private var paletteFade = PaletteFade(palette: PaletteExtractor.fallback)
+    /// Переливание палитры волн и свечения («Скорость переливания»): фаза идет в
+    /// `IslandVisuals.flowPhase`, у снимков ее задает `showPreview`.
+    @ObservationIgnored private var paletteFlow = PaletteFlow()
+    /// Мягкая остановка показанных значений кадра («Мягкая остановка», `islandVisuals`).
+    @ObservationIgnored private var softStop = SoftStop()
+    /// Полосы кадра для мягкой остановки, пока она их меняет (тишина или угасание): один буфер на
+    /// все кадры вместо копии `sampled.bands` на каждом кадре угасания.
+    @ObservationIgnored private var softStopBands: [Float] = []
     /// `wavePalette` для режима `mode` и палитры обложки `artwork`.
     @ObservationIgnored private var wavePaletteCache: (mode: WaveColorMode, artwork: [PaletteColor], palette: [PaletteColor])?
     @ObservationIgnored private var lastVisualTime: Double?
@@ -1092,6 +1100,20 @@ final class AppModel {
         previewNowPlaying ?? adapter.isAvailable
     }
 
+    /// Последний трек источника стоит на паузе, и Now Playing работает: полоса раскрытой панели,
+    /// затихнув, гаснет (`IslandWavesView.paused`), для любого источника.
+    var nowPlayingPaused: Bool {
+        nowPlayingAvailable && lastTrack?.isPlaying == false
+    }
+
+    /// Пауза источника по Now Playing для мягкой остановки: только у источника-приложения. У всего
+    /// звука системы Now Playing не говорит, молчит ли захват (играть может другое приложение), и
+    /// мягкая остановка там идет только по тишине.
+    var sourcePaused: Bool {
+        guard case .application = effectiveSource else { return false }
+        return nowPlayingPaused
+    }
+
     /// Трек для панели с прогрессом и кнопками (`ExpandedPanelView`), см. `panelTrack(...)`.
     var panelTrack: NowPlayingInfo? {
         // Снимки задают трек напрямую, адаптер в них не запущен.
@@ -1270,30 +1292,44 @@ final class AppModel {
     /// Кадр будет на экране в `tP = now + presentationLead(R)`, `R = renderPeriod`: на этот момент
     /// берется кадр анализа, смешанный из соседних (`FrameStore.frame(at:)`), и свечение доли по
     /// расписанию (`BeatGlow`, с памятью о вспышках). Уровни слоев и общий уровень идут через пружины
-    /// (`LevelSpring`), фазы волн по сглаженным уровням (при «Уменьшении движения» вдвое медленнее),
-    /// затем к басу прибавляется акцент доли (`BeatGlow.accented`), уже после пружин, чтобы он
-    /// оставался четким. «Вздох» по весу показа расписания (`BeatPulse.breath`): с полным весом
-    /// пружина, получившая свечение на 50 мс раньше, без веса само свечение, между ними смесь. Мягкий
-    /// пульс (`BeatGlow.ambient(at:info:frame:)` на тот же момент показа: сетка из расписания, энергия
-    /// бочки из кадра `sampled`) идет отдельным каналом `ambient`, только с включенным «Мягким
-    /// пульсом». «Уменьшение движения»: ни свечения, ни «вздоха», ни пульса, ни
-    /// акцента. Шаг ограничен `maxVisualStep`, повторный вызов с тем же `now` ничего не двигает. Кадр
-    /// идет в замер отрисовки (`timelineTime`: дата `TimelineView`), раз в 10 с строки замера пишутся
-    /// в лог (`recordRender`), и в запись ритма вместе с пульсом. Уровни, свечение, «вздох» и пульс
-    /// (через `max`) и переход палитры кадра идут в детектор простоя (`feedRenderIdle`): `renderIdle`
-    /// по нему ставит тик, выход из простоя сразу после кадра. Снимки (`previewing`) получают
-    /// заданные кадр, свечение и «вздох» без шага, без пульса, детектор не трогают.
+    /// (`LevelSpring`), фазы волн по сглаженным уровням (при «Уменьшении движения» вдвое медленнее).
+    /// «Вздох» по весу показа расписания (`BeatPulse.breath`): с полным весом пружина, получившая
+    /// свечение на 50 мс раньше, без веса само свечение, между ними смесь. Мягкий пульс
+    /// (`BeatGlow.ambient(at:info:frame:)` на тот же момент показа: сетка из расписания, энергия бочки
+    /// из кадра `sampled`) идет отдельным каналом `ambient`, только с включенным «Мягким пульсом».
+    ///
+    /// «Мягкая остановка» (`SoftStop`): показанные копии слоев, полос и уровня, свечение, «вздох» и
+    /// пульс угасают за 0.6 с, когда звука нет: уровень кадра не выше порога шума волн
+    /// (`LevelProcessor.noiseFloorDB`) или источник-приложение на паузе по Now Playing
+    /// (`sourcePaused`). Пока тихо, новых вспышек, вздохов и горбов пульса нет, после угасания пульс
+    /// стоит на нуле: слабое свечение без музыки выглядело бы случайной вспышкой. Пружины не
+    /// трогаются. Затем к басу показанных слоев прибавляется акцент доли от большего из свечения и
+    /// пульса (`BeatGlow.accented`), уже после пружин, чтобы он оставался четким.
+    ///
+    /// Переливание (`PaletteFlow`) двигается на тот же ограниченный шаг, что и пружины («Уменьшение
+    /// движения» его останавливает), фаза идет в `flowPhase`, палитра кадра остается без течения.
+    /// «Уменьшение движения»: ни свечения, ни «вздоха», ни пульса, ни акцента, ни переливания. Шаг
+    /// ограничен `maxVisualStep` (после сна ни скачка уровней, ни скачка цвета), повторный вызов с тем
+    /// же `now` ничего не двигает. Кадр идет в замер отрисовки (`timelineTime`: дата `TimelineView`),
+    /// раз в 10 с строки замера пишутся в лог (`recordRender`), и в запись ритма вместе с пульсом
+    /// (показанные свечение и пульс, после мягкой остановки). Уровни, свечение, «вздох» и пульс после
+    /// мягкой остановки, а еще идущие переход палитры, угасание и переливание идут в детектор простоя
+    /// (`feedRenderIdle`): `renderIdle` по нему ставит тик, выход из простоя сразу после кадра.
+    /// Снимки (`previewing`) получают заданные кадр, свечение, «вздох» и фазу переливания без шага,
+    /// без пульса и без мягкой остановки, детектор не трогают.
     func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
         let period = renderPeriod
         let presented = now + LatencyCalculator.presentationLead(refreshPeriod: period)
         let sampled = store.frame(at: presented)
         if previewing {
             let glow = reduceMotion ? 0 : previewGlow
-            let frame = springFrame(sampled, layers: layerSprings.map(\.value), glow: glow)
+            let frame = springFrame(
+                sampled, layers: layerSprings.map(\.value), bands: sampled.bands, level: levelSpring.value, glow: glow
+            )
             let shown = paletteFade.palette(target: wavePalette, now: now)
             return IslandVisuals(
                 frame: frame, sampled: sampled, motion: motion, palette: shown,
-                glow: glow, pulse: reduceMotion ? 0 : previewPulse, time: now
+                glow: glow, pulse: reduceMotion ? 0 : previewPulse, time: now, flowPhase: paletteFlow.phase
             )
         }
         var dt = 0.0
@@ -1308,8 +1344,12 @@ final class AppModel {
             layerSprings[index].step(toward: target, dt: dt)
         }
         levelSpring.step(toward: sampled.level, dt: dt)
-        let springs = layerSprings.map(\.value)
-        motion.advance(layers: springs, dt: reduceMotion ? dt / 2 : dt)
+        // Показанные копии уровней: мягкая остановка меняет их, а не пружины.
+        var layers = layerSprings.map(\.value)
+        var level = levelSpring.value
+        motion.advance(layers: layers, dt: reduceMotion ? dt / 2 : dt)
+        let flowSpeed = reduceMotion ? 0 : settings.colorFlow
+        paletteFlow.advance(dt: dt, speed: flowSpeed)
 
         var glow: Float = 0
         var breath: Float = 0
@@ -1327,7 +1367,31 @@ final class AppModel {
                 ambient = BeatGlow.ambient(at: presented, info: schedule.ambient, frame: sampled)
             }
         }
-        let frame = springFrame(sampled, layers: springs, glow: glow)
+        var bands = sampled.bands
+        if settings.softStop {
+            let silent = sampled.rawLevelDB <= LevelProcessor.noiseFloorDB || sourcePaused
+            if silent || softStop.isFading {
+                // Мягкая остановка может менять полосы: они идут через буфер модели, а не через
+                // копию массива кадра анализа на каждом кадре угасания.
+                softStopBands.removeAll(keepingCapacity: true)
+                softStopBands.append(contentsOf: sampled.bands)
+                softStop.apply(
+                    layers: &layers, bands: &softStopBands, level: &level, glow: &glow, pulse: &breath,
+                    ambient: &ambient, silent: silent, now: now
+                )
+                bands = softStopBands
+            } else {
+                // Звук идет, угасания нет: значения проходят как есть и только запоминаются.
+                softStop.apply(
+                    layers: &layers, bands: &bands, level: &level, glow: &glow, pulse: &breath,
+                    ambient: &ambient, silent: false, now: now
+                )
+            }
+        } else if softStop.isFading {
+            // Выключили посреди угасания: оно не держит частоту кадров и не продолжится потом.
+            softStop = SoftStop()
+        }
+        let frame = springFrame(sampled, layers: layers, bands: bands, level: level, glow: max(glow, ambient))
         if timelineTime != lastRecordedTimeline {
             // Новый кадр `TimelineView` (тот же отбор, что у замера отрисовки ниже).
             rhythmRecording.frame(
@@ -1338,11 +1402,12 @@ final class AppModel {
         recordRender(now: now, timelineTime: timelineTime)
         let shown = paletteFade.palette(target: wavePalette, now: now)
         feedRenderIdle(
-            level: max(springs.max() ?? 0, levelSpring.value), glow: glow, pulse: max(breath, ambient), now: now
+            level: max(layers.max() ?? 0, level), glow: glow, pulse: max(breath, ambient),
+            flowing: PaletteFlow.period(speed: flowSpeed) != nil, now: now
         )
         return IslandVisuals(
             frame: frame, sampled: sampled, motion: motion, palette: shown, glow: glow, pulse: breath, ambient: ambient,
-            time: now
+            time: now, flowPhase: paletteFlow.phase
         )
     }
 
@@ -1362,24 +1427,28 @@ final class AppModel {
         return result
     }
 
-    /// Кадр `sampled` с уровнями слоев из пружин `layers` (значения `layerSprings`), общим
-    /// уровнем из пружины и акцентом доли на басу.
-    private func springFrame(_ sampled: WaveFrame, layers: [Float], glow: Float) -> WaveFrame {
+    /// Кадр `sampled` с показанными уровнями слоев `layers` (пружины после мягкой остановки),
+    /// полосами `bands`, общим уровнем `level` и акцентом доли `glow` на басу (живой кадр передает
+    /// `max(свечение, пульс)`).
+    private func springFrame(_ sampled: WaveFrame, layers: [Float], bands: [Float], level: Float, glow: Float) -> WaveFrame {
         var frame = sampled
         frame.layers = BeatGlow.accented(layers, glow: glow)
-        frame.level = levelSpring.value
+        frame.bands = bands
+        frame.level = level
         return frame
     }
 
     /// Входы кадра в `renderIdleDetector`: наибольший уровень волн `level`, свечение `glow`,
-    /// пульс `pulse` и идущий переход палитры (`PaletteFade.isFading`, как полный пульс: пока
-    /// палитра меняется, простоя нет). Детектор вышел из простоя, а `renderIdle` еще стоит:
-    /// одна отложенная задача главного актора снимает его сразу после вычисления тела, не
+    /// пульс `pulse` и то, что идет само по времени, как полный пульс: переход палитры
+    /// (`PaletteFade.isFading`), угасание мягкой остановки (`SoftStop.isFading`) и переливание
+    /// `flowing` (скорость больше 0 и без «Уменьшения движения»). Пока что-то из них идет, простоя
+    /// нет; переливание на скорости 0 простою не мешает. Детектор вышел из простоя, а `renderIdle`
+    /// еще стоит: одна отложенная задача главного актора снимает его сразу после вычисления тела, не
     /// дожидаясь тика (во время вычисления тела наблюдаемое значение не пишется). В редкой
     /// частоте остается только кадр, который уже идет.
-    private func feedRenderIdle(level: Float, glow: Float, pulse: Float, now: Double) {
-        let fading: Float = paletteFade.isFading ? 1 : 0
-        let idle = renderIdleDetector.update(level: level, glow: glow, pulse: max(pulse, fading), now: now)
+    private func feedRenderIdle(level: Float, glow: Float, pulse: Float, flowing: Bool, now: Double) {
+        let moving: Float = paletteFade.isFading || softStop.isFading || flowing ? 1 : 0
+        let idle = renderIdleDetector.update(level: level, glow: glow, pulse: max(pulse, moving), now: now)
         guard !idle, renderIdle, !renderIdleExitPending else { return }
         renderIdleExitPending = true
         Task { @MainActor [weak self] in
@@ -1436,7 +1505,8 @@ final class AppModel {
     /// трека с `track`, давно открытый, текст виден.
     /// Обложка трека разбирается здесь же, синхронно, тем же путем, что в работе; палитра
     /// берется из нее же или задается явно (`palette`). `displayOptions`: системные опции экрана
-    /// снимка, а не машины, где его снимают.
+    /// снимка, а не машины, где его снимают. `flowPhase`: фаза переливания снимка, на кадрах она не
+    /// двигается.
     func showPreview(
         state: IslandState,
         track: NowPlayingInfo?,
@@ -1448,7 +1518,8 @@ final class AppModel {
         time: Double,
         nowPlayingAvailable: Bool = true,
         showsBanner: Bool = false,
-        displayOptions: DisplayOptions = .standard
+        displayOptions: DisplayOptions = .standard,
+        flowPhase: Double = 0
     ) {
         islandState = state
         self.displayOptions = displayOptions
@@ -1478,6 +1549,7 @@ final class AppModel {
         previewGlow = glow
         previewPulse = pulse
         paletteFade = PaletteFade(palette: wavePalette)
+        paletteFlow = PaletteFlow(phase: flowPhase)
         lastVisualTime = time
     }
 
@@ -1515,11 +1587,22 @@ struct IslandVisuals {
     /// «Вздох» 0...1: масштаб свернутого острова.
     var pulse: Float
     /// Мягкий пульс 0...`BeatGlow.ambientCeiling` на момент показа кадра (`BeatGlow.ambient`), 0 при
-    /// выключенном «Мягком пульсе» и «Уменьшении движения». Свечение под островом рисуется по
-    /// `max(glow, ambient)` (`BeatGlowView.brightness`), точки у выреза и акцент баса только по `glow`.
+    /// выключенном «Мягком пульсе» и «Уменьшении движения», угасает с мягкой остановкой. Свечение под
+    /// островом рисуется по `max(glow, ambient)` (`BeatGlowView.brightness`), акцент баса в `frame`
+    /// тоже от большего из двух, точки у выреза только по `glow`.
     var ambient: Float = 0
     /// Время кадра, с: по нему течет градиент волн.
     var time: Double
+    /// Фаза переливания 0..<1 (`PaletteFlow.phase`), 0 без переливания. `palette` остается без
+    /// течения: волны применяют его после `WavePaint.distinct` (`WaveSet(flowPhase:)`), свечение под
+    /// островом и точки у выреза берут `glowSourceColor`.
+    var flowPhase: Double = 0
+
+    /// Цвет свечения под островом и точек у выреза до осветления (`WavePaint.glowColor`): первый
+    /// цвет палитры с переливанием (RGB-вариант `PaletteFlow.apply`, `distinct` там нет).
+    var glowSourceColor: PaletteColor {
+        PaletteFlow.apply(palette, phase: flowPhase).first ?? PaletteExtractor.fallback[0]
+    }
 }
 
 // MARK: - Диагностика

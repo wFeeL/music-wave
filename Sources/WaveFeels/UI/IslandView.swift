@@ -45,6 +45,10 @@ import WaveCore
 /// системные «Увеличить контраст» и «Уменьшить прозрачность» (`AppModel.displayOptions`,
 /// `WaveAppearance.adapted(to:)`), только для рисования.
 ///
+/// «Мягкая остановка»: в тишине и на паузе источника-приложения волны, свечение, «вздох» и мягкий
+/// пульс затихают за 0.6 с (`AppModel.islandVisuals`). Переливание: цвета волн, свечения под
+/// островом и точек у выреза плывут с фазой `IslandVisuals.flowPhase`.
+///
 /// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее, содержимое
 /// панели появляется и уходит одной прозрачностью. Баннер не перетекает из свернутого острова:
 /// тела, волны и содержимое меняются одной прозрачностью за 0.2 с, а уходящее тело гаснет
@@ -260,7 +264,7 @@ struct IslandView: View {
         let anchor = geometry.anchor
         let layers = IslandTransition.waveLayers(state: state, sinceStateChange: now - model.islandStateChangedAt)
         // На паузе волны панели сначала затихают в линию, затем полоса гаснет.
-        let paused = model.nowPlayingAvailable && model.lastTrack?.isPlaying == false
+        let paused = model.nowPlayingPaused
 
         return ZStack(alignment: .topLeading) {
             if BeatGlowView.isVisible(
@@ -269,7 +273,7 @@ struct IslandView: View {
                 BeatGlowView(
                     geometry: geometry, state: state, scale: scale, glow: breath.glow, ambient: visuals.ambient,
                     intensity: glow, radius: appearance.glowRadius,
-                    color: visuals.palette.first ?? PaletteExtractor.fallback[0], banner: bannerVisible
+                    color: visuals.glowSourceColor, banner: bannerVisible
                 )
             }
             ZStack(alignment: .topLeading) {

@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import WaveCore
 
-/// Мягкая остановка: на паузе показанные волны, полосы, уровень и свечение затихают за 0,6 с.
+/// Мягкая остановка: на паузе показанные волны, полосы, уровень, свечение, «вздох» и мягкий пульс
+/// затихают за 0,6 с.
 struct SoftStopTests {
     private static let start = 10.0
     private static let soundLayers: [Float] = [0.8, 0.5, 0.3]
@@ -90,24 +91,140 @@ struct SoftStopTests {
         #expect(abs(shown.layers[0] - 0.4) < 1e-4)
     }
 
-    @Test func soundReturnPassesThrough() {
+    /// Звук вернулся посреди угасания: пол угасания `удержанное × множитель` идет дальше по тем же
+    /// часам, вход поверх него (`max`), пока множитель не дойдет до нуля; новые вспышки проходят.
+    @Test func soundReturnKeepsTheFadingFloor() {
         var stop = Self.playing(bands: [Float](repeating: 0.6, count: BandMapper.bandCount))
         _ = Self.quiet(&stop, at: 0.2, bands: BandMapper.bandCount)
         #expect(stop.isFading)
         let layers: [Float] = [0.1, 0.05, 0.02]
         let bands = [Float](repeating: 0.03, count: BandMapper.bandCount)
         let back = Self.frame(&stop, layers: layers, bands: bands, level: 0.1, glow: 0.9, silent: false, now: Self.start + 0.25)
-        #expect(back.layers == layers)
-        #expect(back.bands == bands)
-        #expect(back.level == 0.1)
+        let floor = Self.factor(0.25)
+        #expect(abs(back.layers[0] - 0.8 * floor) < 1e-5)
+        #expect(abs(back.layers[1] - 0.5 * floor) < 1e-5)
+        #expect(abs(back.layers[2] - 0.3 * floor) < 1e-5)
+        #expect(back.bands.allSatisfy { abs($0 - 0.6 * floor) < 1e-5 })
+        #expect(abs(back.level - 0.8 * floor) < 1e-5)
         #expect(back.glow == 0.9)
+        #expect(stop.isFading)
+
+        // Громче пола вход проходит как есть.
+        let loud = Self.frame(&stop, layers: [0.9, 0.6, 0.4], level: 0.9, glow: 0, silent: false, now: Self.start + 0.3)
+        #expect(loud.layers == [0.9, 0.6, 0.4])
+        #expect(loud.level == 0.9)
+        #expect(abs(loud.glow - Self.soundGlow * Self.factor(0.3)) < 1e-5)
+
+        // Множитель дошел до нуля: вход идет как есть, угасания больше нет.
+        let through = Self.frame(&stop, layers: layers, bands: bands, level: 0.1, glow: 0, silent: false, now: Self.start + 0.6)
+        #expect(through.layers == layers)
+        #expect(through.bands == bands)
+        #expect(through.level == 0.1)
+        #expect(through.glow == 0)
+        #expect(!stop.isFading)
+    }
+
+    /// Звук вернулся посреди угасания, а пружины поднимаются от нуля: показанное значение не
+    /// проваливается на кадр к входу, а спускается не быстрее пола угасания (у 0.8 за 0,6 с не
+    /// больше 2 в секунду, 0.034 за кадр 60 Гц).
+    @Test func soundReturnHasNoDip() {
+        var stop = Self.playing()
+        var previous = Self.quiet(&stop, at: 0.2).layers[0]
+        for step in 1...60 {
+            let t = 0.2 + Double(step) / 60
+            let rising = Float(step) * 0.004
+            let shown = Self.frame(
+                &stop, layers: [rising, 0, 0], level: rising, glow: 0, silent: false, now: Self.start + t
+            )
+            #expect(shown.layers[0] >= rising)
+            #expect(previous - shown.layers[0] < 0.034, "t \(t): \(previous) -> \(shown.layers[0])")
+            previous = shown.layers[0]
+        }
+        #expect(!stop.isFading)
+    }
+
+    /// Тишина снова наступила, пока пол угасания еще держался со звуком: новое угасание идет от
+    /// того, что было показано на последнем кадре со звуком, без скачка вверх или вниз.
+    @Test func silenceAfterShortReturnFadesFromShown() {
+        var stop = Self.playing(bands: [Float](repeating: 0.6, count: BandMapper.bandCount))
+        _ = Self.quiet(&stop, at: 0.2, bands: BandMapper.bandCount)
+        let bands = [Float](repeating: 0.03, count: BandMapper.bandCount)
+        let back = Self.frame(&stop, layers: [0.1, 0.05, 0.02], bands: bands, level: 0.1, glow: 0.9, silent: false, now: Self.start + 0.25)
+        let next = Self.quiet(&stop, at: 0.25 + 0.3, bands: BandMapper.bandCount)
+        #expect(abs(next.layers[0] - back.layers[0] * 0.5) < 1e-4)
+        #expect(abs(next.level - back.level * 0.5) < 1e-4)
+        #expect(abs(next.glow - 0.45) < 1e-4)
+        #expect(next.bands.allSatisfy { abs($0 - back.bands[0] * 0.5) < 1e-4 })
+
+        // Сразу после звука угасание начинается почти с показанного.
+        var again = Self.playing()
+        _ = Self.quiet(&again, at: 0.2)
+        let shown = Self.frame(&again, layers: [0, 0, 0], level: 0, glow: 0, silent: false, now: Self.start + 0.25)
+        let first = Self.quiet(&again, at: 0.25 + 1.0 / 120)
+        #expect(abs(first.layers[0] - shown.layers[0]) < 1e-3)
+    }
+
+    /// «Вздох» и мягкий пульс угасают, как свечение: на тишине удержанное × множитель, новых
+    /// вздохов и горбов нет; со звуком посреди угасания `max(вход, пол)`. Вызов без них тот же, что
+    /// с нулями.
+    @Test func pulseAndAmbientFadeLikeGlow() {
+        var bands: [Float] = []
+        var stop = SoftStop()
+        var layers = Self.soundLayers
+        var level: Float = 0.8
+        var glow: Float = 0.6
+        var pulse: Float = 0.5
+        var ambient: Float = 0.16
+        stop.apply(
+            layers: &layers, bands: &bands, level: &level, glow: &glow, pulse: &pulse, ambient: &ambient,
+            silent: false, now: Self.start
+        )
+        #expect(pulse == 0.5 && ambient == 0.16)
+        for t in [0.1, 0.3, 0.5, 0.6, 2] {
+            var quietLayers: [Float] = [0, 0, 0]
+            var quietLevel: Float = 0
+            var quietGlow: Float = 0.9
+            var phantomPulse: Float = 1
+            var phantomAmbient: Float = 0.18
+            stop.apply(
+                layers: &quietLayers, bands: &bands, level: &quietLevel, glow: &quietGlow, pulse: &phantomPulse,
+                ambient: &phantomAmbient, silent: true, now: Self.start + t
+            )
+            #expect(abs(phantomPulse - 0.5 * Self.factor(t)) < 1e-6, "t \(t): \(phantomPulse)")
+            #expect(abs(phantomAmbient - 0.16 * Self.factor(t)) < 1e-6, "t \(t): \(phantomAmbient)")
+        }
         #expect(!stop.isFading)
 
-        // Следующая пауза угасает от новых показанных значений.
-        let next = Self.quiet(&stop, at: 0.25 + 0.3, bands: BandMapper.bandCount)
-        #expect(abs(next.layers[0] - 0.05) < 1e-4)
-        #expect(abs(next.glow - 0.45) < 1e-4)
-        #expect(next.bands.allSatisfy { abs($0 - 0.015) < 1e-4 })
+        var returning = SoftStop()
+        var l = Self.soundLayers
+        var lv: Float = 0.8
+        var g: Float = 0.6
+        var p: Float = 0.5
+        var a: Float = 0.16
+        returning.apply(layers: &l, bands: &bands, level: &lv, glow: &g, pulse: &p, ambient: &a, silent: false, now: Self.start)
+        var q: [Float] = [0, 0, 0]
+        var ql: Float = 0
+        var qg: Float = 0
+        var qp: Float = 0
+        var qa: Float = 0
+        returning.apply(
+            layers: &q, bands: &bands, level: &ql, glow: &qg, pulse: &qp, ambient: &qa, silent: true, now: Self.start + 0.2
+        )
+        var lowPulse: Float = 0.05
+        var lowAmbient: Float = 0.01
+        returning.apply(
+            layers: &q, bands: &bands, level: &ql, glow: &qg, pulse: &lowPulse, ambient: &lowAmbient, silent: false,
+            now: Self.start + 0.3
+        )
+        #expect(abs(lowPulse - 0.25) < 1e-5)
+        #expect(abs(lowAmbient - 0.08) < 1e-5)
+        var highPulse: Float = 0.9
+        var highAmbient: Float = 0.17
+        returning.apply(
+            layers: &q, bands: &bands, level: &ql, glow: &qg, pulse: &highPulse, ambient: &highAmbient, silent: false,
+            now: Self.start + 0.35
+        )
+        #expect(highPulse == 0.9 && highAmbient == 0.17)
     }
 
     @Test func phantomGlowSuppressedWhileSilent() {

@@ -220,7 +220,7 @@ struct IslandWavesView: View {
     private func makeSet(_ style: WaveStyle) -> WaveSet {
         WaveSet(
             frame: visuals.frame, palette: visuals.palette, motion: visuals.motion, time: visuals.time, style: style,
-            appearance: appearance
+            appearance: appearance, flowPhase: visuals.flowPhase
         )
     }
 
@@ -293,12 +293,13 @@ struct IslandWavesView: View {
         .offset(x: origin.x, y: origin.y)
     }
 
-    /// Мягкая точка у края выреза, где сходятся волны крыла, вспыхивает со свечением доли.
+    /// Мягкая точка у края выреза, где сходятся волны крыла, вспыхивает со свечением доли. Цвет
+    /// как у свечения под островом, с переливанием (`IslandVisuals.glowSourceColor`).
     @ViewBuilder
     private func accentDot(at center: CGPoint) -> some View {
         let opacity = Self.accentOpacity * Double(visuals.glow)
         if opacity > 0.005 {
-            let color = WavePaint.glowColor(visuals.palette.first ?? PaletteExtractor.fallback[0])
+            let color = WavePaint.glowColor(visuals.glowSourceColor)
             Circle()
                 .fill(Color(palette: color))
                 .frame(width: Self.accentSize, height: Self.accentSize)
