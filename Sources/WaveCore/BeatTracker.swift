@@ -34,14 +34,18 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// 5. энергетический ворот: пик уровня бочки держится и спадает на `gateFallPerBeatDB` за долю (без
 ///    темпа `gateFallNoTempoDB` за 0.25 с), сравнивается со следящим пиком за 10 с,
 ///    `g_E = smoothstep(−24, −12, разность)`. Между бочками ворот открыт, в брейке закрывается;
-/// 6. смесь `blend` идет к 1 за `crossfadeBeats` долей при захвате и к 0 без него.
+/// 6. вес показа `displayWeight` идет к `smoothstep(weightLow, weightHigh, уверенность)`: вверх не
+///    быстрее `1 / weightRiseBeats` за долю, вниз не быстрее `1 / weightFallBeats`. Без захвата вес
+///    растет только после `weightHits` попаданий подряд. Новая сетка (смена темпа, скачок фазы,
+///    перехват тенью) сразу получает вес не выше цели по своей уверенности. `locked` для диагностики и
+///    метрик, на показ влияет только через это правило роста.
 ///
-/// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × blend` и id из счетчика
-/// долей. Яркость ближайшей доли фиксируется, когда время потока доходит до нее: бочка на самой доле
-/// не меняет уже начатую вспышку. Онсет бочки ближе `dropWindow · T` к предсказанной доле при
-/// `blend > 0.5` отбрасывается, остальные светятся с яркостью
-/// `clamp(strength, onsetFloor, 1) × ((1 − blend) + offGridScale × blend) × подтверждение` (см.
-/// `kickConfirmation`) и id из своего счетчика со старшим битом. Прошедшие события остаются в
+/// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
+/// еще `× raceDim`) и id из счетчика долей. Яркость ближайшей доли фиксируется, когда время потока
+/// доходит до нее: бочка на самой доле не меняет уже начатую вспышку. Онсет бочки ближе `dropWindow · T`
+/// к предсказанной доле при весе выше 0.5 отбрасывается, остальные светятся с яркостью
+/// `clamp(strength, onsetFloor, 1) × (offGridScale + (1 − offGridScale) × (1 − вес)) × подтверждение`
+/// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Прошедшие события остаются в
 /// расписании (до 8), чтобы рендер довел их спад. Оба счетчика id только растут, в том числе через
 /// `reset()` и смену темпа: `BeatGlow` помнит id 2 с.
 ///
@@ -75,16 +79,44 @@ public struct BeatTracker: Sendable {
         public var phaseJumpMargin: Double
         /// Онсет бочки ближе этой доли периода к предсказанной доле не светится отдельно.
         public var dropWindow: Double
-        /// Яркость онсета бочки вне сетки при захвате. Не выше порога вспышки `OfflineBeatChain.eventRise`
-        /// (0.2): при захвате бочка между долями дает слабый отблеск, а не вспышку мимо доли. На GTZAN
-        /// такие вспышки при 0.6 попадали в долю в 21 % случаев и тянули точность захвата с 0.93 до 0.82.
+        /// Яркость онсета бочки вне сетки при полном весе показа (при весе w множитель
+        /// `offGridScale + (1 − offGridScale) × (1 − w)`). Не выше порога вспышки
+        /// `OfflineBeatChain.eventRise` (0.2): при захвате бочка между долями дает слабый отблеск, а не
+        /// вспышку мимо доли. На GTZAN такие вспышки при 0.6 попадали в долю в 21 % случаев и тянули
+        /// точность захвата с 0.93 до 0.82.
         public var offGridScale: Float
         /// Нижняя граница яркости онсета бочки.
         public var onsetFloor: Float
-        /// За сколько долей смесь переходит между онсетами и предсказанием. Одна доля: после отпускания
-        /// предсказанные доли с неверной фазой гаснут быстрее (на GTZAN такие вспышки попадали в долю в
-        /// 65 % случаев против 90 % у захваченных).
-        public var crossfadeBeats: Double
+        /// Вес показа: цель `smoothstep(weightLow, weightHigh, уверенность)`, рост до нее за
+        /// `weightRiseBeats` долей от 0 до 1, спад за `weightFallBeats` (решение владельца: мягкий пульс
+        /// вместо выключателя по захвату). Верхний край 0.60 (в спецификации 0.65) равен
+        /// `lockConfidence`: при захвате вес уже полный и бочка между долями приглушена до `offGridScale`.
+        /// На GTZAN tune при 0.65 вспышек с захватом мимо долей 767, wrongLock 18 / 353, при 0.60 755 и
+        /// 15 / 308. Нижний край 0.50 вместо 0.30: вспышек мимо долей 2472 против 2612, покрытие долей
+        /// 0.446 против 0.472. Спад за 2 доли вместо 6: 2485 и 0.447, точность всех вспышек ниже.
+        public var weightLow: Double
+        public var weightHigh: Double
+        public var weightRiseBeats: Double
+        public var weightFallBeats: Double
+        /// Без захвата вес растет, только когда последние `weightHits` долей подряд попали; иначе он
+        /// держится или спадает за уверенностью (0 выключает). Сетка, которая попадает через долю
+        /// (половинный темп против синкоп драм-н-бейса, редкие попадания неверной фазы), держит
+        /// уверенность около 0.43-0.57 и без этого светилась бы почти в полную силу вместо бочек
+        /// (`dnbFallsBackToKicks`: F по бочкам 0.78). На GTZAN tune при 2 вспышек мимо долей 2612
+        /// против 2800 без правила, покрытие долей 0.472 против 0.502, вспышек с захватом мимо долей
+        /// столько же (755); при 3 2380 и 0.432.
+        public var weightHits: Int
+        /// Мягкое подтверждение бочки для показа, когда темп известен, уверенность сетки от `weightLow`
+        /// и ворот открыт: `max(kickConfirmFloor, smoothstep(kickConfirmLow, confirmHigh, отношение))`.
+        /// Иначе прежнее строгое `smoothstep(7, 11, отношение)`: в розовом шуме темп бывает «известен» и
+        /// ворот открыт (уровень ровный), и без условия на уверенность пол зажигал ложные бочки
+        /// (`noiseAloneNeverGlows` при `reactiveScale` 1: пик 0.3). Пол 0 (выключен): на GTZAN tune с
+        /// приглушением 0.5 он нейтрален только потому, что его отблески 0.15 ниже порога вспышки; без
+        /// приглушения пол 0.3 дает 3687 вспышек мимо долей против 2744 (с условием на уверенность
+        /// 2946), точность всех вспышек 0.815 / 0.842 против 0.850. Нижний край 7, а не 5 из
+        /// спецификации: при 5 вспышек мимо долей 2756 против 2612 за 0.005 покрытия.
+        public var kickConfirmFloor: Float
+        public var kickConfirmLow: Float
         /// Переключение темпа в оценке не сбрасывает уверенность, когда новый период отличается от
         /// прежнего или его удвоенного меньше чем на эту долю, а гребенка на новом
         /// периоде видит доли на прежних местах (`carry`). 0 выключает перенос. 10 % как окно дрейфа
@@ -140,7 +172,13 @@ public struct BeatTracker: Sendable {
             dropWindow: Double = 0.2,
             offGridScale: Float = 0.2,
             onsetFloor: Float = 0.4,
-            crossfadeBeats: Double = 1.0,
+            weightLow: Double = 0.30,
+            weightHigh: Double = 0.60,
+            weightRiseBeats: Double = 1.5,
+            weightFallBeats: Double = 6,
+            weightHits: Int = 2,
+            kickConfirmFloor: Float = 0,
+            kickConfirmLow: Float = 7,
             carryTolerance: Double = 0.10,
             carryPhase: Double = 0.25,
             raceBeats: Int = 4,
@@ -165,7 +203,13 @@ public struct BeatTracker: Sendable {
             self.dropWindow = dropWindow
             self.offGridScale = offGridScale
             self.onsetFloor = onsetFloor
-            self.crossfadeBeats = crossfadeBeats
+            self.weightLow = weightLow
+            self.weightHigh = weightHigh
+            self.weightRiseBeats = weightRiseBeats
+            self.weightFallBeats = weightFallBeats
+            self.weightHits = weightHits
+            self.kickConfirmFloor = kickConfirmFloor
+            self.kickConfirmLow = kickConfirmLow
             self.carryTolerance = carryTolerance
             self.carryPhase = carryPhase
             self.raceBeats = raceBeats
@@ -186,7 +230,7 @@ public struct BeatTracker: Sendable {
     /// Зубцов гребенки фазы и вес каждого следующего (более старого).
     static let phaseTeeth = 5
     static let phaseToothWeight = 0.75
-    /// Период до первой оценки темпа (для смеси).
+    /// Период до первой оценки темпа (для веса показа).
     static let defaultPeriod = 0.5
     /// Шаг среднего силы совпавших онсетов.
     static let strengthGain: Float = 0.25
@@ -205,6 +249,8 @@ public struct BeatTracker: Sendable {
     static let confirmEpsilon: Float = 0.5
     static let confirmLow: Float = 7
     static let confirmHigh: Float = 11
+    /// Ворот от этого значения считается открытым для мягкого подтверждения бочки.
+    static let confirmGateOpen: Float = 0.5
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
@@ -261,8 +307,8 @@ public struct BeatTracker: Sendable {
     private let longFallPerHopDB: Float
     /// Энергетический ворот g_E последнего шага, 0...1.
     public private(set) var energyGate: Float = 0
-    /// Смесь онсетов (0) и предсказанных долей (1).
-    private(set) var blend: Float = 0
+    /// Вес показа 0...1: яркость предсказанных долей и приглушение онсетов бочки (`BeatSchedule.weight`).
+    private(set) var displayWeight: Float = 0
 
     /// Прошедшие события по времени, не больше `pastCapacity`.
     private var past: [GlowEvent]
@@ -301,13 +347,14 @@ public struct BeatTracker: Sendable {
             period: period,
             confidence: confidence,
             locked: locked,
-            unlockReason: locked ? nil : lastUnlockReason
+            unlockReason: locked ? nil : lastUnlockReason,
+            weight: displayWeight
         )
     }
 
     public mutating func process(_ hop: HopResult) {
         now = hop.endTime
-        // Ворот и смесь здесь еще от прошлого шага, до звука самой доли.
+        // Ворот и вес здесь еще от прошлого шага, до звука самой доли.
         if committedAmplitude == nil, let nextBeat, now >= nextBeat {
             committedAmplitude = predictedAmplitude
         }
@@ -335,7 +382,7 @@ public struct BeatTracker: Sendable {
         closeWindows()
         closeShadowWindows()
         updateGate(hop.kickLevelDB)
-        updateBlend()
+        updateWeight()
         if let onset = hop.kickOnset {
             addKickOnset(onset)
         }
@@ -368,7 +415,7 @@ public struct BeatTracker: Sendable {
         kickGateDB = Self.floorDB
         longPeakDB = Self.floorDB
         energyGate = 0
-        blend = 0
+        displayWeight = 0
         past.removeAll(keepingCapacity: true)
     }
 
@@ -482,6 +529,7 @@ public struct BeatTracker: Sendable {
     /// запоминается, только если захват был.
     private mutating func resetConfidence(_ reason: UnlockReason) {
         confidence *= 0.5
+        capWeight()
         hits = 0
         if locked { lastUnlockReason = reason }
         locked = false
@@ -500,6 +548,8 @@ public struct BeatTracker: Sendable {
         committedAmplitude = nil
         disagreements = 0
         beatCounter += 2
+        // Новая сетка не та, что ушла после наката.
+        coasted = false
     }
 
     /// Гонка фаз (IBT, `2026-10-25-audio-viz-and-beat.md` C.3): новая фаза гребенки идет тенью с
@@ -561,9 +611,11 @@ public struct BeatTracker: Sendable {
         nextBeat = shadow
         nextMatched = false
         committedAmplitude = nil
+        coasted = false
         beatCounter += 2
         disagreements = 0
         confidence = shadowConfidence
+        capWeight()
         hits = shadowHits
         let wasLocked = locked
         locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
@@ -675,8 +727,11 @@ public struct BeatTracker: Sendable {
                 } else {
                     locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
                 }
-                // Атака при закрытом вороте сетку не подтверждает: решает доля с открытым воротом.
-                if !coasting { coasted = false }
+                // Атака при закрытом вороте сетку не подтверждает: решает доля с открытым воротом. После
+                // промаха на ней сетка остается скрытой до попадания или новой фазы: вес показа идет от
+                // уверенности, которая после одного промаха еще высока, и без этого старая сетка снова
+                // светилась бы в полную силу мимо вернувшихся долей.
+                if !coasting, nextMatched { coasted = false }
             }
             archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
             self.nextBeat = nextBeat + period
@@ -686,7 +741,7 @@ public struct BeatTracker: Sendable {
         }
     }
 
-    // MARK: Ворот, смесь и события
+    // MARK: Ворот, вес и события
 
     private mutating func updateGate(_ levelDB: Float) {
         // Бесконечность и NaN считаются полом, иначе удержание и P_long застряли бы на бесконечности.
@@ -702,9 +757,31 @@ public struct BeatTracker: Sendable {
         energyGate = Self.smoothstep(Self.gateLowDB, Self.gateHighDB, kickGateDB - longPeakDB)
     }
 
-    private mutating func updateBlend() {
-        let step = Float(hopDuration / (parameters.crossfadeBeats * (period ?? Self.defaultPeriod)))
-        blend = locked ? min(blend + step, 1) : max(blend - step, 0)
+    private mutating func updateWeight() {
+        displayWeight = Self.nextWeight(
+            displayWeight, confidence: confidence, beats: hopDuration / (period ?? Self.defaultPeriod), parameters: parameters,
+            rising: locked || hits >= parameters.weightHits
+        )
+    }
+
+    /// Новая сетка: вес не выше цели по ее уверенности, старый вес ее не подтверждал.
+    private mutating func capWeight() {
+        let target = Self.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(confidence))
+        displayWeight = min(displayWeight, target)
+    }
+
+    /// Вес показа после `beats` долей при уверенности `confidence`: к цели
+    /// `smoothstep(weightLow, weightHigh, confidence)` не быстрее `beats / weightRiseBeats` вверх и
+    /// `beats / weightFallBeats` вниз. Без `rising` вес не растет (цель не выше текущего веса).
+    static func nextWeight(
+        _ weight: Float, confidence: Double, beats: Double, parameters: Parameters, rising: Bool = true
+    ) -> Float {
+        var target = smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(confidence))
+        if !rising { target = min(target, weight) }
+        if weight < target {
+            return min(weight + Float(beats / parameters.weightRiseBeats), target)
+        }
+        return max(weight - Float(beats / parameters.weightFallBeats), target)
     }
 
     /// Накат: захват есть, а энергетический ворот ниже `coastGate` (брейк без бочки). Промахи не
@@ -714,12 +791,12 @@ public struct BeatTracker: Sendable {
         locked && energyGate < parameters.coastGate
     }
 
-    /// После наката сетка не видна, пока первая доля с открытым воротом не попадет: бочка новой
-    /// сетки открывает ворот раньше, чем закрывается окно старой доли. Во время гонки фаз сетка
+    /// После наката сетка не видна, пока доля с открытым воротом не попадет (или пока не придет новая
+    /// фаза): бочка новой сетки открывает ворот раньше, чем закрывается окно старой доли. Во время гонки фаз сетка
     /// светится с `raceDim`.
     private var predictedAmplitude: Float {
         guard !coasted else { return 0 }
-        return strengthEMA * energyGate * blend * (shadowNext == nil ? 1 : parameters.raceDim)
+        return strengthEMA * energyGate * displayWeight * (shadowNext == nil ? 1 : parameters.raceDim)
     }
 
     /// Яркость `nextBeat`: зафиксированная или текущая.
@@ -728,12 +805,13 @@ public struct BeatTracker: Sendable {
     }
 
     private mutating func addKickOnset(_ onset: OnsetEvent) {
-        if blend > 0.5, let nextBeat, let period {
+        if displayWeight > 0.5, let nextBeat, let period {
             let distance = min(abs(onset.time - nextBeat), abs(onset.time - (nextBeat - period)))
             if distance < parameters.dropWindow * period { return }
         }
         let strength = onset.strength.isFinite ? min(max(onset.strength, parameters.onsetFloor), 1) : parameters.onsetFloor
-        let amplitude = strength * ((1 - blend) + parameters.offGridScale * blend) * kickConfirmation()
+        let offGrid = parameters.offGridScale + (1 - parameters.offGridScale) * (1 - displayWeight)
+        let amplitude = strength * offGrid * kickConfirmation()
         guard amplitude > 0 else { return }
         archive(GlowEvent(id: Self.onsetIDFlag | onsetCounter, time: onset.time, amplitude: amplitude, predicted: false))
         onsetCounter += 1
@@ -746,6 +824,10 @@ public struct BeatTracker: Sendable {
     /// (около 0.17 в секунду на -20 dBFS, `OnlinePeakPicker` бочки их пропускает) широкополосно не
     /// выделяется: отношение не выше примерно 5.5 при любом уровне шума. Без подтверждения такие
     /// онсеты светились бы без захвата, когда трекер еще не знает, что ритма нет.
+    ///
+    /// Когда темп известен и ворот открыт (`confirmGateOpen`), подтверждение для показа мягче:
+    /// `max(kickConfirmFloor, smoothstep(kickConfirmLow, confirmHigh, отношение))`. Попадания для
+    /// уверенности от этого не зависят, их дают только широкополосные онсеты (`correct`).
     private mutating func kickConfirmation() -> Float {
         let count = min(confirmHops, odfCount - 1)
         guard count > 0 else { return 1 }
@@ -757,6 +839,9 @@ public struct BeatTracker: Sendable {
             Self.select(UnsafeMutableBufferPointer(rebasing: buffer[0..<count]), rank: count / 2)
         }
         let ratio = max(odf(age: 0), odf(age: 1)) / (median + Self.confirmEpsilon)
+        if period != nil, confidence >= parameters.weightLow, energyGate >= Self.confirmGateOpen {
+            return max(parameters.kickConfirmFloor, Self.smoothstep(parameters.kickConfirmLow, Self.confirmHigh, ratio))
+        }
         return Self.smoothstep(Self.confirmLow, Self.confirmHigh, ratio)
     }
 

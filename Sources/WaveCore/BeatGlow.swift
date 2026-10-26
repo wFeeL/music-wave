@@ -30,20 +30,27 @@ public struct BeatSchedule: Sendable, Equatable {
     /// Период доли в секундах.
     public var period: Double?
     public var confidence: Double
+    /// Захват для диагностики и метрик; на показ не влияет, показ идет по `weight`.
     public var locked: Bool
+    /// Вес показа 0...1 (`BeatTracker.displayWeight`): плавная уверенность в сетке. От него зависит
+    /// приглушение онсетов бочки в `BeatGlow`.
+    public var weight: Float
     /// Почему захват потерян (`BeatTracker.lastUnlockReason`); `nil` с захватом и до первого захвата.
     public var unlockReason: UnlockReason?
 
     public static let empty = BeatSchedule(events: [], bpm: nil, period: nil, confidence: 0, locked: false)
 
+    /// Без `weight` вес берется из захвата (1 с захватом, 0 без), как показ был до веса.
     public init(
-        events: [GlowEvent], bpm: Double?, period: Double?, confidence: Double, locked: Bool, unlockReason: UnlockReason? = nil
+        events: [GlowEvent], bpm: Double?, period: Double?, confidence: Double, locked: Bool, unlockReason: UnlockReason? = nil,
+        weight: Float? = nil
     ) {
         self.events = events
         self.bpm = bpm
         self.period = period
         self.confidence = confidence
         self.locked = locked
+        self.weight = weight ?? (locked ? 1 : 0)
         self.unlockReason = unlockReason
     }
 
@@ -63,8 +70,9 @@ public struct BeatSchedule: Sendable, Equatable {
 /// `shape(a) = a < 0 ? 0 : exp(-a / decay)` при `a = t - (event.time - lead) + R / 2`, где `t` это
 /// время показа кадра, а `R` период обновления экрана (`+R/2` центрирует ошибку квантования кадрами).
 /// Свечение равно максимуму `amplitude × shape` по событиям и не бывает больше 1. Онсет бочки
-/// (`predicted == false`) в расписании без захвата светится с `amplitude × reactiveScale`; изменяемый
-/// вариант решает это один раз, когда событие впервые видно, чтобы захват не зажигал его заново.
+/// (`predicted == false`) светится с `amplitude × (reactiveScale + (1 − reactiveScale) × weight)` по
+/// весу расписания: без веса вполовину, с полным весом полностью. Изменяемый вариант берет вес один
+/// раз, когда событие впервые видно, чтобы рост веса не зажигал его заново.
 ///
 /// Изменяемый вариант помнит события по id. Событие, которое впервые видно уже после своего начала
 /// (не позже `lateLimit`), вспыхивает в полную яркость на этом кадре: вспышку, которая начинается уже
@@ -87,8 +95,8 @@ public struct BeatGlow: Sendable {
     public static let lateLimit = 0.2
     /// Яркость онсета бочки, впервые видного без захвата, относительно его `amplitude`. Такая вспышка
     /// идет за звуком (обнаружение и показ, на GTZAN в среднем +36 мс) и попадает в долю реже
-    /// захваченной (0.58 против 0.91), поэтому светится вполовину: заметно, но не как доля. Захваченные
-    /// события, в том числе онсеты, светятся как раньше.
+    /// захваченной (0.58 против 0.91), поэтому светится вполовину: заметно, но не как доля. С ростом веса
+    /// показа (`BeatSchedule.weight`) приглушение плавно уходит, при весе 1 онсет светится полностью.
     public static let reactiveScale: Float = 0.5
     /// Допуск округления на границе атаки.
     private static let edgeTolerance = 1e-9
@@ -98,8 +106,8 @@ public struct BeatGlow: Sendable {
         var origin: Double?
         /// Впервые видно позже `lateLimit`: не светится.
         var stale = false
-        /// Онсет, впервые видный без захвата: светится с `reactiveScale`.
-        var reactive = false
+        /// Множитель яркости по весу первого кадра, на котором событие видно (`scale(of:weight:)`).
+        var scale: Float = 1
         var lastSeen: Double
     }
 
@@ -141,7 +149,7 @@ public struct BeatGlow: Sendable {
                 let isLate = late > Self.edgeTolerance && late <= Self.lateLimit
                 return Record(
                     origin: isLate ? t : nil, stale: late > Self.lateLimit,
-                    reactive: !event.predicted && !schedule.locked, lastSeen: t
+                    scale: Self.scale(of: event, weight: schedule.weight), lastSeen: t
                 )
             }()
             record.lastSeen = t
@@ -151,8 +159,7 @@ public struct BeatGlow: Sendable {
             records[event.id] = record
             guard !record.stale else { continue }
             let a = record.origin.map { t - $0 } ?? late
-            let amplitude = record.reactive ? event.amplitude * Self.reactiveScale : event.amplitude
-            glow = max(glow, Self.contribution(amplitude, a: a, decay: decay))
+            glow = max(glow, Self.contribution(event.amplitude * record.scale, a: a, decay: decay))
         }
         if records.values.contains(where: { t - $0.lastSeen > Self.memory }) {
             records = records.filter { t - $0.value.lastSeen <= Self.memory }
@@ -177,9 +184,17 @@ public struct BeatGlow: Sendable {
         return event.time - lead - refresh / 2
     }
 
-    /// Яркость события в расписании без памяти: онсет без захвата приглушен.
+    /// Яркость события в расписании без памяти: онсет приглушен по весу.
     private static func amplitude(of event: GlowEvent, in schedule: BeatSchedule) -> Float {
-        event.predicted || schedule.locked ? event.amplitude : event.amplitude * reactiveScale
+        event.amplitude * scale(of: event, weight: schedule.weight)
+    }
+
+    /// Множитель яркости: доля 1, онсет бочки `reactiveScale + (1 − reactiveScale) × weight`; вес вне
+    /// 0...1 или нечисловой считается границей или нулем.
+    private static func scale(of event: GlowEvent, weight: Float) -> Float {
+        guard !event.predicted else { return 1 }
+        let clamped = weight.isFinite ? min(max(weight, 0), 1) : 0
+        return reactiveScale + (1 - reactiveScale) * clamped
     }
 
     private static func isValid(_ event: GlowEvent) -> Bool {

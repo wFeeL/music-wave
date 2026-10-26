@@ -57,16 +57,16 @@ struct BeatSyncTests {
         return pooled
     }
 
-    /// Начало проверки захваченных сдвигов: захват плюс переход смеси (`crossfadeBeats` долей).
+    /// Начало проверки захваченных сдвигов: захват плюс рост веса показа (`weightRiseBeats` долей).
     private static func lockedFrom(_ result: SyncResult, period: Double) -> Double? {
-        result.lockTime.map { $0 + BeatTracker.Parameters().crossfadeBeats * period }
+        result.lockTime.map { $0 + BeatTracker.Parameters().weightRiseBeats * period }
     }
 
     private static func isNear(_ bpm: Double?, _ truth: Double, tolerance: Double = 0.04) -> Bool {
         bpm.map { abs($0 / truth - 1) < tolerance } ?? false
     }
 
-    /// Сдвиги вспышек от слышимых долей после захвата и конца перехода смеси (`crossfadeBeats` долей).
+    /// Сдвиги вспышек от слышимых долей после захвата и роста веса показа (`weightRiseBeats` долей).
     private static func describe(_ result: SyncResult, f: Double?, offsets: (mean: Double, sd: Double)?) -> String {
         let lock = result.lockTime.map { String(format: "%.2f", $0) } ?? "none"
         let tempo = result.tempoBPM.map { String(format: "%.1f", $0) } ?? "none"
@@ -155,9 +155,12 @@ struct BeatSyncTests {
 
     /// Без захвата свечение идет от онсетов бочки. Бюджет: блок 5 + обнаружение 7 + пробуждение 4 +
     /// ожидание кадра 8 + показ 33 - задержка вывода 20 = +37 мс, в спецификации «примерно +35».
+    /// С B4 предсказанные доли светятся и без захвата (по весу показа), поэтому для пути онсетов вес
+    /// выключен так же, как захват: без захвата он не растет никогда (`weightHits`).
     @Test func onsetPathIsLateByAtMost45ms() async {
         var config = SyncHarness.Config()
         config.trackerParameters.lockHits = .max
+        config.trackerParameters.weightHits = .max
         let (scene, result) = await Self.run({ SharedScenes.steady120 }, config)
         let offsets = result.offsets(reference: result.audible(scene.kicks), from: Self.from)
         let f = result.fMeasure(reference: result.audible(scene.kicks), tolerance: 0.05, from: Self.from)

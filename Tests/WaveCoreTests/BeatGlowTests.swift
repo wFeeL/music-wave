@@ -65,6 +65,39 @@ struct BeatGlowTests {
         #expect(abs(lockedPeak - 0.9) < 1e-6)
     }
 
+    /// Приглушение онсета бочки идет по весу показа, а не по захвату: `reactiveScale + (1 − reactiveScale)
+    /// × weight`. Захват без веса (вес 0) приглушает, вес без захвата нет. Изменяемый вариант берет вес
+    /// первого кадра, на котором онсет виден, и дальше его не меняет.
+    @Test func reactiveScaleFollowsWeight() {
+        let onset = GlowEvent(id: BeatTracker.onsetIDFlag | 5, time: 10, amplitude: 0.8, predicted: false)
+        let peakTime = 10.0 - BeatGlow.lead - Self.refresh / 2
+        func schedule(locked: Bool, weight: Float) -> BeatSchedule {
+            BeatSchedule(events: [onset], bpm: 120, period: 0.5, confidence: 0.5, locked: locked, weight: weight)
+        }
+        let half = BeatGlow.value(at: peakTime, schedule: schedule(locked: false, weight: 0.5), refreshPeriod: Self.refresh)
+        #expect(abs(half - 0.6) < 1e-6)
+        let lockedNoWeight = BeatGlow.value(at: peakTime, schedule: schedule(locked: true, weight: 0), refreshPeriod: Self.refresh)
+        #expect(abs(lockedNoWeight - 0.4) < 1e-6)
+        let full = BeatGlow.value(at: peakTime, schedule: schedule(locked: false, weight: 1), refreshPeriod: Self.refresh)
+        #expect(abs(full - 0.8) < 1e-6)
+
+        var glow = BeatGlow()
+        #expect(glow.value(at: peakTime - 0.1, schedule: schedule(locked: false, weight: 0.2), refreshPeriod: Self.refresh) == 0)
+        let peak = glow.value(at: peakTime, schedule: schedule(locked: true, weight: 1), refreshPeriod: Self.refresh)
+        #expect(abs(peak - 0.8 * 0.6) < 1e-6)
+    }
+
+    /// Без явного веса расписание берет его из захвата (1 с захватом, 0 без), чтобы старые места
+    /// создания расписания показывали как раньше; `shifted` вес не трогает.
+    @Test func weightDefaultsFromLock() {
+        #expect(BeatSchedule(events: [], bpm: nil, period: nil, confidence: 1, locked: true).weight == 1)
+        #expect(BeatSchedule(events: [], bpm: nil, period: nil, confidence: 1, locked: false).weight == 0)
+        #expect(BeatSchedule.empty.weight == 0)
+        let weighted = BeatSchedule(events: [], bpm: 120, period: 0.5, confidence: 0.4, locked: false, weight: 0.3)
+        #expect(weighted.weight == 0.3)
+        #expect(weighted.shifted(by: 0.02).weight == 0.3)
+    }
+
     @Test func lateEventStartsBright() {
         let event = Self.event(id: 7, time: 10, amplitude: 0.8)
         let schedule = Self.schedule([event])

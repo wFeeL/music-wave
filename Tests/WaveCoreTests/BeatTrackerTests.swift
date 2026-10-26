@@ -278,7 +278,7 @@ struct BeatTrackerTests {
         var hops = SyntheticBeats(bpm: 120)
         hops.feed(&tracker, until: 10)
         try #require(tracker.locked)
-        try #require(tracker.blend == 1)
+        try #require(tracker.displayWeight == 1)
         let beat = try #require(tracker.nextBeat)
         // Бочка на «и», посередине между долями: дальше `dropWindow` от обеих.
         let onset = OnsetEvent(time: beat + 0.25, strength: 1)
@@ -549,22 +549,175 @@ struct BeatTrackerTests {
         #expect(!other.locked && other.schedule.unlockReason == .reset)
     }
 
-    /// Смесь доходит от онсетов до предсказания за одну долю после захвата.
-    @Test func blendCrossfadesInOneBeat() throws {
+    /// Вес показа в трекере: 0, пока уверенность не выше `weightLow`, и доходит до 1 не позже чем за
+    /// `weightRiseBeats` долей (плюс шаг на границе) после того, как уверенность дошла до `weightHigh`.
+    /// Заменяет `blendCrossfadesInOneBeat`: смесь шла по захвату за одну долю, вес идет по уверенности и
+    /// начинает расти до захвата.
+    @Test func weightFollowsConfidence() throws {
+        let parameters = BeatTracker.Parameters()
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var hops = SyntheticBeats(bpm: 120)
         let hop = hops.hop
         var steps = 0
-        var lockStep: Int?
+        var highStep: Int?
         var fullStep: Int?
+        var weightBelowLow: Float = 0
         hops.feed(&tracker, until: 10) { tracker in
             steps += 1
-            if lockStep == nil, tracker.locked { lockStep = steps }
-            if fullStep == nil, tracker.blend == 1 { fullStep = steps }
+            if tracker.confidence <= parameters.weightLow { weightBelowLow = max(weightBelowLow, tracker.displayWeight) }
+            if highStep == nil, tracker.confidence >= parameters.weightHigh { highStep = steps }
+            if fullStep == nil, tracker.displayWeight == 1 { fullStep = steps }
         }
-        let lock = Double(try #require(lockStep)) * hop
+        #expect(weightBelowLow == 0)
+        let high = Double(try #require(highStep)) * hop
         let full = Double(try #require(fullStep)) * hop
-        #expect(abs(full - lock - 0.5) <= 2 * hop, "lock \(lock), full blend \(full)")
+        #expect(full - high <= parameters.weightRiseBeats * 0.5 + 2 * hop, "confidence high at \(high), full weight at \(full)")
+        #expect(tracker.schedule.weight == tracker.displayWeight)
+    }
+
+    /// Уверенность скачком 0 -> 0.8: вес растет примерно за полторы доли, через 2 доли он выше 0.6, но
+    /// не сразу (через полдоли меньше 0.5).
+    @Test func weightRisesInAboutOneAndHalfBeats() {
+        let parameters = BeatTracker.Parameters()
+        #expect(parameters.weightLow == 0.30 && parameters.weightHigh == 0.60)
+        #expect(parameters.weightRiseBeats == 1.5 && parameters.weightFallBeats == 6)
+        let step = 0.01
+        var weight: Float = 0
+        var trace: [Float] = []
+        for _ in 0..<200 {
+            weight = BeatTracker.nextWeight(weight, confidence: 0.8, beats: step, parameters: parameters)
+            trace.append(weight)
+        }
+        #expect(trace[49] < 0.5, "after half a beat \(trace[49])")
+        #expect(abs(trace[99] - 1 / 1.5) < 0.01, "after a beat \(trace[99])")
+        #expect(trace[199] > 0.6, "after 2 beats \(trace[199])")
+        // Ниже `weightLow` цель 0: вес не растет. Посередине между краями цель 0.5, плавно, а не скачком.
+        #expect(BeatTracker.nextWeight(0, confidence: 0.3, beats: 1, parameters: parameters) == 0)
+        #expect(abs(BeatTracker.nextWeight(0, confidence: 0.45, beats: 10, parameters: parameters) - 0.5) < 1e-5)
+        #expect(abs(BeatTracker.nextWeight(1, confidence: 0.45, beats: 10, parameters: parameters) - 0.5) < 1e-5)
+    }
+
+    /// Уверенность 0.8 -> 0.1: вес спадает примерно за 6 долей, через 2 доли выше 0.4, через 8 ниже 0.15.
+    @Test func weightFallsOverAboutSixBeats() {
+        let parameters = BeatTracker.Parameters()
+        let step = 0.01
+        var weight = BeatTracker.nextWeight(0, confidence: 0.8, beats: 10, parameters: parameters)
+        #expect(weight == 1)
+        var trace: [Float] = []
+        for _ in 0..<800 {
+            weight = BeatTracker.nextWeight(weight, confidence: 0.1, beats: step, parameters: parameters)
+            trace.append(weight)
+        }
+        #expect(trace[199] > 0.4, "after 2 beats \(trace[199])")
+        #expect(abs(trace[299] - 0.5) < 0.01, "after 3 beats \(trace[299])")
+        #expect(trace[799] < 0.15, "after 8 beats \(trace[799])")
+    }
+
+    /// Захват, потом доли без атак при открытом вороте: уверенность падает за доли, вес идет за ней
+    /// медленно, и предсказанные доли гаснут постепенно, а не за одну долю.
+    @Test func weightFadesAfterUnlock() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked && tracker.displayWeight == 1)
+        var time = hops.endTime
+        var unlockedAt: Double?
+        var weightAtUnlock: Float = 0
+        while time < 16 {
+            time += hops.hop
+            var hop = SyntheticBeats.hop(endTime: time, broadband: nil, kick: nil)
+            hop.kickLevelDB = -6
+            tracker.process(hop)
+            if unlockedAt == nil, !tracker.locked {
+                unlockedAt = time
+                weightAtUnlock = tracker.displayWeight
+            }
+        }
+        let unlock = try #require(unlockedAt)
+        // Уверенность ниже 0.25 при отпускании, вес еще не догнал свою цель 0.
+        #expect(weightAtUnlock > 0.2, "weight at the unlock \(unlock) s: \(weightAtUnlock)")
+        #expect(tracker.displayWeight == 0)
+    }
+
+    /// Новая сетка (смена темпа на другую сетку) не наследует вес старой: сразу не выше цели по своей
+    /// половинной уверенности. Старый вес эту сетку не подтверждал.
+    @Test func newGridTakesItsOwnWeight() throws {
+        let parameters = BeatTracker.Parameters()
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked && tracker.displayWeight == 1)
+        let period = try #require(tracker.period)
+        tracker.updateTempo(TempoEstimate(period: period / 1.3, switched: true))
+        let target = BeatTracker.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(tracker.confidence))
+        #expect(target < 0.8)
+        #expect(tracker.displayWeight <= target, "weight \(tracker.displayWeight), target \(target)")
+    }
+
+    /// Без захвата сетка, которая попадает только через долю (уверенность ходит около 0.43-0.57, два
+    /// попадания подряд не бывает), не набирает веса: свечение остается за бочками. С `weightHits` 0
+    /// та же сетка светилась бы почти в полную силу.
+    @Test(arguments: [(2, false), (0, true)])
+    func weightNeedsHitsInARowWhileUnlocked(weightHits: Int, rises: Bool) throws {
+        var parameters = BeatTracker.Parameters()
+        parameters.weightHits = weightHits
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        let hop = 256.0 / 48_000
+        var time = 0.0
+        var next = 0.25
+        var beat = 0
+        var peak: Float = 0
+        var peakConfidence = 0.0
+        // Широкополосная функция и бочка на каждой доле 120 BPM (темп 120), атака только на четных.
+        while time < 16 {
+            time += hop
+            var onset: OnsetEvent?
+            var kick: OnsetEvent?
+            if next <= time {
+                kick = OnsetEvent(time: next, strength: 1)
+                if beat % 2 == 0 { onset = kick }
+                beat += 1
+                next += 0.5
+            }
+            tracker.process(SyntheticBeats.hop(endTime: time, broadband: onset, kick: kick))
+            if time > 8 {
+                peak = max(peak, tracker.displayWeight)
+                peakConfidence = max(peakConfidence, tracker.confidence)
+            }
+        }
+        try #require(tracker.period.map { abs($0 - 0.5) < 0.02 } == true)
+        #expect(!tracker.locked)
+        #expect(peakConfidence > parameters.weightLow, "confidence \(peakConfidence)")
+        if rises {
+            #expect(peak > 0.4, "weight \(peak)")
+        } else {
+            #expect(peak == 0, "weight \(peak)")
+        }
+    }
+
+    /// Яркость предсказанной доли фиксируется, когда время потока доходит до доли, и дальше не
+    /// меняется, хотя вес и ворот растут: проверка на захвате с нуля, где вес идет вверх.
+    @Test func amplitudeFrozenAtFirstSight() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        var firstSight: [UInt64: Float] = [:]
+        var changedAfterSight = 0
+        var rising = 0
+        var lastWeight: Float = 0
+        hops.feed(&tracker, until: 8) { tracker in
+            if tracker.displayWeight > lastWeight { rising += 1 }
+            lastWeight = tracker.displayWeight
+            for event in tracker.schedule.events where event.predicted && event.time <= tracker.now {
+                if let seen = firstSight[event.id] {
+                    if seen != event.amplitude { changedAfterSight += 1 }
+                } else {
+                    firstSight[event.id] = event.amplitude
+                }
+            }
+        }
+        #expect(rising > 0)
+        #expect(firstSight.values.contains { $0 > 0 })
+        #expect(changedAfterSight == 0)
     }
 
     /// Захват на «и»: доли сдвинулись на полпериода (трекер оказался на слабой доле). Захват на старой
@@ -720,6 +873,73 @@ struct BeatTrackerTests {
         step(odf: 2 * ratio, kick: onset)
         let glow = tracker.schedule.events.first { !$0.predicted && $0.time == onset.time }
         #expect(abs((glow?.amplitude ?? 0) - amplitude) < 1e-4, "ratio \(ratio): \(String(describing: glow))")
+    }
+
+    /// Мягкий пол подтверждения бочки для показа (`kickConfirmFloor`, по умолчанию выключен, см.
+    /// отчет B4): онсет бочки с отношением 6 (ниже строгого порога 7) светится не тусклее 0.3 силы,
+    /// только когда темп известен, сетка уже набрала уверенность от `weightLow` и ворот открыт. Без
+    /// темпа, без уверенности (темп от одних бочек, как у ложных онсетов розового шума) или при
+    /// закрытом вороте прежнее подтверждение 7...11, и такой онсет не светится. Уверенная сетка здесь
+    /// попадает через долю: уверенность около 0.43-0.57, а вес 0 (`weightHits`), поэтому бочка не
+    /// приглушена весом.
+    @Test(arguments: ["confident", "noConfidence", "noTempo", "gateClosed"])
+    func kickConfirmationFloorOnlyWithTempo(scenario: String) throws {
+        #expect(BeatTracker.Parameters().kickConfirmFloor == 0)
+        var parameters = BeatTracker.Parameters()
+        parameters.kickConfirmFloor = 0.3
+        // Ниже, чтобы после короткой тишины (ворот закрыт) уверенность еще проходила.
+        parameters.weightLow = 0.1
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        let hop = 256.0 / 48_000
+        var time = 0.0
+        var next = 0.25
+        var beat = 0
+        while time < 8 {
+            time += hop
+            var result: HopResult
+            if scenario == "noTempo" {
+                // Уровень как на долях, широкополосная функция 0: темпа нет, медиана 0.
+                result = SyntheticBeats.hop(endTime: time, broadband: nil, kick: nil)
+                result.kickLevelDB = -6
+            } else {
+                var kick: OnsetEvent?
+                var onset: OnsetEvent?
+                if next <= time {
+                    kick = OnsetEvent(time: next, strength: 1)
+                    if scenario != "noConfidence", beat % 2 == 0 { onset = kick }
+                    beat += 1
+                    next += 0.5
+                }
+                result = SyntheticBeats.hop(endTime: time, broadband: onset, kick: kick)
+            }
+            tracker.process(result)
+        }
+        #expect((tracker.period != nil) == (scenario != "noTempo"))
+        #expect((tracker.confidence >= parameters.weightLow) == (scenario == "confident" || scenario == "gateClosed"))
+        #expect(tracker.displayWeight == 0 && !tracker.locked)
+        // До середины между долями: последняя бочка была на доле, следующий онсет на «и».
+        let quiet = scenario == "gateClosed"
+        let until = scenario == "noTempo" ? time + 0.25 : next - 0.25 + (quiet ? 1.0 : 0)
+        while time < until {
+            time += hop
+            var result = SyntheticBeats.hop(endTime: time, broadband: nil, kick: nil)
+            if !quiet { result.kickLevelDB = -6 }
+            tracker.process(result)
+        }
+        // Медиана широкополосной функции за 1.5 с 0, знаменатель 0.5: значение 3 дает отношение 6.
+        time += hop
+        let onset = OnsetEvent(time: time, strength: 1)
+        var result = SyntheticBeats.hop(endTime: time, broadband: nil, kick: onset)
+        result.broadbandODF = 3
+        if quiet { result.kickLevelDB = -40 }
+        tracker.process(result)
+        #expect((tracker.energyGate >= 0.5) == !quiet, "gate \(tracker.energyGate)")
+        let glow = tracker.schedule.events.first { !$0.predicted && $0.time == onset.time }
+        if scenario == "confident" {
+            #expect((glow?.amplitude ?? 0) >= 0.3 - 1e-6, "\(String(describing: glow))")
+        } else {
+            #expect(glow == nil, "\(scenario): \(String(describing: glow))")
+        }
     }
 
     /// Бесконечный или нечисловой уровень бочки считается полом и не застревает в удержании.
