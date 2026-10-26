@@ -1,5 +1,5 @@
-import Foundation
 import SwiftUI
+import Synchronization
 import WaveCore
 
 /// Где рисуются волны.
@@ -370,9 +370,9 @@ nonisolated struct WaveSet: Sendable {
 /// правого, отраженный вокруг вертикали через середину холста (x -> ширина - x): точки и опорные
 /// точки кривых ложатся туда же, куда их ставил прежний расчет справа налево, середины между
 /// точками отличаются не больше чем на единицы последнего разряда (около 1e-13 pt). Живет вместе
-/// с набором, то есть один кадр. Доступ под замком на случай, если SwiftUI зовет замыкание
-/// `Canvas` не на главном потоке.
-nonisolated final class WavePathCache: @unchecked Sendable {
+/// с набором, то есть один кадр. Доступ под замком (`Mutex`) на случай, если SwiftUI зовет
+/// замыкание `Canvas` не на главном потоке.
+nonisolated final class WavePathCache: Sendable {
     private struct Entry {
         let size: CGSize
         let mirrored: Bool
@@ -380,28 +380,27 @@ nonisolated final class WavePathCache: @unchecked Sendable {
         let paths: [Path?]
     }
 
-    private let lock = NSLock()
-    private var entries: [Entry] = []
+    private let entries = Mutex<[Entry]>([])
 
     /// Пути линий для холста размера `size`, зеркальные при `mirrored`. `build` строит их слева
     /// направо (x от 0 до ширины) и зовется не больше раза на размер; зеркальные получаются из
     /// них отражением.
     func paths(size: CGSize, mirrored: Bool, build: () -> [Path?]) -> [Path?] {
-        lock.withLock { () -> [Path?] in
-            if let hit = entries.first(where: { $0.size == size && $0.mirrored == mirrored }) {
+        entries.withLock { stored in
+            if let hit = stored.first(where: { $0.size == size && $0.mirrored == mirrored }) {
                 return hit.paths
             }
             let straight: [Path?]
-            if let hit = entries.first(where: { $0.size == size && !$0.mirrored }) {
+            if let hit = stored.first(where: { $0.size == size && !$0.mirrored }) {
                 straight = hit.paths
             } else {
                 straight = build()
-                entries.append(Entry(size: size, mirrored: false, paths: straight))
+                stored.append(Entry(size: size, mirrored: false, paths: straight))
             }
             guard mirrored else { return straight }
             let flip = CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: size.width, ty: 0)
             let flipped = straight.map { $0?.applying(flip) }
-            entries.append(Entry(size: size, mirrored: true, paths: flipped))
+            stored.append(Entry(size: size, mirrored: true, paths: flipped))
             return flipped
         }
     }
