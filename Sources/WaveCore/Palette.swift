@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// Детерминированный генератор (SplitMix64) для k-means и тестов.
 public struct SplitMix64: RandomNumberGenerator, Sendable {
@@ -414,14 +417,33 @@ public struct PaletteFlow: Sendable {
 }
 
 /// Свечение обложки: мягкое сияние цвета обложки за раскрытой панелью. Скругленный прямоугольник
-/// панели, расширенный на `spread`, с размытием `blur` и прозрачностью `opacity`. Сияние с
-/// размытием помещается в поля окна панели (`NotchGeometry.panelSideMargin`).
+/// видимого тела панели, расширенный на `spread` (`halo(around:)`), с размытием `blur` и
+/// прозрачностью `opacity`. Сияние с размытием (`reach`) помещается в поля окна панели: по бокам
+/// `NotchGeometry.panelSideMargin`, снизу `NotchGeometry.glowMargin`, сверху
+/// `NotchGeometry.panelTopMargin` (у выреза верх панели это верх экрана).
 public enum ArtworkGlow {
     public static let opacity = 0.45
     /// Радиус размытия, pt.
     public static let blur = 8.0
     /// На сколько сияние шире панели с каждой стороны, pt.
     public static let spread = 4.0
+
+    /// На сколько сияние с размытием выходит за тело панели, pt: `spread` и два радиуса размытия.
+    public static var reach: Double {
+        spread + 2 * blur
+    }
+
+    /// Прямоугольник сияния: тело панели `body`, расширенное на `spread` со всех сторон.
+    public static func halo(around body: CGRect) -> CGRect {
+        let out = CGFloat(Self.spread)
+        return body.insetBy(dx: -out, dy: -out)
+    }
+
+    /// Скругление сияния при скруглении тела `radius`: концентрично, на `spread` больше.
+    /// Прямой угол (0) остается прямым.
+    public static func cornerRadius(body radius: CGFloat) -> CGFloat {
+        radius > 0 ? radius + CGFloat(spread) : 0
+    }
 
     /// Рисуется только у раскрытой панели, при включенной функции и с обложкой. При «Уменьшить
     /// прозрачность» размытого сияния нет.

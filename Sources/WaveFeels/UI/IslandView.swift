@@ -47,7 +47,12 @@ import WaveCore
 ///
 /// «Мягкая остановка»: в тишине и на паузе источника-приложения волны, свечение, «вздох» и мягкий
 /// пульс затихают за 0.6 с (`AppModel.islandVisuals`). Переливание: цвета волн, свечения под
-/// островом и точек у выреза плывут с фазой `IslandVisuals.flowPhase`.
+/// островом, точек у выреза и полосы прогресса плывут с фазой `IslandVisuals.flowPhase`.
+///
+/// «Свечение обложки»: за раскрытой панелью мягкое сияние цветов обложки (`ArtworkGlowView`, под
+/// сценой и вне `TimelineView`, одна запеченная текстура). «Полоса прогресса»: тонкая линия по
+/// нижней кромке свернутого острова без баннера (`ProgressEdgeView`, в масштабируемой части
+/// сцены после волн, «вздыхает» вместе с островом).
 ///
 /// «Уменьшение движения»: нет «вздоха» и никакого свечения, волны вдвое медленнее, содержимое
 /// панели появляется и уходит одной прозрачностью. Баннер не перетекает из свернутого острова:
@@ -126,6 +131,7 @@ struct IslandView: View {
         let panel = layout.panelFrame
         let geometry = IslandGeometry(layout: layout, wingWidth: layout.wingWidth)
         ZStack(alignment: .topLeading) {
+            artworkGlow(state: state, geometry: geometry)
             Group {
                 if let clock {
                     let time = clock()
@@ -174,6 +180,31 @@ struct IslandView: View {
             } catch {
                 // Остров снова показан.
             }
+        }
+    }
+
+    // MARK: - Свечение обложки
+
+    /// `ArtworkGlowView` под сценой, вне `TimelineView`: только у раскрытой панели с обложкой,
+    /// при включенной функции и без «Уменьшить прозрачность» (`ArtworkGlow.isShown`). Цвета из
+    /// палитры обложки `AppModel.palette`, без перехода и переливания: на кадрах сияние не
+    /// пересчитывается. Появляется и уходит прозрачностью под пружиной раскрытия.
+    @ViewBuilder
+    private func artworkGlow(state: IslandState, geometry: IslandGeometry) -> some View {
+        if ArtworkGlow.isShown(
+            enabled: model.settings.artworkGlow, state: state, hasArtwork: model.artwork != nil,
+            reduceTransparency: model.displayOptions.reduceTransparency
+        ) {
+            let bottomRadius = ArtworkGlow.cornerRadius(body: IslandOutline.expandedRadius)
+            ArtworkGlowView(
+                halo: ArtworkGlow.halo(around: geometry.expandedBody),
+                topRadius: geometry.hasNotch ? 0 : bottomRadius,
+                bottomRadius: bottomRadius,
+                colors: ArtworkGlow.colors(artworkPalette: model.palette)
+            )
+            .equatable()
+            .transition(.opacity)
+            .allowsHitTesting(false)
         }
     }
 
@@ -312,11 +343,35 @@ struct IslandView: View {
                     bannerLayer: bannerVisible || (bannerMoving && state == .collapsed), wingLayer: !bannerVisible || bannerMoving,
                     reduceMotion: reduceMotion
                 )
+                if let progress = progressEdge(state: state, banner: bannerVisible, geometry: geometry) {
+                    ProgressEdgeView(
+                        track: progress.track, filled: progress.filled,
+                        color: WavePaint.glowColor(visuals.glowSourceColor)
+                    )
+                    .equatable()
+                    .transition(.opacity)
+                }
             }
             .scaleEffect(scale, anchor: UnitPoint(x: anchor.x / geometry.size.width, y: anchor.y / geometry.size.height))
         }
         .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         .opacity(state == .hidden ? 0 : 1)
+    }
+
+    /// Полоса прогресса на кадре: только у свернутого острова без баннера при включенной функции
+    /// (`ProgressEdge.isShown`) и пока у трека панели есть позиция
+    /// (`NowPlayingInfo.playbackPosition(at:)`; устаревший тайминг дает `nil`, и полосы нет).
+    /// Дата из `clock`, как у содержимого панели: на снимках полоса не зависит от часов машины.
+    private func progressEdge(
+        state: IslandState, banner: Bool, geometry: IslandGeometry
+    ) -> (track: CGRect, filled: CGFloat)? {
+        guard ProgressEdge.isShown(enabled: model.settings.progressLine, state: state, banner: banner),
+              let fraction = model.panelTrack?.playbackPosition(
+                  at: clock.map { Date(timeIntervalSinceReferenceDate: $0()) } ?? Date()
+              )?.fraction
+        else { return nil }
+        let track = geometry.progressEdge
+        return (track, ProgressEdge.filledWidth(fraction: fraction, trackWidth: track.width))
     }
 }
 
@@ -433,5 +488,20 @@ struct IslandGeometry: Equatable, Sendable {
 
     var pillWaves: CGRect {
         collapsed.insetBy(dx: min(Self.pillWaveInset, collapsed.width / 2), dy: 0)
+    }
+
+    /// Видимое тело раскрытой панели: у выреза рамка без плеч по бокам
+    /// (`NotchLayout.expandedClickArea`), у капсулы вся рамка. Вокруг него свечение обложки.
+    var expandedBody: CGRect {
+        hasNotch ? expanded.insetBy(dx: Self.expandedShoulderRadius, dy: 0) : expanded
+    }
+
+    /// Полоса прогресса свернутого острова во всю длину (`ProgressEdge.track`): 1 pt от низа,
+    /// по краям отступ на скругление низа. У выреза это плечо и `IslandOutline.collapsedRadius`
+    /// (тело острова уже рамки на плечи), у капсулы половина высоты. Под аппаратным вырезом
+    /// середины полосы не видно, доля все равно отсчитывается по всей длине.
+    var progressEdge: CGRect {
+        let side = hasNotch ? Self.shoulderRadius + IslandOutline.collapsedRadius : collapsed.height / 2
+        return ProgressEdge.track(island: collapsed, sideInset: side)
     }
 }

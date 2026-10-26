@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 @testable import WaveCore
 
 struct PaletteTests {
@@ -327,6 +330,20 @@ struct PaletteTests {
 
     /// Сияние с размытием помещается в поля окна панели и не обрезается краем окна.
     @Test func haloFitsPanelMargins() {
-        #expect(ArtworkGlow.spread + 2 * ArtworkGlow.blur <= Double(NotchGeometry.panelSideMargin))
+        #expect(ArtworkGlow.reach == ArtworkGlow.spread + 2 * ArtworkGlow.blur)
+        #expect(ArtworkGlow.reach <= Double(NotchGeometry.panelSideMargin))
+        #expect(ArtworkGlow.reach <= Double(NotchGeometry.glowMargin))
+        #expect(ArtworkGlow.reach <= Double(NotchGeometry.panelTopMargin))
+    }
+
+    /// Прямоугольник сияния шире тела панели на `spread` со всех сторон, скругление концентрично
+    /// скруглению тела, прямой угол остается прямым.
+    @Test func haloSurroundsPanelBody() {
+        let body = CGRect(x: 10, y: 20, width: 468, height: 150)
+        let halo = ArtworkGlow.halo(around: body)
+        let spread = CGFloat(ArtworkGlow.spread)
+        #expect(halo == CGRect(x: 10 - spread, y: 20 - spread, width: 468 + 2 * spread, height: 150 + 2 * spread))
+        #expect(ArtworkGlow.cornerRadius(body: 28) == 28 + spread)
+        #expect(ArtworkGlow.cornerRadius(body: 0) == 0)
     }
 }

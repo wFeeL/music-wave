@@ -11,7 +11,8 @@ import WaveCore
 /// показывает баннер нового трека (`IslandGeometry.banner`, нижние углы 22 pt, у выреза плечи
 /// 9 pt, у капсулы плеч нет).
 struct IslandOutline: View {
-    static let collapsedRadius: CGFloat = 10
+    /// Без изоляции: по нему `IslandGeometry.progressEdge` отступает от скругления низа.
+    nonisolated static let collapsedRadius: CGFloat = 10
     static let expandedRadius: CGFloat = 28
 
     let geometry: IslandGeometry
@@ -377,5 +378,69 @@ struct BeatGlowView: View {
             .blur(radius: Self.blur * CGFloat(radius))
             .opacity(opacity)
             .offset(x: rect.midX - width / 2, y: bottom - Self.lift - height / 2)
+    }
+}
+
+/// Свечение обложки за раскрытой панелью (`ArtworkGlow`): прямоугольник `halo` (видимое тело
+/// панели, расширенное на `ArtworkGlow.spread`) градиентом поднятых цветов обложки слева
+/// направо, размытый на `ArtworkGlow.blur`, с прозрачностью `ArtworkGlow.opacity`. Лежит под
+/// сценой и вне `TimelineView`, от кадров не зависит: размытие запекается одной текстурой
+/// (`drawingGroup`) с полем под него и пересчитывается только при смене цветов или геометрии
+/// (`==`). `IslandView` строит его только у раскрытой панели (`ArtworkGlow.isShown`), иначе
+/// размытия нет вовсе.
+struct ArtworkGlowView: View, Equatable {
+    /// Прямоугольник сияния в координатах панели.
+    let halo: CGRect
+    /// Скругление верхних углов: у выреза 0 (верх панели это верх экрана), у капсулы как у низа.
+    let topRadius: CGFloat
+    /// Скругление нижних углов.
+    let bottomRadius: CGFloat
+    /// Цвета градиента, уже поднятые (`ArtworkGlow.colors`).
+    let colors: [PaletteColor]
+
+    nonisolated static func == (lhs: ArtworkGlowView, rhs: ArtworkGlowView) -> Bool {
+        lhs.halo == rhs.halo && lhs.topRadius == rhs.topRadius && lhs.bottomRadius == rhs.bottomRadius
+            && lhs.colors == rhs.colors
+    }
+
+    var body: some View {
+        // Текстура шире сияния на два радиуса размытия: края размытия не обрезаются.
+        let pad = CGFloat(2 * ArtworkGlow.blur)
+        let canvas = halo.insetBy(dx: -pad, dy: -pad)
+        UnevenRoundedRectangle(
+            topLeadingRadius: topRadius, bottomLeadingRadius: bottomRadius,
+            bottomTrailingRadius: bottomRadius, topTrailingRadius: topRadius, style: .continuous
+        )
+        .fill(LinearGradient(colors: colors.map { Color(palette: $0) }, startPoint: .leading, endPoint: .trailing))
+        .frame(width: halo.width, height: halo.height)
+        .blur(radius: CGFloat(ArtworkGlow.blur))
+        .frame(width: canvas.width, height: canvas.height)
+        .drawingGroup()
+        .opacity(ArtworkGlow.opacity)
+        .offset(x: canvas.minX, y: canvas.minY)
+    }
+}
+
+/// Полоса прогресса по нижней кромке свернутого острова (`ProgressEdge`): заполненная часть
+/// полосы `track` шириной `filled` цветом `color` (уже поднятым `WavePaint.glowColor`) с
+/// непрозрачностью `ProgressEdge.opacity`. Ширина идет шагами `ProgressEdge.step`, поэтому вид
+/// (`==`) перерисовывается несколько раз в секунду, а не на каждом кадре; с переливанием еще и
+/// со сменой цвета.
+struct ProgressEdgeView: View, Equatable {
+    /// Полоса во всю длину в координатах панели (`IslandGeometry.progressEdge`).
+    let track: CGRect
+    /// Заполненная ширина от левого края полосы (`ProgressEdge.filledWidth`).
+    let filled: CGFloat
+    let color: PaletteColor
+
+    nonisolated static func == (lhs: ProgressEdgeView, rhs: ProgressEdgeView) -> Bool {
+        lhs.track == rhs.track && lhs.filled == rhs.filled && lhs.color == rhs.color
+    }
+
+    var body: some View {
+        Capsule(style: .continuous)
+            .fill(Color(palette: color, opacity: ProgressEdge.opacity))
+            .frame(width: filled, height: track.height)
+            .offset(x: track.minX, y: track.minY)
     }
 }

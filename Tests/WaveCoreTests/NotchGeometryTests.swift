@@ -273,9 +273,35 @@ struct NotchGeometryTests {
         var wider = layout
         wider.wingWidth = 150
         #expect(wider.panelFrame == panel)
-        // Панель капсулы при настройках по умолчанию тоже как в 0.9.0.
+        // Панель капсулы как в 0.9.0, плюс поле сверху под свечение обложки (1.2).
         let pill = try #require(NotchGeometry.layout(for: [external()]))
-        #expect(pill.panelFrame.size == CGSize(width: 468 + 48, height: 150 + 40))
+        #expect(pill.panelFrame.size == CGSize(width: 468 + 48, height: 150 + 40 + 20))
+    }
+
+    /// Свечение обложки с размытием помещается в окно панели со всех сторон: по бокам, снизу
+    /// и сверху. У выреза верх панели это верх экрана, выше рисовать нечего, рамка та же, что
+    /// в 0.9.0; над капсулой поле `panelTopMargin`.
+    @Test func artworkHaloFitsPanelFrame() throws {
+        for screen in [notched(), external()] {
+            for wing: CGFloat in [0, 64, 200] {
+                for radius in [1.0, 3.0] {
+                    var layout = try #require(NotchGeometry.layout(for: [screen]))
+                    layout.wingWidth = wing
+                    layout.glowRadius = radius
+                    let blur = CGFloat(2 * ArtworkGlow.blur)
+                    let extent = ArtworkGlow.halo(around: layout.expandedClickArea).insetBy(dx: -blur, dy: -blur)
+                    #expect(
+                        layout.panelFrame.contains(extent.intersection(layout.screenFrame)),
+                        "\(screen.id), крыло \(wing), радиус \(radius)"
+                    )
+                }
+            }
+        }
+        #expect(NotchGeometry.panelTopMargin == CGFloat(ArtworkGlow.reach))
+        let pill = try #require(NotchGeometry.layout(for: [external()]))
+        #expect(pill.panelFrame.maxY == pill.expandedIsland.maxY + NotchGeometry.panelTopMargin)
+        let notch = try #require(NotchGeometry.layout(for: [notched()]))
+        #expect(notch.panelFrame.maxY == notch.screenFrame.maxY)
     }
 
     /// Свечение радиусом 3× помещается: размытие 42 pt (14 × 3) уходит ниже острова примерно на

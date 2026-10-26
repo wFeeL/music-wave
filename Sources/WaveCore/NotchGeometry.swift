@@ -159,18 +159,22 @@ public struct NotchLayout: Sendable, Equatable {
     }
 
     /// Рамка панели: раскрытый и свернутый остров с текущим крылом плюс запас снизу под
-    /// свечение текущего радиуса (`NotchGeometry.glowMargin(radius:)`) и по бокам под тень и
-    /// «вздох», по горизонтали не выходит за экран. Баннер (`bannerFrame`) в объединении для
-    /// надежности: он и так внутри раскрытого острова. Окно не больше, чем нужно сейчас: прозрачная
-    /// площадь тоже стоит времени композитору. При настройках по умолчанию рамка та же, что в 0.9.0.
+    /// свечение текущего радиуса (`NotchGeometry.glowMargin(radius:)`), по бокам под тень и
+    /// «вздох» и сверху под свечение обложки (`NotchGeometry.panelTopMargin`), не выходит за
+    /// экран по горизонтали и за его верх. Баннер (`bannerFrame`) в объединении для надежности:
+    /// он и так внутри раскрытого острова. Окно не больше, чем нужно сейчас: прозрачная площадь
+    /// тоже стоит времени композитору. У выреза верх острова это верх экрана, поля сверху нет,
+    /// и при настройках по умолчанию рамка та же, что в 0.9.0; у капсулы она выше на поле сверху.
     public var panelFrame: CGRect {
         let union = expandedIsland.union(collapsedIsland(wingWidth: wingWidth)).union(bannerFrame)
         let glow = NotchGeometry.glowMargin(radius: glowRadius)
         let minX = max(union.minX - NotchGeometry.panelSideMargin, screenFrame.minX)
         let maxX = min(union.maxX + NotchGeometry.panelSideMargin, screenFrame.maxX)
+        let minY = union.minY - glow
+        let maxY = max(min(union.maxY + NotchGeometry.panelTopMargin, screenFrame.maxY), union.maxY)
         return CGRect(
-            x: minX, y: union.minY - glow,
-            width: max(maxX - minX, 0), height: union.height + glow
+            x: minX, y: minY,
+            width: max(maxX - minX, 0), height: maxY - minY
         )
     }
 
@@ -306,6 +310,9 @@ public enum NotchGeometry {
     }
     /// Запас панели по бокам: тень раскрытого острова и «вздох» не обрезаются краем окна.
     public static let panelSideMargin: CGFloat = 24
+    /// Запас панели сверху: свечение обложки над раскрытой капсулой не обрезается краем окна
+    /// (`ArtworkGlow.reach`). У выреза верх панели упирается в верх экрана.
+    public static let panelTopMargin = CGFloat(ArtworkGlow.reach)
     /// Отступ капсулы от строки меню на экране без выреза.
     static let pillGap: CGFloat = 8
     static let fakeNotchSize = CGSize(width: 185, height: 32)
