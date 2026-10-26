@@ -584,15 +584,18 @@ final class AppModel {
     /// Выбор пользователя `chosen` (`settings.source ?? defaultSource`). Если автовыбор выключен,
     /// выбран весь звук системы (или приложение без bundle ID) либо пользователь сменил источник,
     /// переключатель сбрасывается и источник возвращается к выбору. На паузе визуализации
-    /// автовыбор стоит. Кандидат (`AutoSourceSwitcher.candidate`): приложение играющей записи
+    /// автовыбор стоит: источник остается, отсчеты начинаются заново (`restartTiming`), чтобы после
+    /// паузы переход или возврат снова ждал свои секунды. Кандидат
+    /// (`AutoSourceSwitcher.candidate`): приложение играющей записи
     /// Now Playing не из выбранного; он считается играющим, если его процессы выводят звук.
     /// Выбранное играет по `AutoSourceSwitcher.appPlaying` (Now Playing, если показывает его,
     /// иначе вывод звука его процессами), автоматическое тоже, только вместо процессов звук
     /// захвата прошлого тика. Снимок процессов читается лениво, только для кандидата и для
-    /// выбранного во время автоматического выбора, и не чаще `autoProcessInterval`.
+    /// выбранного, пока автоматическое молчит, и не чаще `autoProcessInterval`. Переход и возврат
+    /// по переключателю баннер нового трека не показывают (`applyAutoSource`).
     func updateAutoSource(now: Double) {
         let chosen = settings.source ?? defaultSource
-        guard settings.autoSource, case .application(let chosenID, _, _) = chosen, !chosenID.isEmpty else {
+        guard settings.autoSource, let chosenID = Self.autoSourceChosenID(chosen) else {
             resetAutoSource(chosen: chosen)
             return
         }
@@ -600,7 +603,10 @@ final class AppModel {
             resetAutoSource(chosen: chosen)
             autoChosen = chosen
         }
-        guard !settings.paused else { return }
+        guard !settings.paused else {
+            autoSwitcher.restartTiming()
+            return
+        }
 
         let info = nowPlayingStub ?? adapter.info
         let before = autoSwitcher.override
@@ -613,13 +619,14 @@ final class AppModel {
                 playing = candidate
             }
         }
-        // Без автоматического выбора переключатель `chosenPlaying` не читает.
-        let chosenPlaying = before != nil
-            && AutoSourceSwitcher.appPlaying(chosenID, nowPlaying: info, outputRunning: appOutputting(chosen, now: now))
         let audible = previousAudioActive
         let overridePlaying = before.map {
             AutoSourceSwitcher.appPlaying($0, nowPlaying: info, outputRunning: audible)
         } ?? false
+        // Переключатель читает `chosenPlaying` только при молчащем автоматическом: без него и пока
+        // оно играет, вывод звука выбранного не проверяется.
+        let chosenPlaying = before != nil && !overridePlaying
+            && AutoSourceSwitcher.appPlaying(chosenID, nowPlaying: info, outputRunning: appOutputting(chosen, now: now))
         let next = autoSwitcher.update(
             chosen: chosenID,
             playing: playing,
@@ -628,7 +635,14 @@ final class AppModel {
             now: now
         )
         guard next != before else { return }
-        applyAutoSource(next.flatMap { resolveAutoSource($0) }, chosen: chosen)
+        applyAutoSource(next.flatMap { resolveAutoSource($0) }, chosen: chosen, rebaseBanner: true)
+    }
+
+    /// bundle ID выбора `chosen`, при котором работает автовыбор: у всего звука системы и у
+    /// приложения без bundle ID `nil`.
+    nonisolated static func autoSourceChosenID(_ chosen: AudioSource) -> String? {
+        guard case .application(let bundleID, _, _) = chosen, !bundleID.isEmpty else { return nil }
+        return bundleID
     }
 
     /// Переключатель и снимок процессов забыты, источник возвращается к выбору `chosen`.
@@ -636,17 +650,26 @@ final class AppModel {
         autoSwitcher.reset()
         autoChosen = nil
         autoProcesses = nil
-        applyAutoSource(nil, chosen: chosen)
+        applyAutoSource(nil, chosen: chosen, rebaseBanner: false)
     }
 
     /// Новый автоматический источник (`nil`: возврат к выбору `chosen`). При смене счет тишины
     /// политики простоя начинается заново, как в `setPaused`: иначе она продолжила бы счет
-    /// прошлого источника и могла остановить захват нового.
-    private func applyAutoSource(_ source: AudioSource?, chosen: AudioSource) {
+    /// прошлого источника и могла остановить захват нового. `rebaseBanner` (переход и возврат по
+    /// переключателю): трек нового источника не новый для баннера. Баннер прошлого источника
+    /// скрывается, первый трек после смены становится базовым без показа, как после запуска.
+    /// Смена по действию пользователя (выключил автовыбор, выбрал другой источник) баннер не
+    /// трогает, как любая ручная смена источника.
+    private func applyAutoSource(_ source: AudioSource?, chosen: AudioSource, rebaseBanner: Bool) {
         guard source != autoSource else { return }
         let previous = autoSource ?? chosen
         autoSource = source
         idlePolicy.reset()
+        if rebaseBanner {
+            banner.reset()
+            applyBannerPhase(.hidden)
+            scheduleBannerDeadline(now: ProcessInfo.processInfo.systemUptime)
+        }
         if let source {
             log("автовыбор: источник \(source.displayName) (было \(previous.displayName))")
         } else {
@@ -685,6 +708,9 @@ final class AppModel {
     /// Строка «Автовыбор источника» в диагностике.
     var autoSourceDescription: String {
         guard settings.autoSource else { return "выкл" }
+        let chosen = settings.source ?? defaultSource
+        if chosen == .systemWide { return "выкл (весь звук системы)" }
+        if Self.autoSourceChosenID(chosen) == nil { return "выкл (у источника нет bundle ID)" }
         guard let autoSource else { return "ждет" }
         return "сейчас \(autoSource.displayName)"
     }

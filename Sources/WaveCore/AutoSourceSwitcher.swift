@@ -33,6 +33,14 @@ public struct AutoSourceSwitcher: Sendable {
         overrideSilentSince = nil
     }
 
+    /// Пауза визуализации: отсчеты кандидата и тишины автоматического начинаются заново,
+    /// автоматический выбор остается. Иначе после долгой паузы старый момент начала дал бы переход
+    /// или возврат на первом же обновлении, без `confirm` или `release` секунд.
+    public mutating func restartTiming() {
+        pending = nil
+        overrideSilentSince = nil
+    }
+
     /// Возвращает bundle ID автоматического источника или `nil`, если звучит выбор пользователя.
     ///
     /// - Parameters:

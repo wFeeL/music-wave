@@ -87,6 +87,73 @@ struct AppModelAutoSourceTests {
         #expect(model.autoSource == nil)
         #expect(model.effectiveSource == Self.yandex)
         #expect(model.settings.source == Self.yandex)
+
+        // Весь звук системы: автовыбор включен, но не работает, и диагностика говорит почему.
+        model.settings.autoSource = true
+        model.settings.source = .systemWide
+        Self.run(model, tenths: 63...80)
+        #expect(model.autoSource == nil)
+        #expect(model.effectiveSource == .systemWide)
+        #expect(model.autoSourceDescription == "выкл (весь звук системы)")
+    }
+
+    /// Пауза визуализации: источник остается, а отсчет кандидата после нее начинается заново.
+    /// Полсекунды игры до долгой паузы не дают перехода на первом тике после нее.
+    @Test func pauseRestartsPendingCandidate() throws {
+        let fixture = try AutoSourceFixture()
+        defer { fixture.tearDown() }
+        let model = fixture.model
+        model.settings.autoSource = true
+        model.nowPlayingStub = Self.telegramPlaying
+        fixture.world.outputting = [Self.telegramProcess]
+
+        Self.run(model, tenths: 0...5)
+        model.settings.paused = true
+        Self.run(model, tenths: 6...99)
+        #expect(model.autoSource == nil)
+        model.settings.paused = false
+        Self.run(model, tenths: 100...109)
+        #expect(model.autoSource == nil)
+        model.updateAutoSource(now: 10 + AutoSourceSwitcher.confirm)
+        #expect(model.autoSource == Self.telegram)
+
+        // На паузе автоматический выбор держится, хотя Telegram уже молчит, а выбранное играет.
+        model.settings.paused = true
+        model.nowPlayingStub = Self.yandexPlaying
+        fixture.world.outputting = [Self.yandexProcess]
+        Self.run(model, tenths: 111...200)
+        #expect(model.autoSource == Self.telegram)
+    }
+
+    /// Переход и возврат по переключателю не показывают баннер нового трека: трек нового источника
+    /// становится базовым. Настоящая смена трека после этого баннер показывает.
+    @Test func autoSwitchDoesNotShowBanner() throws {
+        let fixture = try AutoSourceFixture()
+        defer { fixture.tearDown() }
+        let model = fixture.model
+        model.settings.autoSource = true
+        model.updateBanner(now: 0, sourceInfo: Self.yandexPlaying)
+
+        model.nowPlayingStub = Self.telegramPlaying
+        fixture.world.outputting = [Self.telegramProcess]
+        Self.run(model, tenths: 0...10)
+        #expect(model.autoSource == Self.telegram)
+        model.updateBanner(now: 1.1, sourceInfo: Self.telegramPlaying)
+        model.updateBanner(now: 2.0, sourceInfo: Self.telegramPlaying)
+        #expect(!model.bannerShown)
+
+        model.nowPlayingStub = Self.yandexPlaying
+        fixture.world.outputting = [Self.yandexProcess]
+        Self.run(model, tenths: 20...40)
+        #expect(model.autoSource == nil)
+        model.updateBanner(now: 4.1, sourceInfo: Self.yandexPlaying)
+        model.updateBanner(now: 5.0, sourceInfo: Self.yandexPlaying)
+        #expect(!model.bannerShown)
+
+        let next = NowPlayingInfo(bundleIdentifier: AutoSourceData.yandexID, title: "Следующий", isPlaying: true)
+        model.updateBanner(now: 6.0, sourceInfo: next)
+        model.updateBanner(now: 6.5, sourceInfo: next)
+        #expect(model.bannerShown)
     }
 
     /// Идет автоматический выбор Telegram. Now Playing переключился на Яндекс Музыку на паузе,

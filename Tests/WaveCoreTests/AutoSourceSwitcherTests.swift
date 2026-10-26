@@ -167,6 +167,28 @@ import Testing
         ) == nil)
     }
 
+    /// Пауза визуализации: отсчеты начинаются заново, автоматический выбор остается. Кандидат,
+    /// игравший полсекунды до долгой паузы, после нее снова набирает `confirm` с начала.
+    @Test func restartTimingForgetsPendingAfterPause() {
+        var switcher = AutoSourceSwitcher()
+        #expect(run(&switcher, playing: Self.telegram, chosenPlaying: false, overridePlaying: false, from: 0, to: 0.5) == nil)
+        switcher.restartTiming()
+        #expect(run(&switcher, playing: Self.telegram, chosenPlaying: false, overridePlaying: false, from: 10, to: 10.9) == nil)
+        #expect(switcher.update(
+            chosen: Self.yandex, playing: Self.telegram, chosenPlaying: false, overridePlaying: false, now: 11
+        ) == Self.telegram)
+
+        // Тишина автоматического до паузы тоже не досчитывается: возврат через `release` после нее.
+        var switched = switchedToTelegram()
+        #expect(run(&switched, playing: nil, chosenPlaying: false, overridePlaying: false, from: 1.1, to: 5) == Self.telegram)
+        switched.restartTiming()
+        #expect(switched.override == Self.telegram)
+        #expect(run(&switched, playing: Self.yandex, chosenPlaying: true, overridePlaying: false, from: 20, to: 21.9) == Self.telegram)
+        #expect(switched.update(
+            chosen: Self.yandex, playing: Self.yandex, chosenPlaying: true, overridePlaying: false, now: 22
+        ) == nil)
+    }
+
     /// Выбранное играет, если Now Playing показывает его, по `isPlaying`; иначе по выводу звука.
     @Test func chosenPlayingPrefersNowPlaying() {
         let paused = NowPlayingInfo(bundleIdentifier: Self.yandex, title: "Трек", isPlaying: false)
