@@ -70,42 +70,88 @@ struct BeatTrackerTests {
         #expect(wasLocked)
     }
 
-    /// Мягкий пульс трекера (`BeatSchedule.ambient`): энергия бочки (короткая огибающая уровня полосы
-    /// бочки против длинного среднего) и горб на сетке (уверенность × ворот) дают пульс в такт, который
-    /// в брейке без бочки (`Drums.breakdown`, 10-18 с) гаснет вместе с энергией и воротом, а после
-    /// возврата бочки возвращается. После `reset()` пульса нет.
-    @Test func ambientFollowsKicksAndFadesInBreakdown() async {
-        let hops = await runOffCooperativePool { Hops.breakdown }
-        var tracker = BeatTracker(framesPerSecond: Self.fps)
-        var before: (peak: Float, low: Float) = (0, 1)
-        var during: Float = 0
-        var after: Float = 0
-        var missing = 0
+    /// Мягкий пульс по шагам: на каждом шаге сетка и горб из расписания, энергия из кадра шага
+    /// (`WaveFrame.kickEnergy`, как у анализа приложения), время конец шага.
+    private static func ambientTrace(_ hops: [HopResult]) -> (values: [(time: Double, value: Float)], tracker: BeatTracker) {
+        var tracker = BeatTracker(framesPerSecond: fps)
+        var values: [(time: Double, value: Float)] = []
+        values.reserveCapacity(hops.count)
         for hop in hops {
             tracker.process(hop)
-            let ambient = tracker.schedule.ambient
-            if ambient == nil { missing += 1 }
-            let value = BeatGlow.ambient(at: hop.endTime, info: ambient)
-            switch hop.endTime {
-            case 6..<10:
-                before = (max(before.peak, value), min(before.low, value))
-            case 12..<18:
-                during = max(during, value)
-            case 20..<24:
-                after = max(after, value)
-            default:
-                break
-            }
+            var frame = hop.frame
+            frame.kickEnergy = tracker.ambientEnergy
+            values.append((hop.endTime, BeatGlow.ambient(at: hop.endTime, info: tracker.schedule.ambient, frame: frame)))
         }
-        #expect(missing == 0)
+        return (values, tracker)
+    }
+
+    /// Пульс на отрезке: наибольший, наименьший и доля шагов от 0.01.
+    private static func ambientStats(
+        _ values: [(time: Double, value: Float)], _ range: Range<Double>
+    ) -> (peak: Float, low: Float, lit: Double) {
+        let part = values.filter { range.contains($0.time) }.map(\.value)
+        let lit = Double(part.filter { $0 >= 0.01 }.count) / Double(max(part.count, 1))
+        return (part.max() ?? 0, part.min() ?? 0, lit)
+    }
+
+    /// Мягкий пульс трекера (`BeatSchedule.ambient` и энергия кадра): энергия бочки (короткая
+    /// огибающая уровня полосы бочки против ее длинного среднего) и горб на сетке (уверенность × ворот)
+    /// дают пульс в такт, который в брейке без бочки (`Drums.breakdown`, 10-18 с) гаснет вместе с
+    /// энергией и воротом, а после возврата бочки возвращается. То же, когда под всей сценой лежит
+    /// ровная подложка в полосе бочки (коричневый шум -24 dBFS и бас 55 Гц): бочка над ней дает
+    /// ясный горб, а в брейке пульс почти гаснет (замер: пик 0.025, от 0.01 4 % шагов; до брейка пик
+    /// 0.17). После `reset()` пульса нет, энергия в расписании всегда 0.
+    @Test func ambientFollowsKicksAndFadesInBreakdown() async {
+        let (bare, bed) = await runOffCooperativePool {
+            let scene = SharedScenes.breakdown
+            let bed = Drums.bassBed(levelDB: -24, bassGain: 1, count: scene.samples.count, sampleRate: scene.sampleRate, seed: 9)
+            let mixed = zip(scene.samples, bed).map { $0 + $1 }
+            return (Hops.breakdown, StreamAnalyzer(sampleRate: scene.sampleRate).processSignal(mixed))
+        }
+        var (values, tracker) = Self.ambientTrace(bare)
+        let before = Self.ambientStats(values, 6..<10)
         #expect(before.peak > 0.1, "peak before the break \(before.peak)")
         // Пульс в такт, а не ровный слой: между бочками он опускается.
         #expect(before.low < before.peak / 2, "low \(before.low) peak \(before.peak)")
-        #expect(during < 0.02, "peak in the break \(during)")
-        #expect(after > 0.1, "peak after the break \(after)")
-
+        #expect(Self.ambientStats(values, 12..<18).peak < 0.02, "peak in the break")
+        #expect(Self.ambientStats(values, 20..<24).peak > 0.1, "peak after the break")
+        #expect(tracker.schedule.ambient?.energy == 0)
         tracker.reset()
-        #expect(BeatGlow.ambient(at: 0, info: tracker.schedule.ambient) == 0)
+        #expect(BeatGlow.ambient(at: 0, info: tracker.schedule.ambient, frame: .silent) == 0)
+        #expect(tracker.ambientEnergy == 0)
+
+        (values, tracker) = Self.ambientTrace(bed)
+        let bedBefore = Self.ambientStats(values, 6..<10)
+        let bedBreak = Self.ambientStats(values, 12..<18)
+        #expect(bedBefore.peak > 0.1, "peak over the bed before the break \(bedBefore.peak)")
+        #expect(bedBefore.low < bedBefore.peak / 2, "low \(bedBefore.low) peak \(bedBefore.peak)")
+        #expect(bedBreak.peak < 0.05 && bedBreak.lit < 0.1, "break over the bed: peak \(bedBreak.peak), lit \(bedBreak.lit)")
+        #expect(Self.ambientStats(values, 20..<24).peak > 0.1, "peak over the bed after the break")
+    }
+
+    /// Ровный неровный звук без ударов (коричневый шум -20 dBFS, основная энергия в полосе бочки): в
+    /// среднем энергия около 1, и пульс от 0.01 только на случайных всплесках шума (замер: 18 % шагов,
+    /// пик 0.12), а не постоянным слоем. Против среднего сырого уровня было около 1.4 и слой 0.086.
+    @Test func steadyNoiseKeepsThePulseLow() async {
+        let hops = await runOffCooperativePool {
+            StreamAnalyzer(sampleRate: 48_000).processSignal(Drums.brownNoise(levelDB: -20, count: 48_000 * 12, seed: 5))
+        }
+        let values = Self.ambientTrace(hops).values
+        let stats = Self.ambientStats(values, 3..<12)
+        #expect(stats.lit < 0.25, "share of steps with pulse >= 0.01: \(stats.lit)")
+        let sorted = values.filter { (3..<12).contains($0.time) }.map(\.value).sorted()
+        #expect(sorted[sorted.count / 2] == 0, "median pulse \(sorted[sorted.count / 2])")
+    }
+
+    /// Звук ниже порога шума волн (`LevelProcessor.noiseFloorDB`): коричневый шум -80 dBFS в полосе
+    /// бочки не дает ни энергии, ни горба, остров может уйти в простой.
+    @Test func noiseBelowTheFloorHasNoPulse() async {
+        let hops = await runOffCooperativePool {
+            StreamAnalyzer(sampleRate: 48_000).processSignal(Drums.brownNoise(levelDB: -80, count: 48_000 * 6, seed: 5))
+        }
+        let (values, tracker) = Self.ambientTrace(hops)
+        #expect(values.allSatisfy { $0.value == 0 })
+        #expect(tracker.ambientEnergy == 0)
     }
 
     /// Брейк без бочки 8 с посреди захвата (`Drums.breakdown`, бочка возвращается на 18 с на той же

@@ -114,6 +114,32 @@ enum Drums {
         return samples.map { $0 * scale }
     }
 
+    /// Коричневый шум (белый через интегратор с утечкой 0.995, основная энергия в басу) со
+    /// среднеквадратичным уровнем `levelDB` dBFS: ровный, но неровный по огибающей звук в полосе бочки.
+    static func brownNoise(levelDB: Float, count: Int, seed: UInt64) -> [Float] {
+        var rng = TestRNG(seed: seed)
+        var state = 0.0
+        var samples = [Float](repeating: 0, count: count)
+        var sumSquares = 0.0
+        for i in 0..<count {
+            state = 0.995 * state + Double(rng.nextUnit())
+            samples[i] = Float(state)
+            sumSquares += state * state
+        }
+        let rms = count > 0 ? (sumSquares / Double(count)).squareRoot() : 0
+        guard rms > 0 else { return samples }
+        let scale = Float(pow(10, Double(levelDB) / 20) / rms)
+        return samples.map { $0 * scale }
+    }
+
+    /// Ровная подложка в полосе бочки на `count` сэмплов: коричневый шум на `levelDB` dBFS и нота баса
+    /// 55 Гц на все время с громкостью `bassGain`.
+    static func bassBed(levelDB: Float, bassGain: Float, count: Int, sampleRate: Double, seed: UInt64) -> [Float] {
+        var samples = brownNoise(levelDB: levelDB, count: count, seed: seed)
+        bassNote(into: &samples, at: 0, duration: Double(count) / sampleRate, gain: bassGain, sampleRate: sampleRate)
+        return samples
+    }
+
     // MARK: Сцены
 
     /// Бочка на каждую долю. `swing` это место второй восьмой хэта в доле (0.5 ровно, 0.66 свинг).

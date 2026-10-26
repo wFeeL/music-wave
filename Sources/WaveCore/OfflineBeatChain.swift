@@ -50,6 +50,8 @@ public struct OfflineBeatChain: Sendable {
         public var trackerParameters = BeatTracker.Parameters()
         /// Считать мягкий пульс на кадрах рендера (итог в `Result`); на вспышки не влияет.
         public var softPulse = false
+        /// С `softPulse`: писать пульс каждого кадра в `Result.ambientTrace` (проверки времени энергии).
+        public var recordAmbientTrace = false
         public var seed: UInt64
 
         public init(seed: UInt64 = 1) {
@@ -134,7 +136,7 @@ public struct OfflineBeatChain: Sendable {
         public var peakAmbient: Float = 0
         public var ambientFrames = 0
         public var renderedFrames = 0
-        /// Мягкий пульс на каждом кадре рендера (`Config.softPulse`), иначе пусто.
+        /// Мягкий пульс на каждом кадре рендера (`Config.softPulse` и `recordAmbientTrace`), иначе пусто.
         public var ambientTrace: [AmbientPoint] = []
 
         /// Первая публикация с захватом, секунды от первого сэмпла.
@@ -336,7 +338,9 @@ public struct OfflineBeatChain: Sendable {
                 let ambient = BeatGlow.ambient(at: tP, info: published.ambient, frame: shown)
                 peakAmbient = max(peakAmbient, ambient)
                 if ambient >= RhythmLog.ambientVisible { ambientFrames += 1 }
-                ambientTrace.append(AmbientPoint(time: tP - hostStart, energy: shown.kickEnergy, value: ambient))
+                if config.recordAmbientTrace {
+                    ambientTrace.append(AmbientPoint(time: tP - hostStart, energy: shown.kickEnergy, value: ambient))
+                }
             }
             frame += 1
         }
