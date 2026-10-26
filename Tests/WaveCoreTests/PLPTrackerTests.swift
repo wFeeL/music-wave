@@ -132,6 +132,27 @@ struct PLPTrackerPartsTests {
         #expect(plp.phase == 0)
     }
 
+    /// Тишина после громкого звука: как только в прошлой половине окна не осталось ненулевых
+    /// активаций, ядро не добавляется и периода нет, хотя скользящее ДПФ после вычитания старых
+    /// значений хранит остаток округления. Порог по |F|² при больших значениях функции онсетов этот
+    /// остаток пропускал, и тишина давала ядра со случайной фазой.
+    @Test func silenceAfterLoudSoundGivesNoTempo() {
+        var plp = PLPTracker(framesPerSecond: 187.5)
+        for frame in 0..<3000 {
+            plp.process(odf: frame % 94 == 0 ? 1e6 : 0)
+        }
+        #expect(plp.period != nil)
+        for _ in 0..<(plp.windowLength / 2) {
+            plp.process(odf: 0)
+        }
+        #expect(plp.period == nil)
+        // Буфер пульса опустел за окно: уверенности тоже нет.
+        for _ in 0..<plp.windowLength {
+            plp.process(odf: 0)
+        }
+        #expect(plp.period == nil && plp.confidence == 0)
+    }
+
     @Test func nonFiniteInputCountsAsZero() {
         var plp = PLPTracker(framesPerSecond: 187.5)
         for value in [Float.nan, .infinity, -.infinity, -5] {

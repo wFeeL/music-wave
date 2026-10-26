@@ -57,8 +57,11 @@ import Foundation
 /// - буфер хранит только место чтения и будущее (с `N / 2 − 1` до `N − 1`): прошлое уже не читается;
 /// - читается последний кадр (`N / 2 − 1`), а не следующий (`N / 2`, lookahead 0 исходника): фаза
 ///   относится к последнему поданному кадру;
-/// - кадр, у которого все коэффициенты нулевые (в окне тишина), ядра не дает: в исходнике argmax
-///   нулей дает темп 60 с фазой 0, и тишина копила бы уверенность 1.
+/// - кадр, у которого в прошлой половине окна нет ни одной ненулевой активации (тишина), ядра не
+///   дает: в исходнике argmax нулей дает темп 60 с фазой 0, и тишина копила бы уверенность 1.
+///   Тишина определяется счетом ненулевых активаций, а не порогом по |F|²: скользящее ДПФ после
+///   вычитания старых значений хранит остаток округления, и после громкого звука он выше любого
+///   разумного порога. Когда ненулевых активаций не осталось, суммы ДПФ обнуляются (точное значение).
 ///
 /// Свойства на нашей функции онсетов (замеры задачи B6). Уверенность откалибрована (на GTZAN tune,
 /// группа steady, от 0.9 фаза верна в 96 % кадров, ниже 0.5 в 30-44 %), но фаза в целом верна только
@@ -76,9 +79,6 @@ public struct PLPTracker: Sendable {
     static func localAverageFrames(framesPerSecond: Double) -> Int {
         max(Int((localAverageSeconds * framesPerSecond).rounded()), 1)
     }
-
-    /// Квадрат модуля коэффициента, ниже которого окно считается тишиной.
-    private static let silence = 1e-18
 
     public let framesPerSecond: Double
     public let minBPM: Double
@@ -107,6 +107,8 @@ public struct PLPTracker: Sendable {
     /// Кольцо прошлой половины активаций; `historyWrite` указывает на самое старое значение.
     private var history: [Double]
     private var historyWrite = 0
+    /// Ненулевых активаций в `history`.
+    private var activeFrames = 0
     /// Кольцо сырых значений для локального среднего и их сумма.
     private var rawRing: [Double]
     private var rawWrite = 0
@@ -179,6 +181,8 @@ public struct PLPTracker: Sendable {
         let oldest = history[historyWrite]
         history[historyWrite] = activation
         historyWrite = (historyWrite + 1) % history.count
+        if oldest != 0 { activeFrames -= 1 }
+        if activation != 0 { activeFrames += 1 }
         let tempoCount = tempoCount
         // Скользящее ДПФ прошлой половины, G' = r (G − старое) + новое × exp(−2πiν (N/2 − 1)), и argmax
         // модуля темпограммы (строго больше, как `np.argmax`: при равенстве первый, меньший темп).
@@ -217,9 +221,16 @@ public struct PLPTracker: Sendable {
             }
         }
 
+        if activeFrames == 0, oldest != 0 {
+            // Последняя активация ушла из окна: ДПФ пустой половины точно ноль, остаток округления не нужен.
+            for index in binSums.indices {
+                binSums[index] = 0
+            }
+        }
+
         let read = pulseRead
         let length = pulseLength
-        if bestIndex >= 0, best > Self.silence {
+        if bestIndex >= 0, activeFrames > 0 {
             // Ядро лучшего темпа в буфер пульса с места чтения до конца окна.
             let magnitude = best.squareRoot()
             let unitRe = bestRe / magnitude
@@ -276,6 +287,7 @@ public struct PLPTracker: Sendable {
             history[index] = 0
         }
         historyWrite = 0
+        activeFrames = 0
         for index in rawRing.indices {
             rawRing[index] = 0
         }

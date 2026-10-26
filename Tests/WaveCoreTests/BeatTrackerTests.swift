@@ -547,6 +547,33 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Счет расхождений (`disagreements`) общий у гребенки и PLP, но идет подряд только от одного
+    /// предлагающего. «И» без онсетов в полтора раза сильнее доли, порог PLP занижен до 0.3, чтобы
+    /// предлагающий менялся от проверки к проверке: без сброса тень стартовала по голосу PLP и
+    /// следующему голосу гребенки. На каждой смене счет начинается заново, поэтому сразу после нее в
+    /// нем не больше одного голоса.
+    @Test func disagreementsRestartWhenTheProposerChanges() throws {
+        var parameters = BeatTracker.Parameters()
+        parameters.plpShadow = 0.3
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked && tracker.confidence >= parameters.lockConfidence)
+        hops.offbeatODF = 75
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var previous = tracker.proposedByPLP
+        var changes = 0
+        var worst = 0
+        hops.feed(&tracker, until: 20) { tracker in
+            guard tracker.proposedByPLP != previous else { return }
+            previous = tracker.proposedByPLP
+            changes += 1
+            worst = max(worst, tracker.disagreements)
+        }
+        #expect(changes > 2)
+        #expect(worst <= 1, "\(worst) disagreements right after a proposer change")
+    }
+
     /// Перехват тенью (голоса гребенки, `combVotesDecideTheRace`) дает новую сетку со счетом тени:
     /// вес сразу не выше цели по уверенности тени, полный вес старой сетки не переходит на «и».
     @Test func shadowTakeoverTakesItsOwnWeight() throws {

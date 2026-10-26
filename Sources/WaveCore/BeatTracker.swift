@@ -336,7 +336,11 @@ public struct BeatTracker: Sendable {
     /// захвата). Меняется только при потере захвата: смена темпа без захвата причину не трогает,
     /// `reset()` и `reconfigure` посреди захвата дают `.reset`.
     public internal(set) var lastUnlockReason: UnlockReason?
-    private var disagreements = 0
+    /// Проверок подряд, на которых предлагающий (гребенка или PLP) расходится с ФАПЧ.
+    private(set) var disagreements = 0
+    /// Последнюю проверку предлагал PLP (`plpShadow`), а не гребенка. Смена предлагающего начинает
+    /// счет `disagreements` заново: один голос гребенки и один голос PLP подряд не запускают тень.
+    private(set) var proposedByPLP = false
     /// Период, по которому гребенка ищет фазу после `reset(keepTempo: true)`, пока у нового потока
     /// нет своей оценки темпа; `nil` без памяти.
     private var resumePeriod: Double?
@@ -522,6 +526,7 @@ public struct BeatTracker: Sendable {
         lastUnlockReason = locked ? .reset : nil
         locked = false
         disagreements = 0
+        proposedByPLP = false
         coasted = false
         dropShadow()
         strengthEMA = 0
@@ -586,7 +591,12 @@ public struct BeatTracker: Sendable {
             if let comb { rephase(to: comb.time) }
             return
         }
-        if locked, confidence >= parameters.lockConfidence, let candidate = plpCandidate(period: estimate.period) {
+        let plpProposal = locked && confidence >= parameters.lockConfidence ? plpCandidate(period: estimate.period) : nil
+        if (plpProposal != nil) != proposedByPLP {
+            proposedByPLP = plpProposal != nil
+            disagreements = 0
+        }
+        if let candidate = plpProposal {
             // Уверенный PLP вместо гребенки: тень и голоса за нее дает он.
             proposeShadow(candidate, next: nextBeat, period: estimate.period)
             return
