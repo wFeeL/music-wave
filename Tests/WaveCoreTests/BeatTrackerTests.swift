@@ -745,6 +745,46 @@ struct BeatTrackerTests {
         #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.03, "next beat \(next)")
     }
 
+    /// Механизм журнала 2 в чистом виде: трекер на «и», онсеты на обеих восьмых, акцент на доле
+    /// (60 и 44 по очереди против 40 на «и») дает отношение гребенки 1.27-1.33, ни одна проверка не выше
+    /// `1 + phaseJumpMargin`. Со стартом гонки по доводам (`raceStartRatio`) сетка уходит на доли за
+    /// несколько секунд и после гонки снова светится; без него (0) гонки нет, и сетка остается на «и».
+    @Test(arguments: [true, false])
+    func accumulatedEvidenceStartsTheRace(start: Bool) throws {
+        #expect(BeatTracker.Parameters().raceStartRatio == 1.15)
+        var parameters = BeatTracker.Parameters()
+        if !start { parameters.raceStartRatio = 0 }
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 100)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.beatODF = [60, 44]
+        hops.offbeatODF = 40
+        hops.offbeatOnsets = true
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.3
+        hops.feed(&tracker, until: 14)
+        // Доли сцены на 0.25 + k · 0.6 с, «и» на 0.55 + k · 0.6 с.
+        tracker.forceLock(onBeat: 0.55)
+        var highestRatio = 0.0
+        var raced = false
+        var moved: Double?
+        hops.feed(&tracker, until: 24) { tracker in
+            highestRatio = max(highestRatio, tracker.combRatio ?? 0)
+            raced = raced || tracker.shadowNext != nil
+            let onBeat = tracker.nextBeat.map { abs(BeatTracker.circularDifference($0 - 0.25, period: 0.6)) < 0.03 } == true
+            if moved == nil, onBeat { moved = tracker.now - 14 }
+        }
+        #expect(highestRatio < 1 + parameters.phaseJumpMargin, "comb ratio up to \(highestRatio)")
+        if start {
+            let move = try #require(moved, "the grid never moved")
+            #expect(move < 4, "moved \(move) s after the force")
+            #expect(tracker.displayWeight == 1 && tracker.shadowNext == nil)
+        } else {
+            #expect(!raced)
+            #expect(moved == nil)
+        }
+    }
+
     /// Тень от PLP (`plpShadow`): гребенка выключена огромным запасом (`phaseJumpMargin`), «и» без
     /// онсетов вдвое сильнее доли. PLP переходит на «и» за несколько секунд, и когда он там уверен (не
     /// ниже `plpShadow`), он запускает тень и голосует за нее: сетка уходит на «и» без потери

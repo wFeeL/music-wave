@@ -296,8 +296,8 @@ extension BeatTracker.Parameters {
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "weightLow",
         "weightHigh", "weightRiseBeats", "weightFallBeats", "weightHits", "kickConfirmFloor", "kickConfirmLow",
         "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceEvidenceChecks",
-        "raceEvidenceShare", "raceEvidenceRatio", "raceEvidenceHits", "raceDropRatio", "raceDim", "coastGate",
-        "gateFallPerBeatDB", "gateFallNoTempoDB", "plpShadow", "everyOtherPeriod", "everyOtherHold",
+        "raceEvidenceShare", "raceEvidenceRatio", "raceEvidenceHits", "raceDropRatio", "raceStartRatio", "raceDim",
+        "coastGate", "gateFallPerBeatDB", "gateFallNoTempoDB", "plpShadow", "everyOtherPeriod", "everyOtherHold",
     ]
 
     /// Задает поле по имени. `false`, если имени нет или значение не подходит (целые поля берут только
@@ -327,6 +327,7 @@ extension BeatTracker.Parameters {
         case "raceEvidenceRatio": raceEvidenceRatio = value
         case "raceEvidenceHits": raceEvidenceHits = value
         case "raceDropRatio": raceDropRatio = value
+        case "raceStartRatio": raceStartRatio = value
         case "offGridScale": offGridScale = Float(value)
         case "onsetFloor": onsetFloor = Float(value)
         case "coastGate": coastGate = Float(value)

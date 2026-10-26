@@ -198,6 +198,23 @@ public struct BeatTracker: Sendable {
         public var raceEvidenceRatio: Double
         public var raceEvidenceHits: Double
         public var raceDropRatio: Double
+        /// Старт гонки по накопленным доводам, когда попадания не различают долю и «и»: при уверенном
+        /// захвате без гонки каждая проверка, где гребенка стоит у половины периода от ФАПЧ (не дальше
+        /// `matchWindow` периода от нее) с отношением оценок не ниже этого значения, засчитывается за
+        /// смену фазы. Когда среднее таких проверок (со спадом `raceStartGain`) доходит до
+        /// `raceEvidenceShare`, а онсеты на «и» сетки идут так же часто (их среднее, как уверенность, не
+        /// ниже `raceEvidenceShare`), гребенка запускает тень, даже если ни одна проверка не выше
+        /// `1 + phaseJumpMargin` (0 выключает). Механизм журнала 2 владельца в чистом виде: хэт на каждой
+        /// восьмой, акцент на доле дает отношение 1.16-1.33, и без этого правила захват на «и» не
+        /// оспаривается никогда (в журнале гонку запустили две случайные проверки выше 1.35). Без условия
+        /// на онсеты «и» без онсетов, чуть сильнее доли по гребенке, раз за разом приглушала верный захват
+        /// (`phaseJumpNeedsAClearlyStrongerComb`). На GTZAN tune (steady) к доводам гонки с пределом 16:
+        /// вспышек мимо долей всего / с захватом 2080 / 576 без изменений, wrongLock 12 / 231 тот же,
+        /// вспышек в долю на 12 меньше (точность 0.8676 -> 0.8675, покрытие долей 0.4217 -> 0.4215): в
+        /// country.00082 и reggae.00018 трекер на половинном темпе разметки, обе фазы доли, и гонка без
+        /// исхода приглушает сетку до предела. Без условия на онсеты и с любым смещением гребенки (не
+        /// только у половины периода) GTZAN тот же, а покрытие захвата 0.3506 -> 0.3501.
+        public var raceStartRatio: Double
         /// Яркость предсказанных долей текущей сетки, пока идет гонка (`shadowNext` есть): гребенка уже
         /// сомневается в фазе, и уверенные вспышки на возможно неверной доле хуже тусклых. На GTZAN tune
         /// без приглушения вспышек с захватом мимо долей 836, при 0.5 / 0.4 / 0.3 / 0.2 828 / 816 / 785 /
@@ -287,6 +304,7 @@ public struct BeatTracker: Sendable {
             raceEvidenceRatio: Double = 1.15,
             raceEvidenceHits: Double = 1,
             raceDropRatio: Double = 1,
+            raceStartRatio: Double = 1.15,
             raceDim: Float = 0.2,
             coastGate: Float = 0.1,
             plpShadow: Double = 0.8,
@@ -326,6 +344,7 @@ public struct BeatTracker: Sendable {
             self.raceEvidenceRatio = raceEvidenceRatio
             self.raceEvidenceHits = raceEvidenceHits
             self.raceDropRatio = raceDropRatio
+            self.raceStartRatio = raceStartRatio
             self.raceDim = raceDim
             self.coastGate = coastGate
             self.plpShadow = plpShadow
@@ -378,6 +397,8 @@ public struct BeatTracker: Sendable {
     /// долей: у каждой задержки гребенки тогда хотя бы два зубца, одна громкая атака на «и» фазу не
     /// ставит.
     static let resumeHistoryBeats = 2.0
+    /// Шаг среднего проверок для старта гонки по доводам (`raceStartRatio`): около четырех последних.
+    static let raceStartGain = 0.25
     /// Насколько далеко (доля периода) от доли ФАПЧ гребенка октавы показа ищет зубцы.
     static let parityReach = 0.1
     /// Показ через долю выключается при периоде выше `everyOtherPeriod` в столько раз (0.42 -> 0.43 с):
@@ -447,6 +468,12 @@ public struct BeatTracker: Sendable {
     private var raceFavour = 0
     private var raceRatioSum = 0.0
     private var raceShadowHits = 0
+    /// Среднее со спадом проверок, на которых гребенка за «и» (`raceStartRatio`).
+    private var raceStartEvidence = 0.0
+    /// Онсеты на «и» сетки (у `nextBeat − T/2`): было ли в текущей доле и их среднее по долям с шагом
+    /// `confidenceGain`, как у уверенности.
+    private var halfMatched = false
+    private(set) var halfConfidence = 0.0
     /// Отношение лучшей оценки гребенки к оценке у фазы ФАПЧ на последней проверке темпа
     /// (`BeatSchedule.combRatio`); `nil` до первой проверки с сеткой.
     private(set) var combRatio: Double?
@@ -626,6 +653,9 @@ public struct BeatTracker: Sendable {
         locked = false
         disagreements = 0
         proposedByPLP = false
+        raceStartEvidence = 0
+        halfMatched = false
+        halfConfidence = 0
         combRatio = nil
         coasted = false
         shownParity = nil
@@ -714,6 +744,18 @@ public struct BeatTracker: Sendable {
         guard let comb else { return }
         let diff = Self.circularDifference(comb.time - nextBeat, period: estimate.period)
         let stronger = comb.score > (1 + parameters.phaseJumpMargin) * comb.currentScore
+        if parameters.raceStartRatio > 0, shadowNext == nil, locked, confidence >= parameters.lockConfidence {
+            let leans = abs(abs(diff) - estimate.period / 2) <= parameters.matchWindow * estimate.period
+                && comb.score >= parameters.raceStartRatio * comb.currentScore
+            raceStartEvidence += Self.raceStartGain * ((leans ? 1 : 0) - raceStartEvidence)
+            if raceStartEvidence >= parameters.raceEvidenceShare, halfConfidence >= parameters.raceEvidenceShare {
+                raceStartEvidence = 0
+                startShadow(at: comb.time)
+                return
+            }
+        } else {
+            raceStartEvidence = 0
+        }
         if abs(diff) > parameters.phaseJump * estimate.period, stronger {
             disagreements += 1
             if let shadow = shadowNext {
@@ -907,7 +949,9 @@ public struct BeatTracker: Sendable {
     /// Доводы гонки за тень (`raceEvidenceChecks`): гребенка за нее на большинстве проверок с заметным
     /// перевесом в среднем, и сама тень держится на онсетах.
     private var raceEvidenceFavoursShadow: Bool {
-        guard parameters.raceEvidenceChecks > 0, raceChecks >= parameters.raceEvidenceChecks, shadowBeats > 0 else { return false }
+        guard parameters.raceEvidenceChecks > 0, raceChecks >= parameters.raceEvidenceChecks, shadowBeats > 0 else {
+            return false
+        }
         let checks = Double(raceChecks)
         return Double(raceFavour) >= parameters.raceEvidenceShare * checks
             && raceRatioSum >= parameters.raceEvidenceRatio * checks
@@ -1077,6 +1121,7 @@ public struct BeatTracker: Sendable {
 
     private mutating func correct(with onset: OnsetEvent) {
         guard let nextBeat, let period else { return }
+        if abs(onset.time - (nextBeat - period / 2)) < parameters.matchWindow * period { halfMatched = true }
         let previous = nextBeat - period
         let isNext = abs(onset.time - nextBeat) <= abs(onset.time - previous)
         let error = onset.time - (isNext ? nextBeat : previous)
@@ -1109,6 +1154,7 @@ public struct BeatTracker: Sendable {
             } else {
                 let hit = nextMatched ? 1.0 : 0.0
                 confidence += parameters.confidenceGain * (hit - confidence)
+                halfConfidence += parameters.confidenceGain * ((halfMatched ? 1.0 : 0.0) - halfConfidence)
                 hits = nextMatched ? hits + 1 : 0
                 if locked {
                     // Первая доля после брейка решает: промах значит, что сетка ушла, захват сразу
@@ -1127,6 +1173,7 @@ public struct BeatTracker: Sendable {
             archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
             self.nextBeat = nextBeat + period
             nextMatched = false
+            halfMatched = false
             committedAmplitude = nil
             beatCounter += 1
         }
