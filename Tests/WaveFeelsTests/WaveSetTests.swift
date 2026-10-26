@@ -332,6 +332,32 @@ struct WaveSetTests {
         #expect(WaveAppearance.standard.lookGeometry.baseline == .center)
     }
 
+    /// Поле текстуры слоя волн (общее у содержимого и оболочки): не меньше `glowMargin`, растет с
+    /// размером свечения и с множителем размытия.
+    @Test func waveLayerMarginGrowsWithGlow() {
+        #expect(WaveLayerView.margin(glowSize: 0.5, glowBlurScale: 0.5) == IslandWavesView.glowMargin)
+        #expect(WaveLayerView.margin(glowSize: 2, glowBlurScale: 1.5) == IslandWavesView.glowMargin * 3)
+    }
+
+    /// Содержимое неживого слоя равно себе на следующем кадре, даже когда меняются свечение доли и
+    /// его цвет: на кадрах оно не пересчитывается. Живое не равно никогда и пересчитывается на
+    /// каждом кадре.
+    @Test func dormantWaveLayerSkipsFrames() {
+        let rect = CGRect(x: 10, y: 20, width: 64, height: 32)
+        func layer(_ waves: WaveSet, beatGlow: Float, color: PaletteColor) -> WaveLayerView {
+            WaveLayerView(
+                waves: waves, rect: rect, mirrored: true, glow: 1, glowSize: 1, glowBlurScale: 1, glowPass: true,
+                accent: CGPoint(x: 5, y: 6), beatGlow: beatGlow, glowSourceColor: color
+            )
+        }
+        let red = PaletteColor(r: 1, g: 0, b: 0)
+        let blue = PaletteColor(r: 0, g: 0, b: 1)
+        #expect(layer(WaveSet(empty: .wing), beatGlow: 0, color: red) == layer(WaveSet(empty: .wing), beatGlow: 1, color: blue))
+        let live = Self.waves { _ in }
+        #expect(!live.layers.isEmpty)
+        #expect(layer(live, beatGlow: 0, color: red) != layer(live, beatGlow: 0, color: red))
+    }
+
     /// Цвет по частотам: одна волна красится участками (`sectionStops`) на точках с краями
     /// смешения, линии слоев своим цветом на обычных точках, «Спектр» своими точками
     /// (`spectrumStops` с «Цветом по частотам»).

@@ -23,8 +23,9 @@ import WaveCore
 /// доли на момент показа кадра по часам хоста (`CACurrentMediaTime()` плюс два периода
 /// отрисовки), сглаживает уровни пружинами и двигает фазы волн, «вздох» и переход палитры
 /// (`AppModel.islandVisuals`). Сцена из трех слоев (`IslandScene.swift`): свечение под островом
-/// (`BeatGlowView`), черное тело (`IslandBodyView`, на кадрах не пересчитывается) и волны
-/// (`IslandWavesView`, каждый прямоугольник волн своей текстурой `drawingGroup`). «Вздох»
+/// (`BeatGlowView`), черное тело (`IslandBodyLayer`, на кадрах не пересчитывается) и волны
+/// (`IslandWavesView`, каждый прямоугольник волн своей текстурой `drawingGroup`; оболочка текстуры
+/// с маской `WaveLayerShell` на кадрах не пересчитывается, только холсты внутри). «Вздох»
 /// масштабирует тело и волны вместе. Волны крыльев и панели сменяют друг друга прозрачностью,
 /// оба слоя считаются только в переходе (`IslandTransition`). С `clock` остров рисуется один
 /// раз на момент `clock()`, без `TimelineView`: так его снимает `ImageRenderer`.
@@ -260,6 +261,14 @@ struct IslandView: View {
     /// `now`: момент кадра по часам хоста (`CACurrentMediaTime()`), по нему берутся кадры анализа
     /// и идет анимация; `timelineTime`: дата `TimelineView`, только для замера отрисовки.
     /// Здесь, и только здесь, сцена читает модель; слои получают готовые значения.
+    ///
+    /// Сцена строится на каждом кадре, но заново считается только то, что на кадре меняется:
+    /// свечение под островом, «вздох» (`scaleEffect`), полоса прогресса (`==`, несколько раз в
+    /// секунду), наборы волн (`IslandWavesView`) и в живых слоях холсты с точкой удара
+    /// (`WaveLayerView`). Тела острова (`IslandBodyLayer`) и оболочки слоев волн (`WaveLayerShell`:
+    /// рамка, маска формой острова, текстура, сдвиг) зависят только от простых значений и на кадрах
+    /// не пересчитываются. Кадр (`AppModel.islandVisuals`) считается один раз на вычисление сцены,
+    /// наборы волн один раз на кадр и общие для всех холстов.
     private func scene(state: IslandState, geometry: IslandGeometry, now: Double, timelineTime: Double) -> some View {
         let visuals = model.islandVisuals(now: now, timelineTime: timelineTime, reduceMotion: reduceMotion)
         // Без «Уменьшения движения» яркость свечения из настроек, с ним свечения нет.
@@ -295,35 +304,11 @@ struct IslandView: View {
                 )
             }
             ZStack(alignment: .topLeading) {
-                if reduceMotion {
-                    // Без перетекания: тело баннера сменяет свернутое прозрачностью, входящее
-                    // проявляется, пока уходящее еще непрозрачно, и остров нигде не просвечивает.
-                    // Тело баннера только у свернутого острова: у раскрытой панели оно было бы
-                    // второй такой же панелью. Форма тела острова идет своей пружиной, а не
-                    // анимацией прозрачности.
-                    let collapsed = state == .collapsed
-                    let bannerShown = collapsed && bannerVisible
-                    IslandBodyView(geometry: geometry, state: state)
-                        .equatable()
-                        .animation(state == .expanded ? Self.expandAnimation : Self.collapseAnimation, value: state)
-                        .opacity(bannerShown ? 0 : 1)
-                        .animation(
-                            Self.reducedBodyAnimation(IslandTransition.reducedBodyFade(incoming: !bannerShown, collapsed: collapsed)),
-                            value: bannerShown
-                        )
-                    if collapsed && (bannerVisible || bannerMoving) {
-                        IslandBodyView(geometry: geometry, state: state, banner: true)
-                            .equatable()
-                            .opacity(bannerVisible ? 1 : 0)
-                            .animation(
-                                Self.reducedBodyAnimation(IslandTransition.reducedBodyFade(incoming: bannerVisible, collapsed: true)),
-                                value: bannerVisible
-                            )
-                    }
-                } else {
-                    IslandBodyView(geometry: geometry, state: state, banner: bannerVisible)
-                        .equatable()
-                }
+                // Тела острова (и баннера при «Уменьшении движения») на кадрах не пересчитываются.
+                IslandBodyLayer(
+                    geometry: geometry, state: state, bannerVisible: bannerVisible, bannerMoving: bannerMoving,
+                    reduceMotion: reduceMotion
+                )
                 IslandWavesView(
                     visuals: visuals, geometry: geometry, state: state, layers: layers, glow: glow,
                     appearance: appearance, paused: paused, banner: bannerVisible,
