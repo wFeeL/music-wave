@@ -8,7 +8,7 @@ import WaveCore
 @MainActor
 struct IslandPreviewTests {
     /// Предпросмотр тратит процессор, только когда его видно: окно открыто, не закрыто другими
-    /// окнами и выбрана вкладка «Вид». Вся таблица истинности.
+    /// окнами и выбрана вкладка «Вид». На «Основных» и «Функциях» он стоит. Вся таблица истинности.
     @Test func previewRunsOnlyWhenVisible() {
         let table: [(open: Bool, visible: Bool, tab: SettingsView.Tab, active: Bool)] = [
             (false, false, .general, false),
@@ -19,6 +19,10 @@ struct IslandPreviewTests {
             (true, false, .appearance, false),
             (true, true, .general, false),
             (true, true, .appearance, true),
+            (false, false, .features, false),
+            (false, true, .features, false),
+            (true, false, .features, false),
+            (true, true, .features, false),
         ]
         #expect(table.count == 2 * 2 * SettingsView.Tab.allCases.count)
         for row in table {

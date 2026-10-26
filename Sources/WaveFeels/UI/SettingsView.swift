@@ -5,9 +5,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WaveCore
 
-/// Окно настроек: две вкладки, «Основные» и «Вид» (`AppearanceSettingsView`), каждая `Form` в
-/// стиле Системных настроек, изменения применяются сразу. Живой предпросмотр острова во вкладке
-/// «Вид» идет, только пока окно открыто, видно и выбрана она (`PreviewPlayer.isActive`).
+/// Окно настроек: три вкладки, «Основные», «Вид» (`AppearanceSettingsView`) и «Функции»
+/// (`FeaturesSettingsView`), каждая `Form` в стиле Системных настроек, изменения применяются
+/// сразу. Живой предпросмотр острова во вкладке «Вид» идет, только пока окно открыто, видно и
+/// выбрана она (`PreviewPlayer.isActive`).
 ///
 /// Пока окно открыто и не свернуто, задержка «Авто», статус запуска при входе и доступ к звуку
 /// обновляются раз в 3 с. Список источников (поиск Яндекс Музыки, браузеры, приложения со звуком)
@@ -17,13 +18,13 @@ import WaveCore
 struct SettingsView: View {
     /// Вкладки окна.
     enum Tab: Hashable, CaseIterable {
-        case general, appearance
+        case general, appearance, features
     }
 
     /// Размер окна: «Основные» в самом высоком состоянии (ручная задержка, подсказка о доступе
     /// к звуку и кнопка настроек конфиденциальности под ней, строка устройства с «Сбросить» под
-    /// сдвигом синхронизации) помещаются без прокрутки. На маленьком экране окно ужимается до его
-    /// видимой области (`WindowsController`).
+    /// сдвигом синхронизации) помещаются без прокрутки. «Мягкий пульс» поэтому живет на вкладке
+    /// «Функции». На маленьком экране окно ужимается до его видимой области (`WindowsController`).
     static let windowSize = CGSize(width: 520, height: 916)
     static let minSize = CGSize(width: 480, height: 420)
     static let statusInterval: Duration = .seconds(3)
@@ -105,6 +106,11 @@ struct SettingsView: View {
                 )
             } label: {
                 Text("Вид")
+            }
+            SwiftUI.Tab(value: Tab.features) {
+                FeaturesSettingsView(model: model)
+            } label: {
+                Text("Функции")
             }
         }
         .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
@@ -401,10 +407,6 @@ struct SettingsView: View {
     private var islandRows: some View {
         let settings = model.settings
         Toggle("Вздох на битах", isOn: Binding(get: { settings.beatPulse }, set: { settings.beatPulse = $0 }))
-        Toggle(isOn: Binding(get: { settings.softPulse }, set: { settings.softPulse = $0 })) {
-            Text("Мягкий пульс")
-            Text("Слабое свечение в такт, когда ритм не ясен")
-        }
         SettingsSliderRow(
             "Скрывать через",
             value: Binding(get: { settings.hideDelay }, set: { settings.hideDelay = $0.rounded() }),

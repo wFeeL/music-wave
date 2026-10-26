@@ -130,8 +130,9 @@ struct SnapshotRendererTests {
         #expect(glyphs > 2000, "13-settings-dark: светлых пикселей \(glyphs)")
 
         // Снимки настроек непрозрачны (переключатель вкладок сведен на фон окна), и вкладки
-        // читаются: в темном оформлении светлый текст, в светлом темный.
-        let tabBar = CGRect(x: settingsSize.width / 2 - 90, y: 0, width: 180, height: 24)
+        // читаются: в темном оформлении светлый текст, в светлом темный. Полоса шириной во все
+        // три вкладки («Основные», «Вид», «Функции»).
+        let tabBar = CGRect(x: settingsSize.width / 2 - 130, y: 0, width: 260, height: 24)
         for name in SnapshotRenderer.settingsScenes.map(\.name) {
             let bitmap = try Bitmap(url: directory.appendingPathComponent("\(name).png"))
             let scale = CGFloat(bitmap.width) / settingsSize.width

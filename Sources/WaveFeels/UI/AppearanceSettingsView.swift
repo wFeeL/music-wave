@@ -5,7 +5,8 @@ import WaveCore
 
 /// Вкладка «Вид»: живой предпросмотр острова и все настройки вида волн. Изменения применяются
 /// сразу, и к острову, и к предпросмотру; значения проходят через `AppSettings`, который держит
-/// их в пределах и заменяет не конечные.
+/// их в пределах и заменяет не конечные. Строки, которые выбранный стиль не рисует, скрыты
+/// (`WaveLook.usesLineCount`, `usesStroke`, `usesFill`); сохраненные значения при этом не меняются.
 struct AppearanceSettingsView: View {
     let model: AppModel
     /// Игрок предпросмотра; живет в `SettingsView`, а не создается на каждом пересчете вкладки.
@@ -17,6 +18,8 @@ struct AppearanceSettingsView: View {
 
     /// Экран острова, как его видит `NotchWindowController`: по нему предел крыла.
     @State private var screen: NotchLayout?
+    /// Системное «Уменьшение движения»: при нем «Пульс» не дышит, под «Стилем» об этом подпись.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel, player: PreviewPlayer, active: Bool, fixedScreen: NotchLayout? = nil) {
         self.model = model
@@ -37,7 +40,9 @@ struct AppearanceSettingsView: View {
                 }
             }
             Section("Линии") {
+                lookRow
                 colorRows
+                flowRows
                 waveRows
             }
             Section("Свечение") {
@@ -157,6 +162,22 @@ struct AppearanceSettingsView: View {
         )
     }
 
+    /// «Цвет по частотам» и «Скорость переливания» (0...1 с шагом 0.05, 0 выключает).
+    @ViewBuilder
+    private var flowRows: some View {
+        let settings = model.settings
+        Toggle(isOn: Binding(get: { settings.colorByBand }, set: { settings.colorByBand = $0 })) {
+            Text("Цвет по частотам")
+            Text("Бас, середина и верх своими цветами")
+        }
+        SettingsSliderRow(
+            "Скорость переливания",
+            value: Binding(get: { settings.colorFlow }, set: { settings.colorFlow = ($0 * 20).rounded() / 20 }),
+            in: AppSettings.Limits.colorFlow,
+            text: SettingsText.colorFlow(speed: settings.colorFlow)
+        )
+    }
+
     // MARK: - Свечение
 
     @ViewBuilder
@@ -178,33 +199,60 @@ struct AppearanceSettingsView: View {
 
     // MARK: - Волны
 
-    @ViewBuilder
-    private var waveRows: some View {
+    /// «Стиль»: «Волны», «Спектр», «Минимал», «Пульс». Подпись под ним только у «Пульса» при
+    /// «Уменьшении движения» (`SettingsText.lookCaption`).
+    private var lookRow: some View {
         let settings = model.settings
-        Picker("Количество волн", selection: Binding(get: { settings.lineCount }, set: { settings.lineCount = $0 })) {
-            ForEach(Array(WaveAppearance.Limits.lineCount), id: \.self) { count in
-                Text("\(count)").tag(count)
+        let caption = SettingsText.lookCaption(settings.look, reduceMotion: reduceMotion)
+        return Picker(selection: Binding(get: { settings.look }, set: { settings.look = $0 })) {
+            ForEach(WaveLook.allCases, id: \.self) { look in
+                Text(look.title).tag(look)
+            }
+        } label: {
+            Text("Стиль")
+            if let caption {
+                Text(caption)
             }
         }
         .pickerStyle(.segmented)
-        SettingsSliderRow(
-            "Толщина линий",
-            value: Binding(get: { settings.lineThickness }, set: { settings.lineThickness = ($0 * 20).rounded() / 20 }),
-            in: WaveAppearance.Limits.thickness,
-            text: SettingsView.multiplier(Float(settings.lineThickness))
-        )
-        SettingsSliderRow(
-            "Размах",
-            value: Binding(get: { settings.waveAmplitude }, set: { settings.waveAmplitude = ($0 * 20).rounded() / 20 }),
-            in: WaveAppearance.Limits.amplitude,
-            text: SettingsView.multiplier(Float(settings.waveAmplitude))
-        )
-        SettingsSliderRow(
-            "Заливка",
-            value: Binding(get: { settings.fill }, set: { settings.fill = ($0 * 20).rounded() / 20 }),
-            in: WaveAppearance.Limits.fill,
-            text: "\(Int((settings.fill * 100).rounded())) %"
-        )
+    }
+
+    /// Строки, которые нужны выбранному стилю: у «Пульса» ни одной, у «Минимала» толщина и
+    /// размах, у «Спектра» все, кроме количества.
+    @ViewBuilder
+    private var waveRows: some View {
+        let settings = model.settings
+        let look = settings.look
+        if look.usesLineCount {
+            Picker("Количество волн", selection: Binding(get: { settings.lineCount }, set: { settings.lineCount = $0 })) {
+                ForEach(Array(WaveAppearance.Limits.lineCount), id: \.self) { count in
+                    Text("\(count)").tag(count)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        if look.usesStroke {
+            SettingsSliderRow(
+                "Толщина линий",
+                value: Binding(get: { settings.lineThickness }, set: { settings.lineThickness = ($0 * 20).rounded() / 20 }),
+                in: WaveAppearance.Limits.thickness,
+                text: SettingsView.multiplier(Float(settings.lineThickness))
+            )
+            SettingsSliderRow(
+                "Размах",
+                value: Binding(get: { settings.waveAmplitude }, set: { settings.waveAmplitude = ($0 * 20).rounded() / 20 }),
+                in: WaveAppearance.Limits.amplitude,
+                text: SettingsView.multiplier(Float(settings.waveAmplitude))
+            )
+        }
+        if look.usesFill {
+            SettingsSliderRow(
+                "Заливка",
+                value: Binding(get: { settings.fill }, set: { settings.fill = ($0 * 20).rounded() / 20 }),
+                in: WaveAppearance.Limits.fill,
+                text: "\(Int((settings.fill * 100).rounded())) %"
+            )
+        }
     }
 
     // MARK: - Экран
