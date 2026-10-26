@@ -124,7 +124,8 @@ struct AppModelRenderTests {
     }
 
     /// Пауза по Now Playing считается для мягкой остановки только у источника-приложения; полоса
-    /// панели гаснет по `nowPlayingPaused` у любого источника.
+    /// панели гаснет по `nowPlayingPaused` у любого источника. Текущая запись Now Playing из
+    /// `nowPlayingStub`, последний трек источника из `showPreview`.
     @Test func sourcePausedOnlyForApplications() throws {
         let (model, defaults, suite) = try Self.makeModel("render-source-paused")
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -133,21 +134,48 @@ struct AppModelRenderTests {
             state: .collapsed, track: paused, palette: nil, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
             glow: 0, pulse: 0, time: 1, nowPlayingAvailable: true
         )
+        model.nowPlayingStub = paused
         model.settings.source = .systemWide
         #expect(model.nowPlayingPaused)
         #expect(!model.sourcePaused)
-        model.settings.source = .application(
-            bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Яндекс Музыка.app", displayName: "Яндекс Музыка"
-        )
+        model.settings.source = Self.yandex
         #expect(model.sourcePaused)
         paused.isPlaying = true
         model.showPreview(
             state: .collapsed, track: paused, palette: nil, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
             glow: 0, pulse: 0, time: 1, nowPlayingAvailable: true
         )
+        model.nowPlayingStub = paused
         #expect(!model.nowPlayingPaused)
         #expect(!model.sourcePaused)
     }
+
+    /// Яндекс Музыка на паузе, затем Now Playing перешел к видео в Safari или опустел, а последний
+    /// трек источника так и остался на паузе: пауза источника по нему не считается, иначе мягкая
+    /// остановка держала бы остров ровным, когда Яндекс Музыка снова играет.
+    @Test func sourcePausedIgnoresStaleLastTrack() throws {
+        let (model, defaults, suite) = try Self.makeModel("render-source-paused-stale")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let paused = NowPlayingInfo(bundleIdentifier: "ru.yandex.desktop.music", title: "Трек", artist: nil, isPlaying: false)
+        model.showPreview(
+            state: .collapsed, track: paused, palette: nil, frame: Self.frame(bass: 0.5), motion: WaveMotion(),
+            glow: 0, pulse: 0, time: 1, nowPlayingAvailable: true
+        )
+        model.settings.source = Self.yandex
+        model.nowPlayingStub = paused
+        #expect(model.sourcePaused)
+
+        model.nowPlayingStub = NowPlayingInfo(bundleIdentifier: "com.apple.Safari", title: "Видео", artist: nil, isPlaying: true)
+        #expect(model.nowPlayingPaused)
+        #expect(!model.sourcePaused)
+
+        model.nowPlayingStub = nil
+        #expect(!model.sourcePaused)
+    }
+
+    private static let yandex = AudioSource.application(
+        bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Яндекс Музыка.app", displayName: "Яндекс Музыка"
+    )
 
     /// Переливание двигается на ограниченный шаг (`maxVisualStep`: после сна цвет не прыгает),
     /// «Уменьшение движения» его останавливает; снимки держат заданную фазу. Палитра кадра без

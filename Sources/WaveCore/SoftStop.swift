@@ -32,6 +32,19 @@ public struct SoftStop: Sendable {
 
     public init() {}
 
+    /// Источник на паузе по Now Playing (второй повод для тишины, кроме уровня звука): источник
+    /// `source` приложение, Now Playing работает (`nowPlayingAvailable`), и его текущая запись
+    /// `current` относится к источнику и не играет. Последний трек источника тут не годится: он
+    /// обновляется, только пока Now Playing показывает источник, и остался бы на паузе, когда
+    /// Now Playing перешел к другому приложению или опустел, а источник снова играет. У всего звука
+    /// системы Now Playing не говорит, молчит ли захват (играть может другое приложение): `false`.
+    public static func sourcePaused(source: AudioSource, current: NowPlayingInfo?, nowPlayingAvailable: Bool) -> Bool {
+        guard case .application = source, nowPlayingAvailable, let current, current.belongs(to: source) else {
+            return false
+        }
+        return !current.isPlaying
+    }
+
     /// Угасание идет: множитель еще больше нуля (тишина или звук, вернувшийся посреди угасания).
     /// Остров по нему не уходит в редкие кадры простоя, пока волны затихают.
     public var isFading: Bool { fadeStart != nil }

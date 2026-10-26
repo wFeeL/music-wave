@@ -1301,12 +1301,15 @@ final class AppModel {
         nowPlayingAvailable && lastTrack?.isPlaying == false
     }
 
-    /// Пауза источника по Now Playing для мягкой остановки: только у источника-приложения. У всего
-    /// звука системы Now Playing не говорит, молчит ли захват (играть может другое приложение), и
-    /// мягкая остановка там идет только по тишине.
+    /// Пауза источника по Now Playing для мягкой остановки (`SoftStop.sourcePaused`): только у
+    /// источника-приложения и только по текущей записи Now Playing (`currentSourceInfo`), а не по
+    /// `lastTrack`: тот остается на паузе, когда Now Playing перешел к другому приложению или
+    /// опустел, а источник снова играет. У всего звука системы мягкая остановка идет только по
+    /// тишине.
     var sourcePaused: Bool {
-        guard case .application = effectiveSource else { return false }
-        return nowPlayingPaused
+        SoftStop.sourcePaused(
+            source: effectiveSource, current: currentSourceInfo, nowPlayingAvailable: nowPlayingAvailable
+        )
     }
 
     /// Трек для панели с прогрессом и кнопками (`ExpandedPanelView`), см. `panelTrack(...)`.

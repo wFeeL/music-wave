@@ -333,4 +333,26 @@ struct SoftStopTests {
         let empty = Self.frame(&lengths, layers: [], level: 0, glow: 0, silent: true, now: Self.start + 0.2)
         #expect(empty.layers.isEmpty && empty.bands.isEmpty)
     }
+    /// Пауза источника по Now Playing: только у источника-приложения и только по текущей записи
+    /// Now Playing этого приложения. Яндекс Музыка на паузе, затем Now Playing перешел к видео в
+    /// Safari или опустел: паузы нет, мягкая остановка идет по тишине.
+    @Test func sourcePausedReadsTheCurrentRecord() {
+        let yandex = AudioSource.application(
+            bundleID: "ru.yandex.desktop.music", bundlePath: "/Applications/Яндекс Музыка.app", displayName: "Яндекс Музыка"
+        )
+        let paused = NowPlayingInfo(bundleIdentifier: "ru.yandex.desktop.music", title: "Трек", isPlaying: false)
+        var playing = paused
+        playing.isPlaying = true
+        let safari = NowPlayingInfo(bundleIdentifier: "com.apple.Safari", title: "Видео", isPlaying: true)
+        let safariPaused = NowPlayingInfo(bundleIdentifier: "com.apple.Safari", title: "Видео", isPlaying: false)
+
+        #expect(SoftStop.sourcePaused(source: yandex, current: paused, nowPlayingAvailable: true))
+        #expect(!SoftStop.sourcePaused(source: yandex, current: playing, nowPlayingAvailable: true))
+        #expect(!SoftStop.sourcePaused(source: yandex, current: safari, nowPlayingAvailable: true))
+        #expect(!SoftStop.sourcePaused(source: yandex, current: safariPaused, nowPlayingAvailable: true))
+        #expect(!SoftStop.sourcePaused(source: yandex, current: nil, nowPlayingAvailable: true))
+        #expect(!SoftStop.sourcePaused(source: yandex, current: paused, nowPlayingAvailable: false))
+        // У всего звука системы пауза по Now Playing не считается.
+        #expect(!SoftStop.sourcePaused(source: .systemWide, current: paused, nowPlayingAvailable: true))
+    }
 }
