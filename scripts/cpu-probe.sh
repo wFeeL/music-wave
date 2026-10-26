@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Замер CPU и памяти собранного приложения. Использование:
 #   scripts/cpu-probe.sh [--preset default|max|user] [--style waves|spectrum]
-#                        [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [секунды]
+#                        [--set wf.ключ=значение ...] [--island collapsed|expanded|banner] [--sample]
+#                        <WaveFeels.app> [секунды]
 #   scripts/cpu-probe.sh --help
 #
 # Приложение читает настройки не из настроек пользователя, а из отдельного набора
@@ -30,6 +31,17 @@
 # настройках. Приложение подтверждает стиль строкой «стиль <стиль>» в «настройках из набора»; без
 # нее прогон считается проваленным. К имени итога добавляется стиль (cpu-max-spectrum.txt,
 # cpu-spectrum-expanded.txt), в шапке отчета строка «style:».
+#
+# --set wf.ключ=значение пишет один ключ поверх набора, после --style и баннера, поэтому
+# главнее их; можно повторять. Ключ обязан начинаться с «wf.», значение не пустое. Тип для
+# `defaults write` по виду значения: true, false, yes, no дают -bool, целое -int, дробное -float,
+# остальное -string (AppSettings читает числа и флаги через NSNumber, поэтому
+# wf.softPulse=0 выключает флаг). Ключи, которые AppSettings хранит как JSON-данные (wf.waveStyle,
+# wf.colorMode, wf.source, wf.levelMode, wf.latencyMode, wf.syncOffsets), так не пишутся: стиль
+# задает --style, остальные отклоняются. Все ключи --set идут в шапку отчета строкой «set:» и в
+# имя итога и стеков (wf.colorFlow=0 добавляет «-colorFlow0»: cpu-max-colorFlow0-softPulse0.txt),
+# так прогоны с разными ключами не затирают друг друга. Что приложение прочитало на самом деле,
+# видно по строкам «defaults read» и «applied settings» в шапке.
 #
 # --island <режим> передается приложению только в прогоне play (прогон silence ждет скрытый
 # остров) и держит остров через его же машину состояний:
@@ -75,7 +87,7 @@
 # Рассчитан на bash 3.2 и BSD-утилиты.
 set -uo pipefail
 
-USAGE="usage: $0 [--preset default|max|user] [--style waves|spectrum] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
+USAGE="usage: $0 [--preset default|max|user] [--style waves|spectrum] [--set wf.key=value ...] [--island collapsed|expanded|banner] [--sample] <WaveFeels.app> [seconds]"
 
 usage() {
     echo "$USAGE" >&2
@@ -100,6 +112,16 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
                     wf.waveStyle, checked by "стиль STYLE" in the app's settings line; report
                     and sample files get the style suffix (cpu-max-spectrum-expanded.txt); without
                     it the preset's own style is kept (waves for default and max)
+  --set wf.KEY=VALUE  one benchmark key written over the preset, after --style and the banner
+                    key, so it wins over both; repeat for more keys. The key must start with
+                    "wf.", the value must not be empty. Type by the value: true/false/yes/no
+                    -bool, integer -int, decimal -float, anything else -string (flags read 0
+                    and 1 too: wf.softPulse=0 turns the soft pulse off). Keys stored as JSON
+                    data (wf.waveStyle, wf.colorMode, wf.source, wf.levelMode,
+                    wf.latencyMode, wf.syncOffsets) are rejected: use --style for the style.
+                    Every key is listed in the report header ("set:") and added to the report
+                    and sample file names (wf.colorFlow=0 adds -colorFlow0:
+                    cpu-max-colorFlow0-softPulse0.txt)
   --island MODE     play run only, the island's state machine still drives it:
                       collapsed  the pointer never expands the island
                       expanded   held open as if hovered; checked by "остров: ... -> раскрыт"
@@ -110,8 +132,9 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
   seconds           measuring window after a 5 s warm-up, at least 5 (default 30)
   -h, --help        this help
 
-The report header has the applied settings and, from the app's last render log line of the
-play run, frames/s and p50 (expanded bucket with --island expanded, collapsed otherwise).
+The report header has the --set keys, the applied settings and, from the app's last render
+log line of the play run, frames/s and p50 (expanded bucket with --island expanded, collapsed
+otherwise).
 Exit code: 0 within limits, 1 failure, 2 usage or settings error.
 EOF
     exit 0
@@ -119,6 +142,11 @@ EOF
 
 PRESET=default
 STYLE=""
+# --set: ключи и значения по порядку. Пустой массив в bash 3.2 с `set -u` раскрывать нельзя,
+# поэтому рядом счетчик.
+SET_KEYS=()
+SET_VALUES=()
+SET_COUNT=0
 ISLAND=""
 SAMPLE=0
 APP_ARG=""
@@ -136,6 +164,18 @@ while [[ $# -gt 0 ]]; do
         --style)
             [[ $# -ge 2 ]] || usage
             STYLE=$2
+            shift 2
+            ;;
+        --set)
+            [[ $# -ge 2 ]] || usage
+            if [[ $2 != *=* ]]; then
+                echo "cpu-probe: --set $2: expected wf.key=value" >&2
+                usage
+            fi
+            # Ключ до первого «=», значение после него (в значении «=» может быть).
+            SET_KEYS[SET_COUNT]=${2%%=*}
+            SET_VALUES[SET_COUNT]=${2#*=}
+            SET_COUNT=$((SET_COUNT + 1))
             shift 2
             ;;
         --island)
@@ -204,6 +244,52 @@ case "$ISLAND" in
         usage
         ;;
 esac
+
+# Тип `defaults write` для значения --set: флаг, целое, дробное или строка.
+set_type() { # значение
+    local integer='^-?[0-9]+$' decimal='^-?[0-9]*[.][0-9]+$'
+    case "$1" in
+        true | false | yes | no)
+            echo -bool
+            ;;
+        *)
+            if [[ $1 =~ $integer ]]; then
+                echo -int
+            elif [[ $1 =~ $decimal ]]; then
+                echo -float
+            else
+                echo -string
+            fi
+            ;;
+    esac
+}
+
+# Проверка ключей --set: имя wf.*, непустое значение, не JSON-ключ AppSettings. Каждый ключ
+# добавляет к имени итога «-<ключ без wf.><значение>» (только буквы, цифры и точка).
+SET_SUMMARY=""
+SET_KEY_PATTERN='^wf[.][A-Za-z0-9_.]+$'
+i=0
+while [[ $i -lt $SET_COUNT ]]; do
+    key=${SET_KEYS[i]}
+    value=${SET_VALUES[i]}
+    if [[ ! $key =~ $SET_KEY_PATTERN ]]; then
+        echo "cpu-probe: --set $key=$value: the key must start with wf. (letters, digits, _ and . only)" >&2
+        usage
+    fi
+    if [[ -z $value ]]; then
+        echo "cpu-probe: --set $key=: empty value" >&2
+        usage
+    fi
+    case "$key" in
+        wf.waveStyle | wf.colorMode | wf.source | wf.levelMode | wf.latencyMode | wf.syncOffsets)
+            echo "cpu-probe: --set $key: stored as JSON data, not supported (use --style for wf.waveStyle)" >&2
+            usage
+            ;;
+    esac
+    PREFIX="$PREFIX-${key#wf.}$(printf '%s' "$value" | tr -cd 'A-Za-z0-9.')"
+    SET_SUMMARY="$SET_SUMMARY, $key=$value ($(set_type "$value"))"
+    i=$((i + 1))
+done
 
 [[ -n "$APP_ARG" && -d "$APP_ARG" ]] || usage
 APP=$(cd "$APP_ARG" && pwd) || usage
@@ -279,6 +365,12 @@ write_preset() {
     if [[ $ISLAND == banner ]]; then
         defaults write "$SUITE" wf.showTrackBanner -bool true || return 1
     fi
+    # --set последним: ключи главнее набора, стиля и баннера.
+    local i=0
+    while [[ $i -lt $SET_COUNT ]]; do
+        defaults write "$SUITE" "${SET_KEYS[i]}" "$(set_type "${SET_VALUES[i]}")" "${SET_VALUES[i]}" || return 1
+        i=$((i + 1))
+    done
 }
 
 # --preset user: ключи wf.* из настроек пользователя в пустой набор замера. Домен выгружается
@@ -668,6 +760,11 @@ if [[ $PRESET == user ]]; then
     report "user settings: $USER_KEYS wf.* keys copied from $USER_DOMAIN, wf.paused forced to 0"
 fi
 report "style: ${STYLE:-not forced} (--style)"
+if [[ $SET_COUNT -gt 0 ]]; then
+    report "set: ${SET_SUMMARY#, } (--set, written after the preset)"
+else
+    report "set: none (--set)"
+fi
 report "island: ${ISLAND:-not forced} (--island, play run only)"
 report "method: cumulative CPU time from ps over a ${DURATION} s window after ${WARMUP} s warm-up, % of one core"
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
