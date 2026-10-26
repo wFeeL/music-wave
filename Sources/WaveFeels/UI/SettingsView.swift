@@ -23,8 +23,9 @@ struct SettingsView: View {
 
     /// Размер окна: «Основные» в самом высоком состоянии (ручная задержка, подсказка о доступе
     /// к звуку и кнопка настроек конфиденциальности под ней, строка устройства с «Сбросить» под
-    /// сдвигом синхронизации) помещаются без прокрутки. «Мягкий пульс» поэтому живет на вкладке
-    /// «Функции». На маленьком экране окно ужимается до его видимой области (`WindowsController`).
+    /// сдвигом синхронизации) помещаются без прокрутки. Поэтому «Мягкий пульс», «Скрывать в
+    /// полноэкранном режиме» и «Показывать новый трек» живут на вкладке «Функции». На маленьком
+    /// экране окно ужимается до его видимой области (`WindowsController`).
     static let windowSize = CGSize(width: 520, height: 916)
     static let minSize = CGSize(width: 480, height: 420)
     static let statusInterval: Duration = .seconds(3)
@@ -412,14 +413,6 @@ struct SettingsView: View {
             value: Binding(get: { settings.hideDelay }, set: { settings.hideDelay = $0.rounded() }),
             in: AppSettings.Limits.hideDelay,
             text: "\(Int(settings.hideDelay.rounded())) с"
-        )
-        Toggle(
-            "Скрывать в полноэкранном режиме",
-            isOn: Binding(get: { settings.hideInFullscreen }, set: { settings.hideInFullscreen = $0 })
-        )
-        Toggle(
-            "Показывать новый трек",
-            isOn: Binding(get: { settings.showTrackBanner }, set: { settings.showTrackBanner = $0 })
         )
     }
 

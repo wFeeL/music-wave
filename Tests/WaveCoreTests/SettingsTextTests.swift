@@ -43,12 +43,24 @@ struct SettingsTextTests {
         #expect(SettingsText.colorFlow(speed: 1) == "8 с")
         #expect(SettingsText.colorFlow(speed: 2) == "8 с")
         #expect(SettingsText.colorFlow(speed: 0.25) == "17 с")
-        #expect(SettingsText.colorFlow(speed: 0.05) == "19 с")
-        // Период из `PaletteFlow.period(speed:)`, до целой секунды.
+        #expect(SettingsText.colorFlow(speed: 0.05) == "19,4 с")
+        #expect(SettingsText.colorFlow(speed: 0.1) == "18,8 с")
+        #expect(SettingsText.colorFlow(speed: 0.95) == "8,6 с")
+        #expect(SettingsText.colorFlow(speed: 0.333) == "16 с")
+        // Период из `PaletteFlow.period(speed:)` до десятых: текст это он же через `seconds`.
         for step in 1...20 {
             let speed = Double(step) / 20
             let period = try #require(PaletteFlow.period(speed: speed))
-            #expect(SettingsText.colorFlow(speed: speed) == "\(Int(period.rounded())) с")
+            #expect(SettingsText.colorFlow(speed: speed) == SettingsText.seconds((period * 10).rounded() / 10))
+        }
+    }
+
+    /// Каждый шаг ползунка (0.05) показывает свой период: соседние значения не совпадают.
+    @Test func colorFlowStepsAreDistinct() {
+        let texts = (0...20).map { SettingsText.colorFlow(speed: Double($0) / 20) }
+        #expect(Set(texts).count == texts.count, "\(texts)")
+        for (left, right) in zip(texts, texts.dropFirst()) {
+            #expect(left != right)
         }
     }
 

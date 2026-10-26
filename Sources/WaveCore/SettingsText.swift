@@ -3,10 +3,11 @@
 /// подпись под «Стилем».
 public enum SettingsText {
     /// Значение «Скорости переливания»: «Выкл» без переливания, иначе период полного оборота
-    /// `PaletteFlow.period(speed:)` до целой секунды («12 с»).
+    /// `PaletteFlow.period(speed:)` до десятых секунды («12 с», «19,4 с»). Соседние шаги ползунка
+    /// (0.05) различаются на 0.6 с, поэтому показывают разные числа.
     public static func colorFlow(speed: Double) -> String {
         guard let period = PaletteFlow.period(speed: speed) else { return "Выкл" }
-        return "\(Int(period.rounded())) с"
+        return seconds((period * 10).rounded() / 10)
     }
 
     /// Секунды до сотых через запятую, без нулей в конце: «0,15 с», «0,2 с», «1 с».

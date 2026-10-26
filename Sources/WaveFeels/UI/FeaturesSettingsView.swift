@@ -53,6 +53,14 @@ struct FeaturesSettingsView: View {
             Text("Мягкий пульс")
             Text("Слабое свечение в такт, когда ритм не ясен")
         }
+        Toggle(
+            "Скрывать в полноэкранном режиме",
+            isOn: Binding(get: { settings.hideInFullscreen }, set: { settings.hideInFullscreen = $0 })
+        )
+        Toggle(
+            "Показывать новый трек",
+            isOn: Binding(get: { settings.showTrackBanner }, set: { settings.showTrackBanner = $0 })
+        )
     }
 
     // MARK: - Управление
