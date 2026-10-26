@@ -54,6 +54,7 @@ struct AppSettingsTests {
             #expect(settings.wingWidth == 64)
             #expect(settings.glowIntensity == 0.6)
             #expect(settings.beatPulse == true)
+            #expect(settings.softPulse == true)
             #expect(settings.hideDelay == 5)
             #expect(settings.hideInFullscreen == true)
             #expect(settings.showTrackBanner == true)
@@ -77,6 +78,7 @@ struct AppSettingsTests {
             written.wingWidth = 96
             written.glowIntensity = 0.25
             written.beatPulse = false
+            written.softPulse = false
             written.hideDelay = 12
             written.hideInFullscreen = false
             written.showTrackBanner = false
@@ -91,6 +93,7 @@ struct AppSettingsTests {
             #expect(read.wingWidth == 96)
             #expect(read.glowIntensity == 0.25)
             #expect(read.beatPulse == false)
+            #expect(read.softPulse == false)
             #expect(read.hideDelay == 12)
             #expect(read.hideInFullscreen == false)
             #expect(read.showTrackBanner == false)
@@ -116,13 +119,14 @@ struct AppSettingsTests {
             settings.hideDelay = 7
             settings.followSystemVolume = false
             settings.beatPulse = false
+            settings.softPulse = false
             settings.hideInFullscreen = false
             settings.showTrackBanner = false
             settings.paused = true
 
             for key in [
                 "wf.source", "wf.sensitivity", "wf.levelMode", "wf.followSystemVolume",
-                "wf.latencyMode", "wf.wingWidth", "wf.glowIntensity", "wf.beatPulse",
+                "wf.latencyMode", "wf.wingWidth", "wf.glowIntensity", "wf.beatPulse", "wf.softPulse",
                 "wf.hideDelay", "wf.hideInFullscreen", "wf.showTrackBanner", "wf.paused",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")

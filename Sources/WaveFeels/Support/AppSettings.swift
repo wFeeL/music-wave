@@ -24,6 +24,7 @@ final class AppSettings {
         static let wingWidth = "wf.wingWidth"
         static let glowIntensity = "wf.glowIntensity"
         static let beatPulse = "wf.beatPulse"
+        static let softPulse = "wf.softPulse"
         static let hideDelay = "wf.hideDelay"
         static let hideInFullscreen = "wf.hideInFullscreen"
         static let showTrackBanner = "wf.showTrackBanner"
@@ -53,6 +54,7 @@ final class AppSettings {
         static let wingWidth = 64.0
         static let glowIntensity = 0.6
         static let beatPulse = true
+        static let softPulse = true
         static let hideDelay = 5.0
         static let hideInFullscreen = true
         static let showTrackBanner = true
@@ -76,6 +78,7 @@ final class AppSettings {
     @ObservationIgnored private var storedWingWidth: Double
     @ObservationIgnored private var storedGlowIntensity: Double
     @ObservationIgnored private var storedBeatPulse: Bool
+    @ObservationIgnored private var storedSoftPulse: Bool
     @ObservationIgnored private var storedHideDelay: Double
     @ObservationIgnored private var storedHideInFullscreen: Bool
     @ObservationIgnored private var storedShowTrackBanner: Bool
@@ -111,6 +114,7 @@ final class AppSettings {
             fallback: Default.glowIntensity
         )
         storedBeatPulse = Self.readBool(defaults, Key.beatPulse) ?? Default.beatPulse
+        storedSoftPulse = Self.readBool(defaults, Key.softPulse) ?? Default.softPulse
         storedHideDelay = Self.clamp(
             Self.readDouble(defaults, Key.hideDelay) ?? Default.hideDelay,
             Limits.hideDelay,
@@ -270,6 +274,20 @@ final class AppSettings {
             guard newValue != storedBeatPulse else { return }
             withMutation(keyPath: \.beatPulse) { storedBeatPulse = newValue }
             defaults.set(newValue, forKey: Key.beatPulse)
+        }
+    }
+
+    /// Мягкий пульс: слабое свечение под вспышками в такт бочке и сетке доли
+    /// (`BeatGlow.ambient`), всегда ниже порога вспышки.
+    var softPulse: Bool {
+        get {
+            access(keyPath: \.softPulse)
+            return storedSoftPulse
+        }
+        set {
+            guard newValue != storedSoftPulse else { return }
+            withMutation(keyPath: \.softPulse) { storedSoftPulse = newValue }
+            defaults.set(newValue, forKey: Key.softPulse)
         }
     }
 

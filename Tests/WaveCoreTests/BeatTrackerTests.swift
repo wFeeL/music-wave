@@ -70,6 +70,44 @@ struct BeatTrackerTests {
         #expect(wasLocked)
     }
 
+    /// Мягкий пульс трекера (`BeatSchedule.ambient`): энергия бочки (короткая огибающая уровня полосы
+    /// бочки против длинного среднего) и горб на сетке (уверенность × ворот) дают пульс в такт, который
+    /// в брейке без бочки (`Drums.breakdown`, 10-18 с) гаснет вместе с энергией и воротом, а после
+    /// возврата бочки возвращается. После `reset()` пульса нет.
+    @Test func ambientFollowsKicksAndFadesInBreakdown() async {
+        let hops = await runOffCooperativePool { Hops.breakdown }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var before: (peak: Float, low: Float) = (0, 1)
+        var during: Float = 0
+        var after: Float = 0
+        var missing = 0
+        for hop in hops {
+            tracker.process(hop)
+            let ambient = tracker.schedule.ambient
+            if ambient == nil { missing += 1 }
+            let value = BeatGlow.ambient(at: hop.endTime, info: ambient)
+            switch hop.endTime {
+            case 6..<10:
+                before = (max(before.peak, value), min(before.low, value))
+            case 12..<18:
+                during = max(during, value)
+            case 20..<24:
+                after = max(after, value)
+            default:
+                break
+            }
+        }
+        #expect(missing == 0)
+        #expect(before.peak > 0.1, "peak before the break \(before.peak)")
+        // Пульс в такт, а не ровный слой: между бочками он опускается.
+        #expect(before.low < before.peak / 2, "low \(before.low) peak \(before.peak)")
+        #expect(during < 0.02, "peak in the break \(during)")
+        #expect(after > 0.1, "peak after the break \(after)")
+
+        tracker.reset()
+        #expect(BeatGlow.ambient(at: 0, info: tracker.schedule.ambient) == 0)
+    }
+
     /// Брейк без бочки 8 с посреди захвата (`Drums.breakdown`, бочка возвращается на 18 с на той же
     /// сетке): вспышки гаснут вместе с воротом, а после возврата сетка продолжается без нового захвата
     /// с нуля. Вспышка предсказанной доли (яркость от `eventRise`) есть на одной из первых трех бочек

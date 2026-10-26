@@ -22,6 +22,28 @@ public struct GlowEvent: Sendable, Equatable {
     }
 }
 
+/// Вход мягкого пульса (`BeatGlow.ambient`), который трекер публикует в расписании рядом с событиями:
+/// сетка доли для горба и энергия бочки. Время на той же оси, что и события расписания.
+public struct AmbientInfo: Sendable, Equatable {
+    /// Доля сетки: горб пульса на `anchor + k × period` для любого целого k.
+    public var anchor: Double
+    /// Период доли, секунды; 0 без темпа (горба нет).
+    public var period: Double
+    /// Высота горба 0...1: уверенность сетки, умноженная на энергетический ворот трекера (в брейке
+    /// без бочки горб гаснет вместе с воротом).
+    public var confidence: Float
+    /// Отношение короткой огибающей уровня полосы бочки (атака 10 мс, спад 150 мс) к его длинному
+    /// среднему (2 с): около 1 при ровном уровне, выше на ударах бочки, 0 в тишине.
+    public var energy: Float
+
+    public init(anchor: Double, period: Double, confidence: Float, energy: Float) {
+        self.anchor = anchor
+        self.period = period
+        self.confidence = confidence
+        self.energy = energy
+    }
+}
+
 /// Расписание свечения, которое анализ публикует для рендера.
 public struct BeatSchedule: Sendable, Equatable {
     /// До 8 последних событий и 2 следующих предсказанных, по времени.
@@ -37,13 +59,16 @@ public struct BeatSchedule: Sendable, Equatable {
     public var weight: Float
     /// Почему захват потерян (`BeatTracker.lastUnlockReason`); `nil` с захватом и до первого захвата.
     public var unlockReason: UnlockReason?
+    /// Вход мягкого пульса (`BeatGlow.ambient`); `nil`, когда расписание не от трекера (метроном,
+    /// пустое): тогда пульса нет. На свечение `BeatGlow.value` не влияет.
+    public var ambient: AmbientInfo?
 
     public static let empty = BeatSchedule(events: [], bpm: nil, period: nil, confidence: 0, locked: false)
 
     /// Без `weight` вес берется из захвата (1 с захватом, 0 без), как показ был до веса.
     public init(
         events: [GlowEvent], bpm: Double?, period: Double?, confidence: Double, locked: Bool, unlockReason: UnlockReason? = nil,
-        weight: Float? = nil
+        weight: Float? = nil, ambient: AmbientInfo? = nil
     ) {
         self.events = events
         self.bpm = bpm
@@ -52,15 +77,17 @@ public struct BeatSchedule: Sendable, Equatable {
         self.locked = locked
         self.weight = weight ?? (locked ? 1 : 0)
         self.unlockReason = unlockReason
+        self.ambient = ambient
     }
 
     /// То же расписание на другой оси времени (поток в хост, задержка вывода, сдвиг синхронизации):
-    /// меняются только времена событий, id остаются.
+    /// меняются только времена событий и доля сетки пульса, id остаются.
     public func shifted(by offset: Double) -> BeatSchedule {
         var copy = self
         for index in copy.events.indices {
             copy.events[index].time += offset
         }
+        copy.ambient?.anchor += offset
         return copy
     }
 }
@@ -98,6 +125,15 @@ public struct BeatGlow: Sendable {
     /// захваченной (0.58 против 0.91), поэтому светится вполовину: заметно, но не как доля. С ростом веса
     /// показа (`BeatSchedule.weight`) приглушение плавно уходит, при весе 1 онсет светится полностью.
     public static let reactiveScale: Float = 0.5
+    /// Мягкий пульс (`ambient(at:info:)`): слой энергии бочки до `ambientEnergyScale`, горб на доле до
+    /// `ambientBeatScale`, сумма не выше `ambientCeiling`, ниже порога вспышки
+    /// `OfflineBeatChain.eventRise` (0.2), поэтому метрики вспышек от пульса не зависят.
+    public static let ambientEnergyScale: Float = 0.12
+    public static let ambientBeatScale: Float = 0.08
+    public static let ambientCeiling: Float = 0.18
+    /// Энергия бочки от `ambientEnergyLow` (ровный уровень, слоя нет) до `ambientEnergyHigh` (полный слой).
+    public static let ambientEnergyLow: Float = 1.0
+    public static let ambientEnergyHigh: Float = 1.6
     /// Допуск округления на границе атаки.
     private static let edgeTolerance = 1e-9
 
@@ -165,6 +201,28 @@ public struct BeatGlow: Sendable {
             records = records.filter { t - $0.value.lastSeen <= Self.memory }
         }
         return glow
+    }
+
+    /// Мягкий пульс на момент показа `time`: `0.12 × smoothstep(1.0, 1.6, energy) + 0.08 × confidence ×
+    /// ((1 + cos 2πφ) / 2)^6`, `φ = (time − anchor) / period`, не выше `ambientCeiling` (0.18).
+    /// Отдельный канал: в `value` не входит, рендер рисует `max(свечение, пульс)`. Горб узкий (вдвое
+    /// ниже пика примерно через 0.1 периода от доли), без опережения: момент показа уже учтен. Без
+    /// `info`, с нечисловыми входами, без темпа (период не больше 0) соответствующей части нет;
+    /// уверенность вне 0...1 обрезается.
+    public static func ambient(at time: Double, info: AmbientInfo?) -> Float {
+        guard let info, time.isFinite else { return 0 }
+        var value: Float = 0
+        if info.energy.isFinite {
+            value += ambientEnergyScale * BeatTracker.smoothstep(ambientEnergyLow, ambientEnergyHigh, info.energy)
+        }
+        let confidence = info.confidence.isFinite ? min(max(info.confidence, 0), 1) : 0
+        if confidence > 0, info.period.isFinite, info.period > 0, info.anchor.isFinite {
+            let phase = (time - info.anchor) / info.period
+            let half = (1 + cos(2 * Double.pi * phase)) / 2
+            let squared = half * half
+            value += ambientBeatScale * confidence * Float(squared * squared * squared)
+        }
+        return min(max(value, 0), ambientCeiling)
     }
 
     /// Слои волн с акцентом доли: к басу прибавляется `bassAccent × glow`, не выше 1.

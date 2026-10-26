@@ -432,6 +432,19 @@ struct WaveShapeTests {
         #expect(pulse.value.isFinite && pulse.value >= 0 && pulse.value <= 1)
     }
 
+    /// «Вздох» по весу показа: с полным весом пружина с упреждением, без веса само свечение, между
+    /// ними смесь. Вес вне 0...1 обрезается, нечисловой считается нулем.
+    @Test func breathBlendsSpringAndGlowByWeight() {
+        #expect(BeatPulse.breath(spring: 0.8, glow: 0.2, weight: 1) == 0.8)
+        #expect(BeatPulse.breath(spring: 0.8, glow: 0.2, weight: 0) == 0.2)
+        #expect(abs(BeatPulse.breath(spring: 0.8, glow: 0.2, weight: 0.25) - 0.35) < 1e-6)
+        #expect(BeatPulse.breath(spring: 0.8, glow: 0.2, weight: 2) == 0.8)
+        #expect(BeatPulse.breath(spring: 0.8, glow: 0.2, weight: -1) == 0.2)
+        #expect(BeatPulse.breath(spring: 0.8, glow: 0.2, weight: .nan) == 0.2)
+        #expect(BeatPulse.breath(spring: .nan, glow: 0.2, weight: 1) == 0)
+        #expect(BeatPulse.breath(spring: 0.5, glow: 0.5, weight: 0.7) == 0.5)
+    }
+
     // MARK: - WavePaint
 
     private static let warm = [RGBColor(hex: 0xFF8A3D), RGBColor(hex: 0xFFC857), RGBColor(hex: 0xF2545B)]

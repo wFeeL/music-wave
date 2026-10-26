@@ -46,6 +46,30 @@ struct AppModelRenderTests {
         #expect(abs(calm.frame.layers[0] - 2 * calm.frame.layers[1]) < 1e-4)
     }
 
+    /// Мягкий пульс идет отдельным каналом: по расписанию на момент показа кадра, 0 при
+    /// «Уменьшении движения» и при выключенном «Мягком пульсе»; свечение доли от него не меняется.
+    @Test func softPulseIsASeparateChannel() throws {
+        let (model, defaults, suite) = try Self.makeModel("render-soft-pulse")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let t = 3_000.0
+        let lead = LatencyCalculator.presentationLead(refreshPeriod: model.renderPeriod)
+        model.store.publish(Self.frame(bass: 0.2), at: t)
+        let info = AmbientInfo(anchor: t + lead, period: 0.5, confidence: 1, energy: 1.6)
+        model.store.publishSchedule(
+            BeatSchedule(events: [], bpm: 120, period: 0.5, confidence: 0.9, locked: false, ambient: info)
+        )
+        #expect(model.settings.softPulse)
+        // На доле энергия и горб вместе упираются в потолок пульса.
+        let on = model.islandVisuals(now: t, timelineTime: 1, reduceMotion: false)
+        #expect(on.ambient == BeatGlow.ambientCeiling)
+        #expect(on.glow == 0)
+        let calm = model.islandVisuals(now: t + 0.01, timelineTime: 2, reduceMotion: true)
+        #expect(calm.ambient == 0)
+        model.settings.softPulse = false
+        let off = model.islandVisuals(now: t + 0.02, timelineTime: 3, reduceMotion: false)
+        #expect(off.ambient == 0)
+    }
+
     @Test func previewKeepsFrameValues() throws {
         let (model, defaults, suite) = try Self.makeModel("render-preview")
         defer { defaults.removePersistentDomain(forName: suite) }

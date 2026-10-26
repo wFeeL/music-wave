@@ -86,11 +86,14 @@ final class RhythmRecording {
         }
     }
 
-    /// Кадр острова с моментом показа `presented` (секунды хоста) и свечением доли `glow` на него.
-    /// Зовется один раз на кадр `TimelineView`; без записи только запоминает свечение и ничего не
-    /// выделяет. `reduceMotion`: «Уменьшение движения» на этом кадре (свечения нет), один раз за
-    /// запись отмечается в ней.
-    func frame(presented: Double, glow: Float, schedule: BeatSchedule?, refreshPeriod: Double, reduceMotion: Bool) {
+    /// Кадр острова с моментом показа `presented` (секунды хоста), свечением доли `glow` и мягким
+    /// пульсом `ambient` на него (пульс идет только в итог пульса записи, вспышки считаются по
+    /// `glow`). Зовется один раз на кадр `TimelineView`; без записи только запоминает свечение и
+    /// ничего не выделяет. `reduceMotion`: «Уменьшение движения» на этом кадре (свечения нет), один
+    /// раз за запись отмечается в ней.
+    func frame(
+        presented: Double, glow: Float, ambient: Float, schedule: BeatSchedule?, refreshPeriod: Double, reduceMotion: Bool
+    ) {
         let rise = glow - previousGlow
         previousGlow = glow
         guard let session else { return }
@@ -98,7 +101,9 @@ final class RhythmRecording {
             notedReduceMotion = true
             session.noteReduceMotion()
         }
-        session.appendFrame(presentedHost: presented, glowRise: rise, schedule: schedule ?? .empty, refreshPeriod: refreshPeriod)
+        session.appendFrame(
+            presentedHost: presented, glowRise: rise, schedule: schedule ?? .empty, refreshPeriod: refreshPeriod, ambient: ambient
+        )
     }
 
     /// Остановка модели: запись бросается без файлов.

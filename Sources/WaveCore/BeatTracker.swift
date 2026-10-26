@@ -38,7 +38,11 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    быстрее `1 / weightRiseBeats` за долю, вниз не быстрее `1 / weightFallBeats`. Без захвата вес
 ///    растет только после `weightHits` попаданий подряд. Новая сетка (смена темпа, скачок фазы,
 ///    перехват тенью) сразу получает вес не выше цели по своей уверенности. `locked` для диагностики и
-///    метрик, на показ влияет только через это правило роста.
+///    метрик, на показ влияет только через это правило роста;
+/// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): уровень полосы бочки в амплитуде идет
+///    в короткую огибающую (атака `ambientAttack`, спад `ambientRelease`) и длинное среднее
+///    (`ambientAverage`), энергия это их отношение (0, пока среднее ниже `ambientFloorDB`). Горб пульса
+///    стоит на сетке ФАПЧ с высотой `уверенность × g_E`. На события, уверенность и вес пульс не влияет.
 ///
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей. Яркость ближайшей доли фиксируется, когда время потока
@@ -256,6 +260,13 @@ public struct BeatTracker: Sendable {
     static let confirmHigh: Float = 11
     /// Ворот от этого значения считается открытым для мягкого подтверждения бочки.
     static let confirmGateOpen: Float = 0.5
+    /// Энергия мягкого пульса: атака и спад короткой огибающей уровня полосы бочки и постоянная
+    /// времени длинного среднего, секунды (как отношение мгновенного и среднего уровня баса в
+    /// MilkDrop). Ниже `ambientFloorDB` (мощность) среднее считается тишиной: энергии и горба нет.
+    static let ambientAttack = 0.010
+    static let ambientRelease = 0.150
+    static let ambientAverage = 2.0
+    static let ambientFloorDB: Float = -90
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
@@ -314,6 +325,13 @@ public struct BeatTracker: Sendable {
     public private(set) var energyGate: Float = 0
     /// Вес показа 0...1: яркость предсказанных долей и приглушение онсетов бочки (`BeatSchedule.weight`).
     private(set) var displayWeight: Float = 0
+    /// Короткая огибающая и длинное среднее уровня полосы бочки (амплитуда) для мягкого пульса;
+    /// первый шаг ставит обе на свой уровень.
+    private var ambientShort = AttackRelease(attack: BeatTracker.ambientAttack, release: BeatTracker.ambientRelease)
+    private var ambientLong = AttackRelease(attack: BeatTracker.ambientAverage, release: BeatTracker.ambientAverage)
+    private var ambientPrimed = false
+    /// Энергия мягкого пульса последнего шага (`AmbientInfo.energy`).
+    private(set) var ambientEnergy: Float = 0
 
     /// Прошедшие события по времени, не больше `pastCapacity`.
     private var past: [GlowEvent]
@@ -353,9 +371,27 @@ public struct BeatTracker: Sendable {
             confidence: confidence,
             locked: locked,
             unlockReason: locked ? nil : lastUnlockReason,
-            weight: displayWeight
+            weight: displayWeight,
+            ambient: ambient
         )
     }
+
+    /// Вход мягкого пульса: сетка ФАПЧ (без темпа период 0), высота горба `уверенность × g_E` (0 в
+    /// тишине) и энергия бочки.
+    private var ambient: AmbientInfo {
+        guard let nextBeat, let period, ambientAudible else {
+            return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: ambientEnergy)
+        }
+        return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(confidence) * energyGate, energy: ambientEnergy)
+    }
+
+    /// Длинное среднее уровня бочки выше `ambientFloorDB`.
+    private var ambientAudible: Bool {
+        ambientPrimed && ambientLong.value >= Self.ambientFloorAmplitude
+    }
+
+    /// `ambientFloorDB` в амплитуде.
+    private static let ambientFloorAmplitude = Float(pow(10.0, Double(ambientFloorDB) / 20))
 
     public mutating func process(_ hop: HopResult) {
         now = hop.endTime
@@ -387,6 +423,7 @@ public struct BeatTracker: Sendable {
         closeWindows()
         closeShadowWindows()
         updateGate(hop.kickLevelDB)
+        updateAmbient(hop.kickLevelDB)
         updateWeight()
         if let onset = hop.kickOnset {
             addKickOnset(onset)
@@ -421,6 +458,10 @@ public struct BeatTracker: Sendable {
         longPeakDB = Self.floorDB
         energyGate = 0
         displayWeight = 0
+        ambientShort.reset()
+        ambientLong.reset()
+        ambientPrimed = false
+        ambientEnergy = 0
         past.removeAll(keepingCapacity: true)
     }
 
@@ -760,6 +801,22 @@ public struct BeatTracker: Sendable {
         kickGateDB = max(level, kickGateDB - fall)
         longPeakDB = max(level, longPeakDB - longFallPerHopDB)
         energyGate = Self.smoothstep(Self.gateLowDB, Self.gateHighDB, kickGateDB - longPeakDB)
+    }
+
+    /// Энергия мягкого пульса: уровень бочки в амплитуде (нечисловой как пол) в короткую огибающую и
+    /// длинное среднее, энергия их отношение, 0 ниже `ambientFloorDB`.
+    private mutating func updateAmbient(_ levelDB: Float) {
+        let level = levelDB.isFinite ? max(levelDB, Self.floorDB) : Self.floorDB
+        let amplitude = Float(pow(10.0, Double(level) / 20))
+        if ambientPrimed {
+            ambientShort.step(toward: amplitude, dt: hopDuration)
+            ambientLong.step(toward: amplitude, dt: hopDuration)
+        } else {
+            ambientShort.reset(to: amplitude)
+            ambientLong.reset(to: amplitude)
+            ambientPrimed = true
+        }
+        ambientEnergy = ambientAudible ? ambientShort.value / ambientLong.value : 0
     }
 
     private mutating func updateWeight() {

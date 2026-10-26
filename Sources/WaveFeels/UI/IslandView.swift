@@ -228,11 +228,13 @@ struct IslandView: View {
         let paused = model.nowPlayingAvailable && model.lastTrack?.isPlaying == false
 
         return ZStack(alignment: .topLeading) {
-            if BeatGlowView.isVisible(glow: visuals.glow, intensity: glow) {
+            if BeatGlowView.isVisible(
+                glow: BeatGlowView.brightness(glow: visuals.glow, ambient: visuals.ambient), intensity: glow
+            ) {
                 BeatGlowView(
-                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, intensity: glow,
-                    radius: appearance.glowRadius, color: visuals.palette.first ?? PaletteExtractor.fallback[0],
-                    banner: bannerVisible
+                    geometry: geometry, state: state, scale: scale, glow: visuals.glow, ambient: visuals.ambient,
+                    intensity: glow, radius: appearance.glowRadius,
+                    color: visuals.palette.first ?? PaletteExtractor.fallback[0], banner: bannerVisible
                 )
             }
             ZStack(alignment: .topLeading) {

@@ -15,6 +15,8 @@ import Synchronization
 /// публикации расписания по часам хоста, без задержки вывода (как `OfflineBeatChain.State.time`).
 public struct RhythmLog: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 1
+    /// Мягкий пульс кадра от этого значения считается видимым (`Meta.ambientFrames`).
+    public static let ambientVisible: Float = 0.05
 
     public var schemaVersion: Int
     public var meta: Meta
@@ -81,6 +83,8 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var glowIntensity: Double
         /// «Вздох» острова в такт доле включен.
         public var beatPulse: Bool
+        /// «Мягкий пульс» включен; в журналах до 1.2 поля нет (`nil`).
+        public var softPulse: Bool?
         /// Режим энергосбережения в начале записи (рендер до 30 кадров в секунду, облегченный вид).
         public var lowPower: Bool
         /// Сэмплов, обрезанных до ±1 при записи в 16 бит: прогон видит их не такими, как анализ.
@@ -96,6 +100,10 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         /// Время показа последнего кадра рендера, секунды оси; `nil`, если кадров не было. Вспышки
         /// позже него не могли попасть в запись.
         public var renderedUntil: Double?
+        /// Кадров, на которых показанный мягкий пульс был от `RhythmLog.ambientVisible`, и его пик за
+        /// запись; `nil`, если кадры пульс не передавали (журналы до 1.2).
+        public var ambientFrames: Int?
+        public var ambientPeak: Float?
         public var endReason: EndReason
 
         public init(
@@ -113,6 +121,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             reduceMotion: Bool = false,
             glowIntensity: Double = 1,
             beatPulse: Bool = true,
+            softPulse: Bool? = nil,
             lowPower: Bool = false,
             clippedSamples: Int = 0,
             startHostSeconds: Double = 0,
@@ -120,6 +129,8 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             audioSeconds: Double = 0,
             renderedFrames: Int = 0,
             renderedUntil: Double? = nil,
+            ambientFrames: Int? = nil,
+            ambientPeak: Float? = nil,
             endReason: EndReason = .stopped
         ) {
             self.appVersion = appVersion
@@ -136,6 +147,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.reduceMotion = reduceMotion
             self.glowIntensity = glowIntensity
             self.beatPulse = beatPulse
+            self.softPulse = softPulse
             self.lowPower = lowPower
             self.clippedSamples = clippedSamples
             self.startHostSeconds = startHostSeconds
@@ -143,6 +155,8 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.audioSeconds = audioSeconds
             self.renderedFrames = renderedFrames
             self.renderedUntil = renderedUntil
+            self.ambientFrames = ambientFrames
+            self.ambientPeak = ambientPeak
             self.endReason = endReason
         }
     }
@@ -158,14 +172,20 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         /// Почему захват потерян (`BeatSchedule.unlockReason`). В журналах 1.1 поля нет, они читаются
         /// с `nil`; без причины ключ не пишется.
         public var unlockReason: UnlockReason?
+        /// Вес показа (`BeatSchedule.weight`); в журналах до 1.2 поля нет (`nil`).
+        public var weight: Float?
 
-        public init(time: Double, bpm: Double?, confidence: Double, locked: Bool, beats: [Double], unlockReason: UnlockReason? = nil) {
+        public init(
+            time: Double, bpm: Double?, confidence: Double, locked: Bool, beats: [Double], unlockReason: UnlockReason? = nil,
+            weight: Float? = nil
+        ) {
             self.time = time
             self.bpm = bpm
             self.confidence = confidence
             self.locked = locked
             self.beats = beats
             self.unlockReason = unlockReason
+            self.weight = weight
         }
     }
 
@@ -229,6 +249,8 @@ public struct RhythmRecorder: Sendable {
     static let beatTolerance = 0.001
     /// Изменение уверенности, после которого расписание пишется заново.
     static let confidenceStep = 0.01
+    /// Изменение веса показа, после которого расписание пишется заново.
+    static let weightStep: Float = 0.02
 
     public let duration: Double
     public private(set) var samples: [Int16] = []
@@ -325,15 +347,17 @@ public struct RhythmRecorder: Sendable {
     }
 
     /// Расписание, опубликованное в момент хоста `host` (ось хоста, с задержкой и сдвигом). Пишется,
-    /// если сменились захват, причина его потери, темп, предсказанные доли (больше чем на 1 мс) или
-    /// уверенность (на 0.01 и больше).
+    /// если сменились захват, причина его потери, темп, предсказанные доли (больше чем на 1 мс),
+    /// уверенность (на 0.01 и больше) или вес показа (на 0.02 и больше).
     public mutating func appendSchedule(_ schedule: BeatSchedule, publishedAtHost host: Double) {
         guard hasStarted, endReason == nil, host.isFinite else { return }
         let zero = meta.startHostSeconds
         let bpm = schedule.bpm.flatMap { $0.isFinite ? $0 : nil }
         let confidence = schedule.confidence.isFinite ? schedule.confidence : 0
+        let weight = schedule.weight.isFinite ? schedule.weight : 0
         if let last = schedules.last, last.locked == schedule.locked, last.unlockReason == schedule.unlockReason, last.bpm == bpm,
            abs(last.confidence - confidence) < Self.confidenceStep,
+           let lastWeight = last.weight, abs(lastWeight - weight) < Self.weightStep,
            Self.sameBeats(last.beats, schedule, zero: zero) {
             return
         }
@@ -344,20 +368,29 @@ public struct RhythmRecorder: Sendable {
         schedules.append(
             RhythmLog.Schedule(
                 time: Self.rounded(host - zero), bpm: bpm, confidence: confidence, locked: schedule.locked, beats: beats,
-                unlockReason: schedule.unlockReason
+                unlockReason: schedule.unlockReason, weight: weight
             )
         )
     }
 
     /// Кадр рендера с моментом показа `presentedHost` (секунды хоста): `glowRise` это рост
     /// свечения против прошлого кадра, вспышка при росте больше `OfflineBeatChain.eventRise`.
-    /// Источник вспышки оценивается по `schedule` так же, как в офлайн-цепочке.
-    public mutating func appendFrame(presentedHost: Double, glowRise: Float, schedule: BeatSchedule, refreshPeriod: Double) {
+    /// Источник вспышки оценивается по `schedule` так же, как в офлайн-цепочке. `ambient`: показанный
+    /// на кадре мягкий пульс (в итог `meta.ambientFrames` и `ambientPeak`; нечисловой как 0); во
+    /// вспышки не входит.
+    public mutating func appendFrame(
+        presentedHost: Double, glowRise: Float, schedule: BeatSchedule, refreshPeriod: Double, ambient: Float? = nil
+    ) {
         guard hasStarted, presentedHost.isFinite else { return }
         let time = presentedHost - meta.startHostSeconds
         guard time >= 0 else { return }
         meta.renderedFrames += 1
         meta.renderedUntil = max(meta.renderedUntil ?? time, time)
+        if let ambient {
+            let shown = ambient.isFinite ? max(ambient, 0) : 0
+            meta.ambientFrames = (meta.ambientFrames ?? 0) + (shown >= RhythmLog.ambientVisible ? 1 : 0)
+            meta.ambientPeak = max(meta.ambientPeak ?? 0, shown)
+        }
         guard glowRise > OfflineBeatChain.eventRise else { return }
         flashes.append(
             RhythmLog.Flash(
@@ -471,9 +504,13 @@ public final class RhythmSession: Sendable {
         recorder.withLock { $0.appendSchedule(schedule, publishedAtHost: host) }
     }
 
-    public func appendFrame(presentedHost: Double, glowRise: Float, schedule: BeatSchedule, refreshPeriod: Double) {
+    public func appendFrame(
+        presentedHost: Double, glowRise: Float, schedule: BeatSchedule, refreshPeriod: Double, ambient: Float? = nil
+    ) {
         recorder.withLock {
-            $0.appendFrame(presentedHost: presentedHost, glowRise: glowRise, schedule: schedule, refreshPeriod: refreshPeriod)
+            $0.appendFrame(
+                presentedHost: presentedHost, glowRise: glowRise, schedule: schedule, refreshPeriod: refreshPeriod, ambient: ambient
+            )
         }
     }
 

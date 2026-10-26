@@ -13,6 +13,8 @@ import Foundation
 /// `renderPhase` или случайная) в момент `tEval` берет последнее расписание, опубликованное до него,
 /// и считает свечение на момент показа `tP = tEval + 2 / renderRate`. Событие свечения это кадр, где
 /// свечение выросло больше чем на `eventRise` против прошлого кадра; его время это `tP` кадра.
+/// Мягкий пульс (`Config.softPulse`, `BeatGlow.ambient` на тот же `tP`) считается отдельно: во вспышки
+/// он не входит, только в итог пульса (`Result.peakAmbient`, `ambientFrames`).
 ///
 /// Ось времени. Все времена результата отсчитываются от первого сэмпла (хост сдвинут на `hostStart`
 /// и вычтен обратно). Вспышки и онсеты бочки даны на слышимой оси: момент звука t в файле слышен в
@@ -43,6 +45,8 @@ public struct OfflineBeatChain: Sendable {
         /// Ручной сдвиг вспышек, секунды (плюс это позже).
         public var syncOffset = 0.0
         public var trackerParameters = BeatTracker.Parameters()
+        /// Считать мягкий пульс на кадрах рендера (итог в `Result`); на вспышки не влияет.
+        public var softPulse = false
         public var seed: UInt64
 
         public init(seed: UInt64 = 1) {
@@ -75,13 +79,18 @@ public struct OfflineBeatChain: Sendable {
         public var confidence: Double
         /// Почему захват потерян (`BeatSchedule.unlockReason`); `nil` с захватом и до первого захвата.
         public var unlockReason: UnlockReason?
+        /// Вес показа (`BeatSchedule.weight`).
+        public var weight: Float
 
-        public init(time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil) {
+        public init(
+            time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil, weight: Float = 0
+        ) {
             self.time = time
             self.locked = locked
             self.bpm = bpm
             self.confidence = confidence
             self.unlockReason = unlockReason
+            self.weight = weight
         }
     }
 
@@ -101,6 +110,11 @@ public struct OfflineBeatChain: Sendable {
         public var peakGlow: Float
         /// Задержка вывода прогона.
         public var outputLatency: Double
+        /// Мягкий пульс (`Config.softPulse`): наибольший за прогон, сколько кадров с пульсом от
+        /// `RhythmLog.ambientVisible` и сколько кадров рендера всего. Без пульса нули.
+        public var peakAmbient: Float = 0
+        public var ambientFrames = 0
+        public var renderedFrames = 0
 
         /// Первая публикация с захватом, секунды от первого сэмпла.
         public var lockTime: Double? {
@@ -235,7 +249,7 @@ public struct OfflineBeatChain: Sendable {
             analysis.states.append(
                 State(
                     time: wake - hostStart, locked: published.locked, bpm: published.bpm, confidence: published.confidence,
-                    unlockReason: published.unlockReason
+                    unlockReason: published.unlockReason, weight: published.weight
                 )
             )
             for event in published.events where event.predicted && wake <= event.time - BeatGlow.lead {
@@ -255,6 +269,8 @@ public struct OfflineBeatChain: Sendable {
         var previous: Float = 0
         var peak: Float = 0
         var flashes: [Flash] = []
+        var peakAmbient: Float = 0
+        var ambientFrames = 0
         var frame = 0
         while true {
             let tEval = hostStart + renderPeriod * (phase + Double(frame))
@@ -276,6 +292,11 @@ public struct OfflineBeatChain: Sendable {
             }
             peak = max(peak, value)
             previous = value
+            if config.softPulse {
+                let ambient = BeatGlow.ambient(at: tP, info: published.ambient)
+                peakAmbient = max(peakAmbient, ambient)
+                if ambient >= RhythmLog.ambientVisible { ambientFrames += 1 }
+            }
             frame += 1
         }
 
@@ -285,7 +306,10 @@ public struct OfflineBeatChain: Sendable {
             kickOnsets: analysis.kickOnsets,
             predictedTimes: analysis.predicted.values.map { $0 - hostStart }.sorted(),
             peakGlow: peak,
-            outputLatency: config.outputLatency
+            outputLatency: config.outputLatency,
+            peakAmbient: peakAmbient,
+            ambientFrames: ambientFrames,
+            renderedFrames: frame
         )
     }
 
