@@ -97,8 +97,11 @@ struct OfflineBeatChainTests {
     /// удвоенном темпе и вспышки на «и»; 0.06 и тише без смены темпа; без слабой доли все три проверки
     /// проходят и на 1.1. Защита октавы при дрейфе (B2) этот случай не меняет: удвоенные оценки
     /// 148-150 BPM лежат в 1.3 % от 2 × 75.1 и держатся 3.5 с, так что 12 из 16 набираются по правилу
-    /// кратных; захват сбрасывает сама смена темпа.
-    @Test(.disabled("B3-B4: an exact octave switch still resets the lock, no hard resets, smooth weight"))
+    /// кратных; захват сбрасывает сама смена темпа. B3 этого не меняет нарочно: удвоение темпа по-прежнему
+    /// сбрасывает захват (перенос сразу показывал удвоенную сетку, вспышки шли на «и», темная серия 6
+    /// долей, точность с захватом 0.73), так что после B3 числа те же, что в 1.1 (4 доли, захват на
+    /// 147 BPM с 26.3 с, точность 0.81). Нужен выбор октавы для показа или строже правило кратных.
+    @Test(.disabled("needs an octave choice for display: the estimator switches to the exact double at 24.3 s, B3 keeps resetting on tempo doubling"))
     func ritardandoKeepsGlow() async throws {
         let (scene, result) = await runOffCooperativePool {
             let scene = Drums.tempoRamp(from: 80, to: 72, seconds: 30, offbeatGain: 0.1)

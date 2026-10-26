@@ -558,10 +558,11 @@ struct BeatTrackerTests {
         #expect(tracker.locked && tracker.lastUnlockReason == nil)
     }
 
-    /// Переход ровно на удвоенный (80 -> 160 BPM) или половинный (144 -> 72 BPM) темп с теми же
-    /// позициями долей уверенность не сбрасывает, следующая доля остается на долях сцены.
-    @Test(arguments: [(80.0, 0.5), (144.0, 2.0)])
-    func octaveRelatedKeepsPhase(bpm: Double, factor: Double) throws {
+    /// Переход ровно на половинный темп (144 -> 72 BPM, период ×2) с теми же позициями долей
+    /// уверенность не сбрасывает, следующая доля остается на долях сцены. Удвоение темпа (80 -> 160
+    /// BPM) сбрасывает: доли между старыми прежняя уверенность не подтверждала.
+    @Test(arguments: [(144.0, 2.0, true), (80.0, 0.5, false)])
+    func octaveRelatedKeepsPhase(bpm: Double, factor: Double, carries: Bool) throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var hops = SyntheticBeats(bpm: bpm)
         hops.feed(&tracker, until: 10)
@@ -570,6 +571,10 @@ struct BeatTrackerTests {
         try #require(abs(period * bpm / 60 - 1) < 0.02, "locked at \(60 / period) BPM")
         let (hits, confidence) = (tracker.hits, tracker.confidence)
         tracker.updateTempo(TempoEstimate(period: period * factor, switched: true))
+        guard carries else {
+            #expect(!tracker.locked && tracker.hits == 0 && tracker.lastUnlockReason == .tempoSwitch)
+            return
+        }
         #expect(tracker.locked)
         #expect(tracker.hits == hits)
         #expect(tracker.confidence == confidence)
