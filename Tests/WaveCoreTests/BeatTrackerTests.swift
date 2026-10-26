@@ -577,6 +577,139 @@ struct BeatTrackerTests {
         #expect(lockedUntilMove)
     }
 
+    /// Сцена журнала 2 владельца на настоящих барабанах: 100 BPM, бочка на каждой доле, малый на 2 и 4,
+    /// хэт на каждой восьмой (онсеты на обеих восьмых). Трекер, захвативший доли, ставится на «и»
+    /// уверенным захватом сразу после вспышки доли 10.2 с, следующая вспышка на «и» 10.5 с. Сетка
+    /// возвращается на доли не позже чем через 4 доли, и подряд не больше 2 долей без вспышки
+    /// (приглушенные доли гонки и отблески бочки не вспышки).
+    @Test func forcedOffbeatReturnsWithinFourBeats() throws {
+        let scene = Drums.fourOnFloor(bpm: 100, seconds: 20, hats: .eighths, snareOnBackbeat: true)
+        let hops = StreamAnalyzer(sampleRate: scene.sampleRate).processSignal(scene.samples)
+        let period = 0.6
+        let forceAt = 10.25
+        let first = try #require(scene.beats.first)
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var forced = false
+        var takeover: Double?
+        var shown: [UInt64: (time: Double, amplitude: Float)] = [:]
+        for hop in hops {
+            tracker.process(hop)
+            if !forced, tracker.now >= forceAt {
+                forced = true
+                try #require(tracker.locked)
+                tracker.forceLock(onBeat: first + period / 2)
+            }
+            // Яркость каждого события, когда время потока до него дошло.
+            for event in tracker.schedule.events where event.time <= tracker.now && shown[event.id] == nil {
+                shown[event.id] = (event.time, event.amplitude)
+            }
+            if forced, takeover == nil, let next = tracker.nextBeat,
+                abs(BeatTracker.circularDifference(next - first, period: period)) < 0.1 * period
+            {
+                takeover = tracker.now - forceAt
+            }
+        }
+        let back = try #require(takeover, "the grid never returned to the beat")
+        #expect(back / period <= 4, "back on the beat \(back / period) beats after the force")
+        let flashes = shown.values.filter { $0.amplitude > OfflineBeatChain.eventRise }.map(\.time)
+        var run = 0
+        var longest = 0
+        for beat in scene.beats where beat >= forceAt && beat < 18 {
+            run = flashes.contains { abs($0 - beat) < period / 2 } ? 0 : run + 1
+            longest = max(longest, run)
+        }
+        #expect(longest <= 2, "\(longest) beats in a row without a flash")
+    }
+
+    /// Механизм журнала 2: трекер на «и», онсеты на обеих восьмых (сетка попадает в каждую долю, и
+    /// перевес тени по попаданиям невозможен), гребенка за долю (60 против 40). Голоса выключены
+    /// (`raceVotes` 0), чтобы решали только доводы. Без доводов (`raceEvidenceChecks` 0) тень брошена
+    /// по `raceLimit`, и сетка остается на «и»; с доводами она уходит на доли после
+    /// `raceEvidenceChecks` проверок с начала гонки и до предела.
+    @Test(arguments: [true, false])
+    func accumulatedEvidenceDecidesATiedRace(evidence: Bool) throws {
+        let defaults = BeatTracker.Parameters()
+        #expect(defaults.raceEvidenceChecks == 8 && defaults.raceEvidenceShare == 0.75 && defaults.raceEvidenceRatio == 1.15)
+        #expect(defaults.raceEvidenceHits == 1 && defaults.raceDropRatio == 1)
+        var parameters = BeatTracker.Parameters()
+        parameters.raceVotes = 0
+        if !evidence { parameters.raceEvidenceChecks = 0 }
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 100)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.beatODF = [60]
+        hops.offbeatODF = 40
+        hops.offbeatOnsets = true
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.3
+        // Доли сцены на 0.25 + k · 0.6 с, «и» на 0.55 + k · 0.6 с.
+        tracker.forceLock(onBeat: 0.55)
+        var start: Double?
+        var end: Double?
+        var checksAtEnd = 0
+        var previous = tracker
+        hops.feed(&tracker, until: 22) { tracker in
+            if start == nil, tracker.shadowNext != nil { start = tracker.now }
+            if start != nil, end == nil, tracker.shadowNext == nil {
+                end = tracker.now
+                checksAtEnd = previous.raceChecks
+            }
+            previous = tracker
+        }
+        let raceStart = try #require(start, "no race")
+        let raceEnd = try #require(end, "the race never ended")
+        let next = try #require(tracker.nextBeat)
+        let onBeat = abs(BeatTracker.circularDifference(next - 0.25, period: 0.6)) < 0.03
+        if evidence {
+            #expect(onBeat, "next beat \(next)")
+            #expect(checksAtEnd >= parameters.raceEvidenceChecks, "\(checksAtEnd) checks")
+            #expect(raceEnd - raceStart < Double(parameters.raceLimit) * 0.6, "race \(raceEnd - raceStart) s")
+        } else {
+            #expect(!onBeat, "next beat \(next)")
+            #expect(raceEnd - raceStart >= Double(parameters.raceLimit - 1) * 0.6, "race \(raceEnd - raceStart) s")
+        }
+    }
+
+    /// Тень, за которую гребенка была только на старте (короткий всплеск на «и» без онсетов), после
+    /// `raceEvidenceChecks` проверок со средним отношением ниже `raceDropRatio` бросается раньше
+    /// `raceLimit`, и приглушение снимается; сетка и захват остаются на долях. Без этого правила
+    /// (`raceDropRatio` 0) гонка идет до предела.
+    @Test(arguments: [true, false])
+    func evidenceForTheGridEndsTheRaceEarly(drop: Bool) throws {
+        var parameters = BeatTracker.Parameters()
+        if !drop { parameters.raceDropRatio = 0 }
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.offbeatODF = 100
+        hops.nextOffbeatTime = hops.nextBeatTime + 0.25
+        var start: Double?
+        while start == nil, hops.endTime < 12 {
+            hops.feed(&tracker, until: hops.endTime + 0.05) { tracker in
+                if start == nil, tracker.shadowNext != nil { start = tracker.now }
+            }
+        }
+        let raceStart = try #require(start, "no race")
+        hops.offbeatODF = 0
+        var end: Double?
+        var alwaysLocked = true
+        hops.feed(&tracker, until: 20) { tracker in
+            if end == nil, tracker.shadowNext == nil { end = tracker.now }
+            alwaysLocked = alwaysLocked && tracker.locked
+        }
+        let raceEnd = try #require(end, "the race never ended")
+        let limit = Double(parameters.raceLimit) * 0.5
+        if drop {
+            #expect(raceEnd - raceStart < 0.6 * limit, "race \(raceEnd - raceStart) s")
+        } else {
+            #expect(raceEnd - raceStart >= limit - 0.5, "race \(raceEnd - raceStart) s")
+        }
+        #expect(alwaysLocked)
+        let next = try #require(tracker.nextBeat)
+        #expect(abs(BeatTracker.circularDifference(next - 0.25, period: 0.5)) < 0.03, "next beat \(next)")
+    }
+
     /// Тень от PLP (`plpShadow`): гребенка выключена огромным запасом (`phaseJumpMargin`), «и» без
     /// онсетов вдвое сильнее доли. PLP переходит на «и» за несколько секунд, и когда он там уверен (не
     /// ниже `plpShadow`), он запускает тень и голосует за нее: сетка уходит на «и» без потери
@@ -1661,6 +1794,9 @@ struct SyntheticBeats {
     let hop = 256.0 / 48_000
     /// Широкополосная функция на «и» (без онсета): ее видит только гребенка фазы. 0 выключает.
     var offbeatODF: Float = 0
+    /// На «и» с `offbeatODF` еще и широкополосный онсет (хэт на каждой восьмой): попадания тогда не
+    /// различают долю и «и».
+    var offbeatOnsets = false
     var nextOffbeatTime = 0.0
     /// Онсет и функция бочки только на каждой `kickEvery`-й доле (с первой), широкополосный онсет на
     /// каждой.
@@ -1693,6 +1829,7 @@ struct SyntheticBeats {
             if quietBetweenKicks, kick == nil { hop.kickLevelDB = -40 }
             if offbeatODF > 0, nextOffbeatTime <= endTime {
                 hop.broadbandODF = max(hop.broadbandODF, offbeatODF)
+                if offbeatOnsets, hop.broadbandOnset == nil { hop.broadbandOnset = OnsetEvent(time: nextOffbeatTime, strength: 1) }
                 nextOffbeatTime += 60 / bpm
             }
             tracker.process(hop)

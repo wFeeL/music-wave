@@ -295,7 +295,8 @@ extension BeatTracker.Parameters {
         "alpha", "beta", "matchWindow", "confidenceGain", "lockConfidence", "lockHits", "unlockConfidence",
         "phaseJump", "phaseJumpChecks", "phaseJumpMargin", "dropWindow", "offGridScale", "onsetFloor", "weightLow",
         "weightHigh", "weightRiseBeats", "weightFallBeats", "weightHits", "kickConfirmFloor", "kickConfirmLow",
-        "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceDim", "coastGate",
+        "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceEvidenceChecks",
+        "raceEvidenceShare", "raceEvidenceRatio", "raceEvidenceHits", "raceDropRatio", "raceDim", "coastGate",
         "gateFallPerBeatDB", "gateFallNoTempoDB", "plpShadow", "everyOtherPeriod", "everyOtherHold",
     ]
 
@@ -322,6 +323,10 @@ extension BeatTracker.Parameters {
         case "carryTolerance": carryTolerance = value
         case "carryPhase": carryPhase = value
         case "raceMargin": raceMargin = value
+        case "raceEvidenceShare": raceEvidenceShare = value
+        case "raceEvidenceRatio": raceEvidenceRatio = value
+        case "raceEvidenceHits": raceEvidenceHits = value
+        case "raceDropRatio": raceDropRatio = value
         case "offGridScale": offGridScale = Float(value)
         case "onsetFloor": onsetFloor = Float(value)
         case "coastGate": coastGate = Float(value)
@@ -331,7 +336,7 @@ extension BeatTracker.Parameters {
         case "plpShadow": plpShadow = value
         case "everyOtherPeriod": everyOtherPeriod = value
         case "everyOtherHold": everyOtherHold = value
-        case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes", "weightHits":
+        case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes", "raceEvidenceChecks", "weightHits":
             guard value == value.rounded(), abs(value) < 1e9 else { return false }
             switch name {
             case "lockHits": lockHits = Int(value)
@@ -339,6 +344,7 @@ extension BeatTracker.Parameters {
             case "raceBeats": raceBeats = Int(value)
             case "raceLimit": raceLimit = Int(value)
             case "weightHits": weightHits = Int(value)
+            case "raceEvidenceChecks": raceEvidenceChecks = Int(value)
             default: raceVotes = Int(value)
             }
         default: return false
