@@ -581,6 +581,7 @@ struct BeatTrackerTests {
         let parameters = BeatTracker.Parameters()
         #expect(parameters.weightLow == 0.30 && parameters.weightHigh == 0.60)
         #expect(parameters.weightRiseBeats == 1.5 && parameters.weightFallBeats == 6)
+        #expect(parameters.weightHits == 3)
         let step = 0.01
         var weight: Float = 0
         var trace: [Float] = []
@@ -657,7 +658,7 @@ struct BeatTrackerTests {
     /// Без захвата сетка, которая попадает только через долю (уверенность ходит около 0.43-0.57, два
     /// попадания подряд не бывает), не набирает веса: свечение остается за бочками. С `weightHits` 0
     /// та же сетка светилась бы почти в полную силу.
-    @Test(arguments: [(2, false), (0, true)])
+    @Test(arguments: [(3, false), (2, false), (0, true)])
     func weightNeedsHitsInARowWhileUnlocked(weightHits: Int, rises: Bool) throws {
         var parameters = BeatTracker.Parameters()
         parameters.weightHits = weightHits
@@ -690,6 +691,50 @@ struct BeatTrackerTests {
         #expect(peakConfidence > parameters.weightLow, "confidence \(peakConfidence)")
         if rises {
             #expect(peak > 0.4, "weight \(peak)")
+        } else {
+            #expect(peak == 0, "weight \(peak)")
+        }
+    }
+
+    /// Без захвата сетка, которая попадает два раза подряд и промахивается на третьей доле (уверенность
+    /// около 0.57-0.74, захвата нет: нужно 5 подряд), при `weightHits` 3 (по умолчанию) не набирает
+    /// веса; при 2 набрала бы. Три попадания подряд выбраны по приоритету владельца: на GTZAN tune
+    /// вспышек мимо долей 2391 против 2617 при 2.
+    @Test(arguments: [(3, false), (2, true)])
+    func weightNeedsThreeHitsInARow(weightHits: Int, rises: Bool) throws {
+        var parameters = BeatTracker.Parameters()
+        parameters.weightHits = weightHits
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: parameters)
+        let hop = 256.0 / 48_000
+        var time = 0.0
+        var next = 0.25
+        var beat = 0
+        var peak: Float = 0
+        var peakConfidence = 0.0
+        var everLocked = false
+        // Функция онсетов и бочка на каждой доле 120 BPM, атака на двух долях из трех.
+        while time < 16 {
+            time += hop
+            var onset: OnsetEvent?
+            var kick: OnsetEvent?
+            if next <= time {
+                kick = OnsetEvent(time: next, strength: 1)
+                if beat % 3 != 2 { onset = kick }
+                beat += 1
+                next += 0.5
+            }
+            tracker.process(SyntheticBeats.hop(endTime: time, broadband: onset, kick: kick))
+            everLocked = everLocked || tracker.locked
+            if time > 8 {
+                peak = max(peak, tracker.displayWeight)
+                peakConfidence = max(peakConfidence, tracker.confidence)
+            }
+        }
+        try #require(tracker.period.map { abs($0 - 0.5) < 0.02 } == true)
+        #expect(!everLocked)
+        #expect(peakConfidence > parameters.weightHigh, "confidence \(peakConfidence)")
+        if rises {
+            #expect(peak > 0.5, "weight \(peak)")
         } else {
             #expect(peak == 0, "weight \(peak)")
         }
