@@ -134,6 +134,40 @@ struct BeatTrackerTests {
         #expect(Self.ambientStats(values, 20..<24).peak > 0.1, "peak over the bed after the break")
     }
 
+    /// Брейк без бочки, в котором хэты держат долю (`Drums.kicklessBreak`, бочка молчит 10-22 с; синтетика
+    /// разбора 1.2.1, исправление D): захват идет накатом, сетка не вспыхивает (ворот закрыт), а горб мягкого
+    /// пульса стоит на сетке наката с высотой от попаданий широкополосных онсетов (`coastConfidence`). С
+    /// 12 до 22 с пульс от `RhythmLog.ambientVisible` на половине шагов и больше, горб с 14 с в медиане
+    /// выше 0.5 (замер: 0.56 и 0.99). До этого горб гас вместе с воротом, и пульс шел только от атак хэтов
+    /// (0.42 и 0).
+    @Test func kicklessBreakPulsesOnTheCoastedGrid() async {
+        let scene = Drums.kicklessBreak()
+        let hops = await runOffCooperativePool { StreamAnalyzer(sampleRate: scene.sampleRate).processSignal(scene.samples) }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var values: [Float] = []
+        var heights: [Float] = []
+        var unlocked = 0
+        var flashing = 0
+        for hop in hops {
+            tracker.process(hop)
+            guard (12..<22).contains(hop.endTime) else { continue }
+            var frame = hop.frame
+            frame.kickEnergy = tracker.ambientEnergy
+            let schedule = tracker.schedule
+            values.append(BeatGlow.ambient(at: hop.endTime, info: schedule.ambient, frame: frame))
+            if hop.endTime >= 14 { heights.append(schedule.ambient?.confidence ?? 0) }
+            if !schedule.locked { unlocked += 1 }
+            if schedule.events.contains(where: { $0.predicted && $0.time > hop.endTime && $0.amplitude > OfflineBeatChain.eventRise }) {
+                flashing += 1
+            }
+        }
+        #expect(unlocked == 0 && flashing == 0, "unlocked steps \(unlocked), steps with a flashing grid \(flashing)")
+        let visible = Double(values.filter { $0 >= RhythmLog.ambientVisible }.count) / Double(values.count)
+        #expect(visible >= 0.5, "visible share in the break \(visible)")
+        let sorted = heights.sorted()
+        #expect(sorted[sorted.count / 2] > 0.5, "median hump height \(sorted[sorted.count / 2])")
+    }
+
     /// Длинная 808 легато, как в журнале 1 владельца (1.2.1): полоса бочки звучит ровно, и энергия от
     /// отношения уровней пульса почти не давала (на журнале 2.5 % кадров). Энергия от атак (онсеты длинной
     /// бочки и широкополосные) дает пульс на нотах: от `RhythmLog.ambientVisible` на четверти шагов и

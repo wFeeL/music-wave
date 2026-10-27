@@ -50,8 +50,9 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    спадает с `ambientRelease`, энергия догоняет ее с `ambientAttack`. Она относится к окну шага и идет
 ///    к рендеру только в кадре (`WaveFrame.kickEnergy`) по слышимой оси, в расписании энергия 0. Горб
 ///    пульса стоит на сетке ФАПЧ с высотой `уверенность × g_E`, пока длинное среднее уровня полосы бочки
-///    (`ambientAverage`) не ниже порога шума волн `LevelProcessor.noiseFloorDB`. На события,
-///    уверенность и вес пульс не влияет.
+///    (`ambientAverage`) не ниже порога шума волн `LevelProcessor.noiseFloorDB`; на накате (брейк без
+///    бочки) с высотой `уверенность × coastConfidence`, по попаданиям широкополосных онсетов в доли
+///    наката. На события, уверенность и вес пульс не влияет.
 ///
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей; на быстрой сетке доли другой четности, чем `shownParity`,
@@ -533,6 +534,9 @@ public struct BeatTracker: Sendable {
     private var processedSinceReset = false
     /// Последние доли прошли накатом (`isCoasting`): следующая закрытая доля решает судьбу захвата.
     private var coasted = false
+    /// Доли наката с широкополосным онсетом: среднее с шагом `confidenceGain` по долям, закрытым на
+    /// накате (промахи тоже идут), 0 вне наката. Высота горба пульса в брейке без бочки (`ambient`).
+    private(set) var coastConfidence = 0.0
     /// Теневая фаза: следующая доля другой фазы того же периода, которую гребенка предложила вместо
     /// мгновенного скачка. Считает попадания по тем же широкополосным онсетам; `nil`, пока гонки нет.
     private(set) var shadowNext: Double?
@@ -638,10 +642,21 @@ public struct BeatTracker: Sendable {
     /// Вход мягкого пульса: сетка ФАПЧ (без темпа период 0) и высота горба `уверенность × g_E` (0 в
     /// тишине). Энергия 0: она относится к звуку, который слышен только через задержку вывода, и идет
     /// к рендеру в кадре (`WaveFrame.kickEnergy`), иначе пульс опережал бы бочку.
+    ///
+    /// На накате (`isCoasting`, брейк без бочки при захвате) ворот закрыт, и горб высотой
+    /// `уверенность × g_E` гас, хотя хэты или малый держали долю (разбор журналов 1.2.1, исправление D).
+    /// Там высота `уверенность × coastConfidence`: доля наката с широкополосным онсетом поднимает горб, доля
+    /// без него опускает, так что в брейке с одним пэдом горба нет. Слышимость полосы бочки на накате не
+    /// нужна (онсеты есть только от -60 dBFS). Только пульс: сетка наката не вспыхивает. Синтетика
+    /// разбора (240 с, 120 BPM, брейк без бочки 120-135 с, хэты восьмыми): пульс от 0.05 в брейке на
+    /// 57 % кадров при задержке вывода 134 мс (61 % при 20 мс), только от атак 48 % (45 %), с энергией от
+    /// отношения уровней 0.2 %; вспышки и `wave-eval` те же.
     private var ambient: AmbientInfo {
-        guard let nextBeat, let period, ambientAudible else {
-            return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0)
+        guard let nextBeat, let period else { return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0) }
+        if isCoasting {
+            return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence * coastConfidence), energy: 0)
         }
+        guard ambientAudible else { return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0) }
         return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence) * energyGate, energy: 0)
     }
 
@@ -771,6 +786,7 @@ public struct BeatTracker: Sendable {
         halfConfidence = 0
         combRatio = nil
         coasted = false
+        coastConfidence = 0
         shownParity = nil
         dropShadow()
         strengthEMA = 0
@@ -1268,6 +1284,7 @@ public struct BeatTracker: Sendable {
     private mutating func closeWindows() {
         while let nextBeat, let period, now > nextBeat + parameters.matchWindow * period {
             let coasting = isCoasting
+            coastConfidence = coasting ? coastConfidence + parameters.confidenceGain * ((nextMatched ? 1 : 0) - coastConfidence) : 0
             if coasting, !nextMatched {
                 // Брейк без бочки при захвате: доля без онсета не довод против сетки, уверенность,
                 // счет и захват стоят, сетка идет дальше по последнему периоду.
