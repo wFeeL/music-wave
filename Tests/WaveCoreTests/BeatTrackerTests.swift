@@ -1335,7 +1335,7 @@ struct BeatTrackerTests {
     @Test func weightRisesInAboutOneAndHalfBeats() {
         let parameters = BeatTracker.Parameters()
         #expect(parameters.weightLow == 0.30 && parameters.weightHigh == 0.60)
-        #expect(parameters.weightRiseBeats == 1.5 && parameters.weightFallBeats == 12)
+        #expect(parameters.weightRiseBeats == 1.5 && parameters.weightFallBeats == 9)
         #expect(parameters.weightHits == 3)
         let step = 0.01
         var weight: Float = 0
@@ -1353,22 +1353,23 @@ struct BeatTrackerTests {
         #expect(abs(BeatTracker.nextWeight(1, confidence: 0.45, beats: 10, parameters: parameters) - 0.5) < 1e-5)
     }
 
-    /// Уверенность 0.8 -> 0.1: вес спадает примерно за 12 долей (`weightFallBeats`, разбор 1.2.1, исправление
-    /// C): через 2 доли выше 0.8, через 6 половина, через 8 еще выше 0.3, через 14 ниже 0.15.
-    @Test func weightFallsOverAboutTwelveBeats() {
+    /// Уверенность 0.8 -> 0.1: вес спадает примерно за 9 долей (`weightFallBeats`, разбор 1.2.1, исправление
+    /// C, решение по повторам записей владельца): через 2 доли выше 0.75, через 4.5 половина, через 6 еще
+    /// выше 0.3, через 10 ниже 0.15.
+    @Test func weightFallsOverAboutNineBeats() {
         let parameters = BeatTracker.Parameters()
         let step = 0.01
         var weight = BeatTracker.nextWeight(0, confidence: 0.8, beats: 10, parameters: parameters)
         #expect(weight == 1)
         var trace: [Float] = []
-        for _ in 0..<1400 {
+        for _ in 0..<1000 {
             weight = BeatTracker.nextWeight(weight, confidence: 0.1, beats: step, parameters: parameters)
             trace.append(weight)
         }
-        #expect(trace[199] > 0.8, "after 2 beats \(trace[199])")
-        #expect(abs(trace[599] - 0.5) < 0.01, "after 6 beats \(trace[599])")
-        #expect(trace[799] > 0.3, "after 8 beats \(trace[799])")
-        #expect(trace[1399] < 0.15, "after 14 beats \(trace[1399])")
+        #expect(trace[199] > 0.75, "after 2 beats \(trace[199])")
+        #expect(abs(trace[449] - 0.5) < 0.01, "after 4.5 beats \(trace[449])")
+        #expect(trace[599] > 0.3, "after 6 beats \(trace[599])")
+        #expect(trace[999] < 0.15, "after 10 beats \(trace[999])")
     }
 
     /// Захват, потом доли без атак при открытом вороте: уверенность падает за доли, вес идет за ней
