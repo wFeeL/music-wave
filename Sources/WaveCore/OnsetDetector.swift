@@ -97,6 +97,19 @@ public struct SuperFlux: Sendable {
 /// levelDB(n) - levelDB(n - riseLag) >= minRiseDB              // настоящий подъем, не колебание шума
 /// n - lastOnset >= combine
 /// ```
+/// Онсет длинной бочки (`sustainedContrast > 0`, `lastOnsetSustained`), когда обычного онсета на
+/// шаге нет: первые три условия и ворот уровня те же, а порог и подъем другие:
+/// ```
+/// odf(n) >  max(sustainedFloor, sustainedContrast * T, relativeFloor * P(n))
+/// levelDB(n) - min(levelDB[n-preAvg ... n-1]) >= sustainedRiseDB   // выход из провала между нотами
+/// min(levelDB[n-preAvg ... n-1]) > minLevelDB                       // полоса и до этого звучала
+/// n - lastAnyOnset >= combine
+/// ```
+/// Такой онсет выходит из `process` через `sustainedWait` (`lastOnsetDelay` шагов спустя), если за это
+/// время не сработал обычный онсет: на атаке настоящей бочки уровень растет несколько шагов, и
+/// условия длинной бочки иногда выполнялись на шаг раньше обычных, давая два онсета на один удар.
+/// Обычные онсеты от онсетов длинной бочки не зависят: `combine` для них считается от прошлого
+/// обычного онсета, и их поток тот же, что без онсетов длинной бочки.
 /// Подъем уровня считается от уровня окна `riseLag` (около 16 мс, почти длина окна) назад, а не от
 /// минимума за 150 мс: в полосе бочки всего три бина, и уровень шума за 150 мс проваливается на
 /// 10-18 дБ ниже среднего, так что выход из провала выглядел бы как подъем бочки.
@@ -132,6 +145,21 @@ public struct OnlinePeakPicker: Sendable {
         public var lowFloor: Float
         /// Шаг средних T и A на один локальный максимум.
         public var typicalGain: Float
+        /// Онсет длинной бочки: 808 легато поверх уже громкой полосы бочки не дает подъема на
+        /// `minRiseDB` за `riseLag` (журнал 1 владельца 1.2.1: 1 онсет на 55 нот), но пик функции на
+        /// смене ноты стоит над типичным пиком T (тот же, что у `peakContrast`) намного выше пиков
+        /// шума, а уровень выходит из провала между нотами. Онсет без подъема засчитывается, когда
+        /// odf выше `max(sustainedFloor, sustainedContrast * T)`, а уровень выше минимума за `preAvg`
+        /// на `sustainedRiseDB` и этот минимум выше `minLevelDB`. Пока `peakContrast` 0, T в начале и
+        /// после `reset()` равен `floor / sustainedContrast`, то есть порог начинается с `floor`.
+        /// 0 выключает.
+        public var sustainedContrast: Float
+        /// Нижняя граница odf онсета длинной бочки.
+        public var sustainedFloor: Float
+        /// Подъем уровня над минимумом за окно `preAvg` для онсета длинной бочки, дБ.
+        public var sustainedRiseDB: Float
+        /// Сколько ждет онсет длинной бочки, не сработает ли обычный, секунды (не меньше шага).
+        public var sustainedWait: Double
         /// Уровень акцента A: скользящее среднее логарифмов локальных максимумов выше
         /// `peakContrast * T`, шаг `typicalGain`; после `init` и `reset()` A = `floor / accentFloor`.
         /// Опущенный порог не ниже `accentFloor * A`: после громких долей он опускается медленно, а
@@ -157,6 +185,10 @@ public struct OnlinePeakPicker: Sendable {
             lowFloor: Float = 0,
             typicalGain: Float = 0.05,
             accentFloor: Float = 0,
+            sustainedContrast: Float = 0,
+            sustainedFloor: Float = 0,
+            sustainedRiseDB: Float = 0,
+            sustainedWait: Double = 0.010,
             minLevelDB: Float = -60,
             minRiseDB: Float = 9,
             riseLag: Double = 0.016,
@@ -174,6 +206,10 @@ public struct OnlinePeakPicker: Sendable {
             self.lowFloor = lowFloor
             self.typicalGain = typicalGain
             self.accentFloor = accentFloor
+            self.sustainedContrast = sustainedContrast
+            self.sustainedFloor = sustainedFloor
+            self.sustainedRiseDB = sustainedRiseDB
+            self.sustainedWait = sustainedWait
             self.minLevelDB = minLevelDB
             self.minRiseDB = minRiseDB
             self.riseLag = riseLag
@@ -190,6 +226,7 @@ public struct OnlinePeakPicker: Sendable {
     private let preAvgHops: Int
     private let riseLagHops: Int
     private let combineHops: Int
+    private let sustainedWaitHops: Int
     private let followerDecay: Float
     private let longDecay: Float
 
@@ -199,12 +236,22 @@ public struct OnlinePeakPicker: Sendable {
     private var ringIndex = 0
     private var follower: Float = 0
     private var longFollower: Float = 0
+    /// Шагов с прошлого обычного онсета и с прошлого онсета любого вида.
     private var hopsSinceOnset = Int.max
+    private var hopsSinceAnyOnset = Int.max
     /// Логарифм и значение типичного пика T и уровня акцента A (`Parameters.peakContrast`).
     private var logTypical: Float = 0
     private var typical: Float = 0
     private var logAccent: Float = 0
     private var accent: Float = 0
+    /// Последний онсет из `process` это онсет длинной бочки (`Parameters.sustainedContrast`).
+    public private(set) var lastOnsetSustained = false
+    /// На сколько шагов раньше вызова `process`, вернувшего онсет, он случился: 0 у обычного, у онсета
+    /// длинной бочки шагов ожидания `sustainedWait`.
+    public private(set) var lastOnsetDelay = 0
+    /// Онсет длинной бочки, который ждет обычного: сила и шагов с него.
+    private var pendingStrength: Float = 0
+    private var pendingAge: Int?
 
     public init(hopDuration: Double, parameters: Parameters = .init()) {
         precondition(hopDuration > 0, "hopDuration must be positive")
@@ -217,6 +264,7 @@ public struct OnlinePeakPicker: Sendable {
         preAvgHops = hops(parameters.preAvg)
         riseLagHops = hops(parameters.riseLag)
         combineHops = hops(parameters.combine)
+        sustainedWaitHops = hops(parameters.sustainedWait)
         followerDecay = Float(exp(-hopDuration / parameters.followerRelease))
         longDecay = Float(exp(-hopDuration / parameters.longRelease))
         let capacity = max(2 * preMaxHops + 1, preAvgHops, riseLagHops)
@@ -232,10 +280,16 @@ public struct OnlinePeakPicker: Sendable {
         return min(p.floor, max(p.lowFloor, p.peakContrast * typical, p.accentFloor * accent))
     }
 
-    /// T и A с начала такие, что порог равен `floor`.
+    /// T нужен опущенному порогу или онсетам длинной бочки.
+    private var tracksTypical: Bool {
+        parameters.peakContrast > 0 || parameters.sustainedContrast > 0
+    }
+
+    /// T и A с начала такие, что опущенный порог (или порог длинной бочки) равен `floor`.
     private mutating func resetTypical() {
         let p = parameters
-        typical = p.peakContrast > 0 ? p.floor / p.peakContrast : 0
+        let contrast = p.peakContrast > 0 ? p.peakContrast : p.sustainedContrast
+        typical = contrast > 0 ? p.floor / contrast : 0
         logTypical = typical > 0 ? log(typical) : 0
         accent = p.accentFloor > 0 ? p.floor / p.accentFloor : 0
         logAccent = accent > 0 ? log(accent) : 0
@@ -249,13 +303,16 @@ public struct OnlinePeakPicker: Sendable {
         follower = max(odf, follower * followerDecay)
         longFollower = max(odf, longFollower * longDecay)
         if hopsSinceOnset < Int.max { hopsSinceOnset += 1 }
+        if hopsSinceAnyOnset < Int.max { hopsSinceAnyOnset += 1 }
 
         let capacity = odfRing.count
         var recentMax: Float = 0
         var olderMax: Float = 0
         var sum: Float = 0
+        var minLevel = level
         for age in 1...capacity {
             let index = (ringIndex - age + capacity) % capacity
+            if age <= preAvgHops { minLevel = min(minLevel, levelRing[index]) }
             if age < preMaxHops {
                 recentMax = max(recentMax, odfRing[index])
             } else if age > preMaxHops, age <= 2 * preMaxHops {
@@ -272,7 +329,7 @@ public struct OnlinePeakPicker: Sendable {
         // между треками) иначе опускал бы порог до прихода слышимого звука.
         let candidateIndex = (ringIndex - preMaxHops + capacity) % capacity
         let candidate = odfRing[candidateIndex]
-        if p.peakContrast > 0, candidate > 0, levelRing[candidateIndex] > p.minLevelDB,
+        if tracksTypical, candidate > 0, levelRing[candidateIndex] > p.minLevelDB,
            candidate > recentMax, candidate > odf, candidate >= olderMax {
             if p.accentFloor > 0, candidate > p.peakContrast * typical {
                 logAccent += p.typicalGain * (log(candidate) - logAccent)
@@ -282,21 +339,49 @@ public struct OnlinePeakPicker: Sendable {
             typical = exp(logTypical)
         }
         recentMax = max(recentMax, candidate)
-        let fires = odf >= recentMax
+        let peak = odf >= recentMax
             && odf > mean + p.delta * follower
             && odf > p.longFactor * longFollower
-            && odf > max(effectiveFloor, p.relativeFloor * follower)
             && level > p.minLevelDB
+        let fires = peak
+            && odf > max(effectiveFloor, p.relativeFloor * follower)
             && level - earlierLevel >= p.minRiseDB
             && hopsSinceOnset >= combineHops
+        let sustained = !fires && p.sustainedContrast > 0 && peak
+            && odf > max(p.sustainedFloor, p.sustainedContrast * typical, p.relativeFloor * follower)
+            && level - minLevel >= p.sustainedRiseDB
+            && minLevel > p.minLevelDB
+            && hopsSinceAnyOnset >= combineHops
 
         odfRing[ringIndex] = odf
         levelRing[ringIndex] = level
         ringIndex = (ringIndex + 1) % capacity
 
-        guard fires else { return nil }
-        hopsSinceOnset = 0
-        return follower > 0 ? min(max(odf / follower, 0), 1) : 1
+        let strength = follower > 0 ? min(max(odf / follower, 0), 1) : 1
+        if fires {
+            pendingAge = nil
+            hopsSinceOnset = 0
+            hopsSinceAnyOnset = 0
+            lastOnsetSustained = false
+            lastOnsetDelay = 0
+            return strength
+        }
+        if let age = pendingAge {
+            guard age + 1 >= sustainedWaitHops else {
+                pendingAge = age + 1
+                return nil
+            }
+            pendingAge = nil
+            lastOnsetSustained = true
+            lastOnsetDelay = age + 1
+            return pendingStrength
+        }
+        if sustained {
+            pendingAge = 0
+            pendingStrength = strength
+            hopsSinceAnyOnset = 0
+        }
+        return nil
     }
 
     public mutating func reset() {
@@ -308,6 +393,10 @@ public struct OnlinePeakPicker: Sendable {
         follower = 0
         longFollower = 0
         hopsSinceOnset = Int.max
+        hopsSinceAnyOnset = Int.max
+        lastOnsetSustained = false
+        lastOnsetDelay = 0
+        pendingAge = nil
         resetTypical()
     }
 }

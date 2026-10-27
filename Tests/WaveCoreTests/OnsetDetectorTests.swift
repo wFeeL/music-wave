@@ -290,6 +290,35 @@ struct OnsetDetectorTests {
         #expect(onsets.isEmpty, "broadband onsets at \(onsets)")
     }
 
+    /// Длинная 808 легато (журнал 1 владельца): полоса бочки уже громкая, подъема на 7.5 дБ за 16 мс
+    /// нет, и прежний выбор пиков видел 1 бочку из 55. Пик функции бочки на смене ноты стоит над
+    /// типичным пиком полосы во много раз выше, чем у шума, а уровень поднимается из провала между
+    /// нотами: после разгона типичного пика (2 с) онсет на каждой ноте, все с признаком `sustained`.
+    @Test func sustained808GivesKickOnsets() async {
+        let (score, kicks) = await runOffCooperativePool { () -> (Score, [OnsetEvent]) in
+            let scene = Drums.sustained808()
+            let kicks = Self.analyze(scene).kicks.map(\.event).filter { $0.time >= 2 }
+            let notes = scene.kicks.filter { $0 >= 2 }
+            return (Self.score(kicks.map(\.time), reference: notes, until: 20), kicks)
+        }
+        #expect(score.recall >= 0.95, "recall \(score.recall) of \(score.references)")
+        #expect(score.falsePositives <= 1, "false onsets \(score.falsePositives)")
+        #expect(kicks.allSatisfy { $0.sustained }, "classic onsets \(kicks.filter { !$0.sustained }.map(\.time))")
+    }
+
+    /// Онсеты длинной бочки не открываются шумом ни на каком уровне: в трех бинах бочки розовый шум
+    /// дает пики не выше 3.7 типичного пика (`sustainedContrast` 6), сколько бы ни прыгал уровень.
+    @Test(arguments: [Float(-10), -20, -35, -50])
+    func pinkNoiseGivesNoSustainedKicks(levelDB: Float) async {
+        let onsets = await runOffCooperativePool {
+            (UInt64(1)...3).flatMap { seed in
+                Self.analyze(Drums.pinkNoise(levelDB: levelDB, count: Int(Self.rate * 10), seed: seed)).kicks
+                    .map(\.event).filter(\.sustained).map(\.time)
+            }
+        }
+        #expect(onsets.isEmpty, "sustained kick onsets at \(onsets)")
+    }
+
     /// Порог, опущенный по типичному пику, не открывает шум ни на каком уровне: у розового шума пики
     /// не выше 2.5 типичного пика (`peakContrast` 3.2), а его уровень от громкости почти не зависит.
     @Test(arguments: [Float(-10), -35, -50])
@@ -455,6 +484,57 @@ struct OnlinePeakPickerTests {
             fired = picker.process(n == 80 ? 9 : 0, levelDB: -20) != nil || fired
         }
         #expect(!fired)
+    }
+
+    /// Функция бочки на длинной 808: бугры 0.05 через каждые 11 шагов, на нотах (каждые 94 шага) пик
+    /// 0.8 при уровне -10 dBFS, за 5-8 шагов до пика провал до -25 dBFS, за 1-3 шага -12. Подъем за
+    /// 16 мс 2 дБ, пик ниже порога 2: обычный онсет не проходит. Пик стоит над типичным пиком (около
+    /// 0.1) больше чем в 6 раз, а уровень над минимумом за 150 мс на 15 дБ: после разгона онсет на
+    /// каждой ноте с `lastOnsetSustained` (выходит через `lastOnsetDelay` шагов), на буграх нет.
+    /// Обычный удар после этого остается обычным и без задержки.
+    @Test func sustainedPeaksOverAQuietTypicalPeakFire() {
+        var picker = OnlinePeakPicker(hopDuration: Self.hop, parameters: StreamAnalyzer.kickPickerParameters)
+        let noteHops = 94
+        var sustained: [Int] = []
+        var classic: [Int] = []
+        for n in 0..<3_000 {
+            let phase = n % noteHops
+            let odf: Float = phase == 0 ? 0.8 : (phase % 11 == 0 && noteHops - phase > 8 ? 0.05 : 0)
+            let level: Float = switch noteHops - phase {
+            case 5...8: -25
+            case 1...3: -12
+            default: -10
+            }
+            if picker.process(odf, levelDB: level) != nil {
+                let hop = n - picker.lastOnsetDelay
+                if picker.lastOnsetSustained { sustained.append(hop) } else { classic.append(hop) }
+            }
+        }
+        let late = sustained.filter { $0 >= 1_500 }
+        #expect(sustained.allSatisfy { $0 % noteHops == 0 }, "onsets off the notes \(sustained.filter { $0 % noteHops != 0 })")
+        #expect(late.count == (1_500..<3_000).count(where: { $0 % noteHops == 0 }), "late onsets \(late.count)")
+        #expect(classic.isEmpty, "classic onsets \(classic)")
+        for n in 0..<100 {
+            if picker.process(n == 50 ? 3 : 0, levelDB: n >= 50 ? -2 : -30) != nil {
+                #expect(n == 50 && !picker.lastOnsetSustained && picker.lastOnsetDelay == 0)
+            }
+        }
+    }
+
+    /// Пики 3.5 над буграми 1 (как у шума в трех бинах бочки, отрыв около 3) с тем же провалом уровня
+    /// перед пиком: когда типичный пик разогнался (после 2 с), ни обычных онсетов (подъема за 16 мс
+    /// нет), ни онсетов длинной бочки. В первую секунду порог длинной бочки начинается с порога 2
+    /// обычного онсета, и пики 3.5 там еще проходят.
+    @Test func noiseLikeKickPeaksStayQuiet() {
+        var picker = OnlinePeakPicker(hopDuration: Self.hop, parameters: StreamAnalyzer.kickPickerParameters)
+        var fired: [Int] = []
+        for n in 0..<3_000 {
+            let phase = n % 55
+            let odf: Float = phase == 0 ? 3.5 : (phase % 11 == 0 ? 1 : 0)
+            let level: Float = (55 - phase >= 5 && 55 - phase <= 8) ? -25 : -10
+            if picker.process(odf, levelDB: level) != nil, n >= 375 { fired.append(n) }
+        }
+        #expect(fired.isEmpty, "onsets \(fired)")
     }
 
     @Test func needsARealLevelRise() {

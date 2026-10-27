@@ -1721,6 +1721,31 @@ struct BeatTrackerTests {
         #expect(abs((glow?.amplitude ?? 0) - amplitude) < 1e-4, "ratio \(ratio): \(String(describing: glow))")
     }
 
+    /// Онсет длинной бочки (`OnsetEvent.sustained`, 808 поверх громкой полосы) не светится: на
+    /// синкопе 808 и на нотах баса в GTZAN такие онсеты чаще мимо доли. Тот же онсет без признака с
+    /// подтверждением 11 светится в полную силу.
+    @Test(arguments: [false, true])
+    func sustainedKickOnsetsNeverFlash(sustained: Bool) {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        let hop = 256.0 / 48_000
+        var time = 0.0
+        func step(odf: Float, kick: OnsetEvent?) {
+            time += hop
+            var result = SyntheticBeats.hop(endTime: time, broadband: nil, kick: kick)
+            result.broadbandODF = odf
+            tracker.process(result)
+        }
+        for _ in 0..<Int(2 / hop) { step(odf: 1.5, kick: nil) }
+        let onset = OnsetEvent(time: time + hop, strength: 1, sustained: sustained)
+        step(odf: 22, kick: onset)
+        let glow = tracker.schedule.events.first { !$0.predicted && $0.time == onset.time }
+        if sustained {
+            #expect(glow == nil, "\(String(describing: glow))")
+        } else {
+            #expect(abs((glow?.amplitude ?? 0) - 1) < 1e-4, "\(String(describing: glow))")
+        }
+    }
+
     /// Мягкий пол подтверждения бочки для показа (`kickConfirmFloor`, по умолчанию выключен, см.
     /// отчет B4): онсет бочки с отношением 6 (ниже строгого порога 7) светится не тусклее 0.3 силы,
     /// только когда темп известен, сетка уже набрала уверенность от `weightLow` и ворот открыт. Без

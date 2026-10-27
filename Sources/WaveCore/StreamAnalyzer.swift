@@ -27,10 +27,14 @@ public struct OnsetEvent: Sendable, Equatable {
     public var time: Double
     /// `clamp(odf / P, 0, 1)`, P это следящий пик функции онсетов (спад 3 с).
     public var strength: Float
+    /// Онсет длинной бочки (808 поверх уже громкой полосы бочки, `OnlinePeakPicker.lastOnsetSustained`):
+    /// он есть в журнале ритма и в огибающей удара, но не светится (`BeatTracker`).
+    public var sustained: Bool
 
-    public init(time: Double, strength: Float) {
+    public init(time: Double, strength: Float, sustained: Bool = false) {
         self.time = time
         self.strength = strength
+        self.sustained = sustained
     }
 }
 
@@ -99,7 +103,19 @@ public final class StreamAnalyzer {
     /// на фронте меньше), поэтому абсолютная часть ниже, а относительная растет с ударами. Совсем
     /// без ложных онсетов три бина бочки в шуме не обойтись: у розового шума -20 dBFS около 0.17 в
     /// секунду; редкие ложные удары гасят уверенность и захват ритма в трекере.
-    static let kickPickerParameters = OnlinePeakPicker.Parameters(floor: 2.0, relativeFloor: 0.25, minRiseDB: 7.5)
+    ///
+    /// Онсет длинной бочки (`sustained`): 808 легато поверх уже громкой полосы бочки (журнал 1 владельца
+    /// 1.2.1: уровень полосы -9.5...-11.6 дБ все 30 с, на смене ноты провал, подъема на 7.5 дБ нет, 1
+    /// онсет на 55 нот). Пик функции бочки выше `max(0.3, 6 T, 0.25 P)` и уровень на 3 дБ выше минимума
+    /// за 150 мс, который сам выше ворота -60 dBFS. На журнале 1 онсетов бочки 1 -> 41, из них 35 на
+    /// нотах 808 (нот около 55). У розового шума от -10 до -50 dBFS пик не выше 3.7 T, онсетов длинной
+    /// бочки 0 за 720 с. Такие онсеты не светятся (`BeatTracker`): на GTZAN tune (steady) их 781, на
+    /// доле только 47 %. Если бы они светились, без захвата прибавилось бы 20 вспышек на доле и 15
+    /// мимо (точность всех вспышек 0.8677 -> 0.8671, без захвата 0.7460 -> 0.7450). Поэтому они есть
+    /// только в журнале ритма и в огибающей удара, а вспышки и метрики `wave-eval` те же.
+    static let kickPickerParameters = OnlinePeakPicker.Parameters(
+        floor: 2.0, relativeFloor: 0.25, sustainedContrast: 6, sustainedFloor: 0.3, sustainedRiseDB: 3, minRiseDB: 7.5
+    )
     /// Выбор пиков широкополосной функции. Проверки подъема уровня нет: уровень здесь это
     /// максимум полос, его почти всегда держит бочка или бас, и хэт между ними его не поднимает
     /// (с проверкой 9 дБ хип-хоп дает F 0.6). Шум отсекает порог odf 10: у розового шума пики до 8.7
@@ -269,8 +285,12 @@ public final class StreamAnalyzer {
         let broadbandODF = bandAmplitudes.withUnsafeBufferPointer { broadbandFlux.process($0) }
 
         let onsetTime = Double(endSample) / rate - Self.onsetLag
-        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB)
-            .map { OnsetEvent(time: onsetTime, strength: $0) }
+        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB).map { strength in
+            OnsetEvent(
+                time: onsetTime - Double(kickPicker.lastOnsetDelay) * config.hopDuration,
+                strength: strength, sustained: kickPicker.lastOnsetSustained
+            )
+        }
         let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB)
             .map { OnsetEvent(time: onsetTime, strength: $0) }
 

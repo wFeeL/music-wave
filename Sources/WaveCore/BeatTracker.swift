@@ -59,7 +59,9 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// на GTZAN tune против правила «вес выше 0.5» точность всех вспышек 0.8549 -> 0.8572, вспышек мимо
 /// долей 2391 -> 2356), остальные светятся с яркостью
 /// `clamp(strength, onsetFloor, 1) × (offGridScale + (1 − offGridScale) × (1 − вес)) × подтверждение`
-/// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Прошедшие события остаются в
+/// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Онсет длинной бочки
+/// (`OnsetEvent.sustained`, 808 поверх громкой полосы бочки) не светится совсем: на синкопе 808 и на
+/// нотах баса такие онсеты чаще мимо доли (`StreamAnalyzer.kickPickerParameters`). Прошедшие события остаются в
 /// расписании (до 8), чтобы рендер довел их спад. Оба счетчика id только растут, в том числе через
 /// `reset()` и смену темпа: `BeatGlow` помнит id 2 с.
 ///
@@ -628,7 +630,7 @@ public struct BeatTracker: Sendable {
         updateGate(hop.kickLevelDB)
         updateAmbient(hop.kickLevelDB)
         updateWeight()
-        if let onset = hop.kickOnset {
+        if let onset = hop.kickOnset, !onset.sustained {
             addKickOnset(onset)
         }
     }
