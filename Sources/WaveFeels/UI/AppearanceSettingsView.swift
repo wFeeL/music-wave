@@ -8,7 +8,8 @@ import WaveCore
 /// их в пределах и заменяет не конечные. Строки, которые выбранный стиль не рисует, скрыты
 /// (`WaveLook.usesLineCount`, `WaveLook.usesSpectrumPeaks`); сохраненные значения при этом не
 /// меняются. «След пиков» у «Спектра» стоит на месте скрытого «Количества волн», поэтому вкладка
-/// не становится выше.
+/// не становится выше. Предпросмотр вспыхивает по сетке долей демо-записи (`DemoTimeline`) при любом
+/// режиме «Свечения».
 struct AppearanceSettingsView: View {
     let model: AppModel
     /// Игрок предпросмотра; живет в `SettingsView`, а не создается на каждом пересчете вкладки.
@@ -46,6 +47,7 @@ struct AppearanceSettingsView: View {
                 waveRows
             }
             Section("Свечение") {
+                glowModeRow
                 glowRows
             }
             Section("Крылья") {
@@ -179,6 +181,23 @@ struct AppearanceSettingsView: View {
     }
 
     // MARK: - Свечение
+
+    /// «Свечение»: «По ритму», «Ритм и звук», «По звуку» (`GlowMode`) и подпись выбранного режима
+    /// в одну строку, как у «Частоты кадров».
+    private var glowModeRow: some View {
+        let settings = model.settings
+        return VStack(alignment: .leading, spacing: 4) {
+            Picker("Свечение", selection: Binding(get: { settings.glowMode }, set: { settings.glowMode = $0 })) {
+                ForEach(GlowMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(SettingsText.glowModeCaption(settings.glowMode))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 
     @ViewBuilder
     private var glowRows: some View {

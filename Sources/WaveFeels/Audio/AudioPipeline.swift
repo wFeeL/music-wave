@@ -115,6 +115,11 @@ final class AudioPipeline {
         didSet { if syncOffsets != oldValue { pushSettings() } }
     }
 
+    /// Режим «Свечения» анализа (`AnalysisEngine.setGlowMode`). Выставляет `AppModel`.
+    @ObservationIgnored var glowMode: GlowMode {
+        didSet { if glowMode != oldValue { engine.setGlowMode(glowMode) } }
+    }
+
     /// Сдвиг синхронизации текущего устройства вывода, миллисекунды.
     var syncOffsetMs: Int { syncOffsets.offset(forDeviceUID: output.deviceUID) }
 
@@ -173,11 +178,12 @@ final class AudioPipeline {
     @ObservationIgnored private var suspendedOutputting = false
 
     /// `timing` и `makeCapture` подставляют тесты: короткие сроки и свой захват вместо
-    /// `ProcessTapCapture`.
+    /// `ProcessTapCapture`. `glowMode`: режим «Свечения», с которым создается анализ.
     init(
         store: FrameStore,
         processes: AudioProcessList,
         output: OutputDeviceMonitor,
+        glowMode: GlowMode = .rhythm,
         timing: CaptureRecovery.Timing = .standard,
         makeCapture: ((SampleRingBuffer) -> any TapCapturing)? = nil
     ) {
@@ -190,7 +196,8 @@ final class AudioPipeline {
         } else {
             capture = ProcessTapCapture(ring: ring)
         }
-        self.engine = AnalysisEngine(ring: ring, store: store)
+        self.engine = AnalysisEngine(ring: ring, store: store, glowMode: glowMode)
+        self.glowMode = glowMode
         recoveryTiming = timing
         recovery = CaptureRecovery(timing: timing)
 

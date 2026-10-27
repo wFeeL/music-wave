@@ -398,12 +398,12 @@ struct AppModelRenderTests {
         let empty = try #require(model.diagnosticsSections().first { $0.title == "Ритм" })
         #expect(empty.rows.map(\.label) == [
             "Темп", "Уверенность", "Захват ритма", "Задержка вывода", "Задержка показа",
-            "Запаздывание онсета", "Сдвиг синхронизации",
+            "Запаздывание онсета", "Сдвиг синхронизации", "Свечение",
         ])
         // Задержка вывода зависит от устройства машины (на CI 13 мс): ожидание считается так же.
         let latency = LatencyCalculator.outputLatency(model.output.latency, mode: model.settings.latencyMode)
         let output = "\(AppModel.milliseconds(latency)) мс"
-        #expect(empty.rows.map(\.value) == ["нет", "0.00", "нет", output, "33 мс", "7 мс", "0 мс"])
+        #expect(empty.rows.map(\.value) == ["нет", "0.00", "нет", output, "33 мс", "7 мс", "0 мс", "Ритм и звук"])
 
         model.store.publishSchedule(BeatSchedule(events: [], bpm: 123.6, period: 60 / 123.6, confidence: 0.817, locked: true))
         model.settings.syncOffsets.set(15, deviceUID: model.output.deviceUID, name: model.output.deviceName)
@@ -412,7 +412,22 @@ struct AppModelRenderTests {
         #expect(section.rows[1].value == "0.82")
         #expect(section.rows[2].value == "да")
         #expect(section.rows[6].value == "+15 мс")
+        model.settings.glowMode = .sound
+        let sound = try #require(model.diagnosticsSections().first { $0.title == "Ритм" })
+        #expect(sound.rows[7].value == "По звуку")
         #expect(AppModel.syncOffsetText(-20) == "-20 мс")
+    }
+
+    /// Анализ создается в сохраненном режиме «Свечения», без перехода из режима по умолчанию.
+    @Test func analysisStartsInTheStoredGlowMode() throws {
+        let (_, defaults, suite) = try Self.makeModel("render-glow-mode")
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("sound", forKey: "wf.glowMode")
+        let model = AppModel(defaults: defaults)
+        #expect(model.settings.glowMode == .sound)
+        #expect(model.pipeline.glowMode == .sound)
+        #expect(model.pipeline.analysisEngineForTesting.glowModeForTesting.mode == .sound)
+        #expect(model.pipeline.analysisEngineForTesting.glowModeForTesting.measuresBassLevel)
     }
 
     private static func frame(bass: Float) -> WaveFrame {

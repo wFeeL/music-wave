@@ -75,6 +75,7 @@ struct AppSettingsTests {
             #expect(settings.expandDelay == 0.15)
             #expect(settings.followDisplayOptions == true)
             #expect(settings.frameRate == 60)
+            #expect(settings.glowMode == .hybrid)
             #expect(settings.rhythmRecordingDuration == 120)
         }
     }
@@ -112,6 +113,7 @@ struct AppSettingsTests {
             written.expandDelay = 0.5
             written.followDisplayOptions = false
             written.frameRate = 30
+            written.glowMode = .sound
             written.rhythmRecordingDuration = 45
 
             let read = AppSettings(defaults: defaults)
@@ -140,6 +142,7 @@ struct AppSettingsTests {
             #expect(read.expandDelay == 0.5)
             #expect(read.followDisplayOptions == false)
             #expect(read.frameRate == 30)
+            #expect(read.glowMode == .sound)
             #expect(read.rhythmRecordingDuration == 45)
 
             read.source = .systemWide
@@ -178,6 +181,7 @@ struct AppSettingsTests {
             settings.expandDelay = 0.3
             settings.followDisplayOptions = false
             settings.frameRate = 30
+            settings.glowMode = .rhythm
             settings.rhythmRecordingDuration = 300
 
             for key in [
@@ -186,7 +190,7 @@ struct AppSettingsTests {
                 "wf.hideDelay", "wf.hideInFullscreen", "wf.showTrackBanner", "wf.paused",
                 "wf.waveStyle", "wf.colorFlow", "wf.colorByBand", "wf.spectrumPeaks", "wf.softStop", "wf.artworkGlow",
                 "wf.progressLine", "wf.autoSource", "wf.trackSwipe", "wf.expandDelay",
-                "wf.followDisplayOptions", "wf.frameRate", "wf.rhythmRecordingDuration",
+                "wf.followDisplayOptions", "wf.frameRate", "wf.glowMode", "wf.rhythmRecordingDuration",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
             }
@@ -402,6 +406,40 @@ struct AppSettingsTests {
             #expect(defaults.integer(forKey: "wf.frameRate") == 60)
             defaults.set(30.0, forKey: "wf.frameRate")
             #expect(AppSettings(defaults: defaults).frameRate == 30)
+        }
+    }
+
+    /// «Свечение» хранится словом `GlowMode.rawValue` (не JSON, как пишет `cpu-probe.sh --set`), по
+    /// умолчанию «Ритм и звук»; неизвестное слово, не строка и JSON читаются как «Ритм и звук» и ничего не
+    /// пишут. Присваивание того же режима не меняет хранилище и не будит наблюдателей.
+    @Test func glowModeIsStoredAsRawValue() throws {
+        try Self.withDefaults { defaults in
+            #expect(AppSettings(defaults: defaults).glowMode == .hybrid)
+            #expect(defaults.object(forKey: "wf.glowMode") == nil)
+            let json = try JSONEncoder().encode(GlowMode.sound)
+            let stored: [Any] = ["loud", "", "Sound", 1, json]
+            for garbage in stored {
+                defaults.set(garbage, forKey: "wf.glowMode")
+                #expect(AppSettings(defaults: defaults).glowMode == .hybrid, "\(garbage)")
+            }
+            for mode in GlowMode.allCases {
+                defaults.set(mode.rawValue, forKey: "wf.glowMode")
+                #expect(AppSettings(defaults: defaults).glowMode == mode)
+            }
+            defaults.removeObject(forKey: "wf.glowMode")
+            let settings = AppSettings(defaults: defaults)
+            let fired = ChangeFlag()
+            withObservationTracking {
+                _ = settings.glowMode
+            } onChange: {
+                fired.value = true
+            }
+            settings.glowMode = .hybrid
+            #expect(!fired.value)
+            #expect(defaults.object(forKey: "wf.glowMode") == nil)
+            settings.glowMode = .rhythm
+            #expect(fired.value)
+            #expect(defaults.string(forKey: "wf.glowMode") == "rhythm")
         }
     }
 

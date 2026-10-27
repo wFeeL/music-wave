@@ -20,8 +20,8 @@
 # В наборах default и max «вздох» и мягкий пульс включены, пауза выключена, стиль не задан
 # («Волны» по умолчанию). Содержимое набора (`defaults read`) пишется в начало отчета, а
 # действующие значения приложение пишет в свой лог строкой «настройки из набора ...»: стиль, вид,
-# переливание и цвет по частотам, крыло, которое рисуется на самом деле, энергосбережение и
-# «Уменьшение движения».
+# переливание и цвет по частотам, крыло, которое рисуется на самом деле, режим свечения,
+# энергосбережение и «Уменьшение движения».
 # Строка из прогона play попадает в шапку отчета (applied settings). Прогон без этой строки
 # считается проваленным: сборка без --settings-suite мерила бы настройки пользователя.
 #
@@ -57,6 +57,10 @@
 # в секунду, другое значение отклоняется (код 2); в шапке отчета строка «frame rate:»,
 # приложение подтверждает значение в «настройках из набора» («частота кадров 30,»), без
 # подтверждения прогон провален.
+#
+# Режим свечения: --set wf.glowMode=rhythm, hybrid или sound (по умолчанию hybrid, «Ритм и звук»),
+# другое слово отклоняется (код 2). В шапке отчета строка «glow mode:», приложение подтверждает
+# режим в «настройках из набора» («режим свечения rhythm,»), без подтверждения прогон провален.
 #
 # Частота кадров в замере. С --settings-suite приложение раз в 10 с пишет в лог строки «отрисовка,
 # свернутый: ...» и «отрисовка, раскрытый: ...» (замер раздела «Отрисовка» и кадров в секунду).
@@ -130,7 +134,10 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
                     cpu-max-colorFlow0-softPulse0.txt). wf.frameRate=30 (or 60, the default)
                     caps the island's frames per second, any other value is a usage error;
                     the report header shows it
-                    ("frame rate:") and the app confirms it ("частота кадров 30,")
+                    ("frame rate:") and the app confirms it ("частота кадров 30,").
+                    wf.glowMode=rhythm, hybrid (the default) or sound sets the glow mode,
+                    any other value is a usage error; the report header shows it
+                    ("glow mode:") and the app confirms it ("режим свечения rhythm,")
   --island MODE     play run only, the island's state machine still drives it:
                       collapsed  the pointer never expands the island
                       expanded   held open as if hovered; checked by "остров: ... -> раскрыт"
@@ -281,6 +288,8 @@ SET_SUMMARY=""
 # Частота кадров, заданная через --set wf.frameRate=30 или 60 (иначе пусто: набор не трогает ее,
 # приложение берет 60 или значение владельца при --preset user).
 FRAME_RATE=""
+# Режим свечения, заданный через --set wf.glowMode=rhythm, hybrid или sound (иначе пусто).
+GLOW_MODE=""
 SET_KEY_PATTERN='^wf[.][A-Za-z0-9_.]+$'
 i=0
 while [[ $i -lt $SET_COUNT ]]; do
@@ -311,6 +320,14 @@ while [[ $i -lt $SET_COUNT ]]; do
             usage
         fi
         FRAME_RATE=$value
+    fi
+    if [[ $key == wf.glowMode ]]; then
+        # Приложение прочитало бы другое слово как hybrid молча, и замер шел бы не в том режиме.
+        if [[ ! $value =~ ^(rhythm|hybrid|sound)$ ]]; then
+            echo "cpu-probe: --set wf.glowMode=$value: expected rhythm, hybrid or sound" >&2
+            usage
+        fi
+        GLOW_MODE=$value
     fi
     PREFIX="$PREFIX-${key#wf.}$(printf '%s' "$value" | tr -cd 'A-Za-z0-9.-')"
     SET_SUMMARY="$SET_SUMMARY, $key=$value ($(set_type "$value"))"
@@ -707,6 +724,10 @@ probe() {
         if [[ -n $FRAME_RATE && $settings_line != *"частота кадров $FRAME_RATE,"* ]]; then
             reasons="$reasons; app did not report frame rate $FRAME_RATE (wf.frameRate not applied, build before 1.3?)"
         fi
+        # --set wf.glowMode=rhythm|hybrid|sound: приложение должно было прочитать режим («режим свечения M,»).
+        if [[ -n $GLOW_MODE && $settings_line != *"режим свечения $GLOW_MODE,"* ]]; then
+            reasons="$reasons; app did not report glow mode $GLOW_MODE (wf.glowMode not applied, build without glow modes?)"
+        fi
     else
         report "effective settings: not reported"
         reasons="$reasons; app did not report settings from $SUITE (build without --settings-suite?), the run may have used personal settings"
@@ -801,6 +822,7 @@ else
     FRAME_RATE_TEXT="not forced"
 fi
 report "frame rate: $FRAME_RATE_TEXT (--set wf.frameRate; the app's value is in applied settings as \"частота кадров\")"
+report "glow mode: ${GLOW_MODE:-not forced} (--set wf.glowMode; the app's value is in applied settings as \"режим свечения\")"
 report "island: ${ISLAND:-not forced} (--island, play run only)"
 report "method: cumulative CPU time from ps over a ${DURATION} s window after ${WARMUP} s warm-up, % of one core"
 report "machine: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m), $(sysctl -n hw.ncpu 2>/dev/null || echo '?') cores, macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"

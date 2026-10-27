@@ -305,14 +305,15 @@ final class AppModel {
     @ObservationIgnored private var wakeTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main) {
-        settings = AppSettings(defaults: defaults)
+        let settings = AppSettings(defaults: defaults)
+        self.settings = settings
         let store = FrameStore()
         let processList = AudioProcessList()
         let output = OutputDeviceMonitor()
         self.store = store
         self.processList = processList
         self.output = output
-        let pipeline = AudioPipeline(store: store, processes: processList, output: output)
+        let pipeline = AudioPipeline(store: store, processes: processList, output: output, glowMode: settings.glowMode)
         self.pipeline = pipeline
         rhythmRecording = RhythmRecording(pipeline: pipeline)
         adapter = MediaRemoteAdapter(bundle: bundle, defaults: defaults)
@@ -1210,7 +1211,17 @@ final class AppModel {
         }
         pipeline.latencyMode = settings.latencyMode
         pipeline.syncOffsets = settings.syncOffsets
+        applyGlowMode()
         pipeline.paused = settings.paused
+    }
+
+    /// «Свечение» в анализ. Запись ритма идет в одном режиме: смена режима посреди нее кончает ее
+    /// (`RhythmSession.noteGlowMode`, причина `settingsChanged`).
+    private func applyGlowMode() {
+        let mode = settings.glowMode
+        guard mode != pipeline.glowMode else { return }
+        pipeline.glowMode = mode
+        rhythmRecording.noteGlowMode(mode)
     }
 
     /// После 10 с тишины IOProc останавливается, но только у приложения, о котором Now Playing
@@ -1942,10 +1953,12 @@ extension AppModel {
 
     /// «Записать …»: запись ритма длиной `settings.rhythmRecordingDuration` с версией, сборкой, устройством вывода, режимом задержки,
     /// периодом отрисовки, упреждением показа и настройками, от которых зависит видимое свечение
-    /// («Уменьшение движения» системы, яркость свечения, «вздох», мягкий пульс, энергосбережение).
+    /// («Уменьшение движения» системы, яркость свечения, «вздох», мягкий пульс, режим «Свечения»,
+    /// энергосбережение). Режим сначала уходит в анализ, чтобы запись и анализ шли в одном режиме.
     /// Задержку, сдвиг и частоту берет сама запись у анализа, «Уменьшение движения» и пульс на
     /// кадрах отмечает `islandVisuals`.
     func startRhythmRecording() {
+        applyGlowMode()
         let info = Bundle.main.infoDictionary ?? [:]
         let latencyMode: String
         switch settings.latencyMode {
@@ -1967,6 +1980,7 @@ extension AppModel {
             beatPulse: settings.beatPulse,
             flashLength: settings.flashLength,
             softPulse: settings.softPulse,
+            glowMode: settings.glowMode.rawValue,
             lowPower: lowPower
         )
         rhythmRecording.start(meta: meta, duration: settings.rhythmRecordingDuration)
@@ -2157,6 +2171,7 @@ extension AppModel {
                 label: "Сдвиг синхронизации",
                 value: Self.syncOffsetText(settings.syncOffsets.offset(forDeviceUID: output.deviceUID))
             ),
+            DiagnosticsRow(label: "Свечение", value: settings.glowMode.title),
         ])
     }
 

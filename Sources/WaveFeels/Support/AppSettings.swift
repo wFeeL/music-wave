@@ -52,6 +52,8 @@ final class AppSettings {
         static let expandDelay = "wf.expandDelay"
         static let followDisplayOptions = "wf.followDisplayOptions"
         static let frameRate = "wf.frameRate"
+        /// Режим «Свечения», строка `GlowMode.rawValue` (не JSON).
+        static let glowMode = "wf.glowMode"
         /// Длина записи ритма, секунды (`RhythmRecordingLength`).
         static let rhythmRecordingDuration = "wf.rhythmRecordingDuration"
     }
@@ -140,6 +142,7 @@ final class AppSettings {
     @ObservationIgnored private var storedExpandDelay: Double
     @ObservationIgnored private var storedFollowDisplayOptions: Bool
     @ObservationIgnored private var storedFrameRate: Int
+    @ObservationIgnored private var storedGlowMode: GlowMode
     @ObservationIgnored private var storedRhythmRecordingDuration: Int
 
     init(defaults: UserDefaults = .standard) {
@@ -231,6 +234,7 @@ final class AppSettings {
         storedFollowDisplayOptions = Self.readBool(defaults, Key.followDisplayOptions)
             ?? Default.followDisplayOptions
         storedFrameRate = RenderPacing.normalizedFrameRate(Self.readInt(defaults, Key.frameRate) ?? Default.frameRate)
+        storedGlowMode = GlowMode.setting(stored: defaults.string(forKey: Key.glowMode))
         storedRhythmRecordingDuration = RhythmRecordingLength.normalized(
             Self.readInt(defaults, Key.rhythmRecordingDuration) ?? Default.rhythmRecordingDuration
         )
@@ -542,6 +546,20 @@ final class AppSettings {
             guard value != storedFrameRate else { return }
             withMutation(keyPath: \.frameRate) { storedFrameRate = value }
             defaults.set(value, forKey: Key.frameRate)
+        }
+    }
+
+    /// «Свечение»: по ритму, ритм и звук (по умолчанию) или по звуку (`GlowMode`). Хранится словом
+    /// `rawValue` в `wf.glowMode`; неизвестное слово читается как значение по умолчанию.
+    var glowMode: GlowMode {
+        get {
+            access(keyPath: \.glowMode)
+            return storedGlowMode
+        }
+        set {
+            guard newValue != storedGlowMode else { return }
+            withMutation(keyPath: \.glowMode) { storedGlowMode = newValue }
+            defaults.set(newValue.rawValue, forKey: Key.glowMode)
         }
     }
 

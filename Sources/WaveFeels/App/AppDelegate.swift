@@ -223,7 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Действующие настройки вида из набора `--settings-suite` (после ограничения диапазонов,
     /// стиль словом `WaveLook.rawValue`, как в `cpu-probe.sh --style`) и то, что еще меняет
     /// нагрузку: крыло, которое рисуется на самом деле (по раскладке панели, не шире предела
-    /// экрана; у капсулы без выреза крыльев нет), режим энергосбережения (30 кадров в секунду), выбранную «Частоту кадров»
+    /// экрана; у капсулы без выреза крыльев нет), режим «Свечения» словом `GlowMode.rawValue` (не в «По ритму»
+    /// анализ еще считает бас и реактивный слой), режим энергосбережения (30 кадров в секунду), выбранную «Частоту кадров»
     /// и «Уменьшение движения» (без «вздоха», пульса и свечения). По этой строке cpu-probe.sh
     /// проверяет, на чем шел замер, и переносит ее в шапку отчета.
     private static func logSettings(_ settings: AppSettings, suite: String, layout: NotchLayout?) {
@@ -255,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "след пиков \(yesNo(settings.spectrumPeaks))",
             "вздох \(yesNo(settings.beatPulse))",
             "мягкий пульс \(yesNo(settings.softPulse))",
+            "режим свечения \(settings.glowMode.rawValue)",
             "пауза \(yesNo(settings.paused))",
             "частота кадров \(settings.frameRate)",
             "энергосбережение \(yesNo(ProcessInfo.processInfo.isLowPowerModeEnabled))",

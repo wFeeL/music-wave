@@ -111,6 +111,12 @@ final class RhythmRecording {
         )
     }
 
+    /// Режим «Свечения» сменился на `mode`: идущая запись другого режима кончается
+    /// (`RhythmSession.noteGlowMode`) и сохраняет то, что успела. Без записи ничего не делает.
+    func noteGlowMode(_ mode: GlowMode) {
+        session?.noteGlowMode(mode)
+    }
+
     /// Остановка модели: запись бросается без файлов.
     func cancel() {
         task?.cancel()

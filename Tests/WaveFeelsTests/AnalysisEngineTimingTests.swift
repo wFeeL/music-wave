@@ -276,6 +276,27 @@ struct AnalysisEngineTimingTests {
     }
 }
 
+extension AnalysisEngineTimingTests {
+    /// Режим «Свечения» доходит до трекера и анализатора вместе (`GlowMode.apply`): при создании и при
+    /// смене на очереди анализа. Запуск на другой частоте и обнуление кольца его не сбрасывают.
+    @Test func glowModeReachesTrackerAndAnalyzer() {
+        let ring = SampleRingBuffer(capacity: 131_072)
+        let engine = AnalysisEngine(ring: ring, store: FrameStore(), wakesOnTimer: false, glowMode: .sound)
+        #expect(engine.glowModeForTesting.mode == .sound)
+        #expect(engine.glowModeForTesting.measuresBassLevel)
+        engine.setGlowMode(.rhythm)
+        #expect(engine.glowModeForTesting.mode == .rhythm)
+        #expect(!engine.glowModeForTesting.measuresBassLevel)
+        engine.setGlowMode(.hybrid)
+        engine.start(sampleRate: 44_100)
+        engine.start(sampleRate: Self.rate)
+        #expect(engine.glowModeForTesting.mode == .hybrid)
+        #expect(engine.glowModeForTesting.measuresBassLevel)
+        engine.stop()
+        #expect(AnalysisEngine(ring: ring, store: FrameStore(), wakesOnTimer: false).glowModeForTesting.mode == .rhythm)
+    }
+}
+
 /// Кадры и их слышимые времена с очереди анализа.
 final class TimedFrameLog: Sendable {
     private let storage = Mutex<[(frame: WaveFrame, time: Double)]>([])

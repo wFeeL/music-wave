@@ -43,6 +43,9 @@ import WaveCore
 /// пробуждения. Все это на очереди анализа, IOProc не трогается. Остановка, новый запуск или
 /// обнуление кольца, простой острова и остановка потока кончают запись (причина в `RhythmLog`),
 /// пропуск шагов она замечает сама по номерам сэмплов.
+///
+/// Режим «Свечения» (`GlowMode`) ставится анализатору и трекеру вместе через `GlowMode.apply`: при
+/// создании и на очереди анализа при каждой смене (`setGlowMode`). Сбросы и смена частоты его сохраняют.
 nonisolated final class AnalysisEngine: @unchecked Sendable {
     /// Самый большой шаг времени между пробуждениями, который получают уровни.
     static let maxStep = 0.1
@@ -109,13 +112,16 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     private var idle = false
 
     /// `wakesOnTimer: false`: без таймера, пробуждения только через `processPendingForTesting`.
-    init(ring: SampleRingBuffer, store: FrameStore, wakesOnTimer: Bool = true) {
+    /// `glowMode`: режим «Свечения» с первого шага.
+    init(ring: SampleRingBuffer, store: FrameStore, wakesOnTimer: Bool = true, glowMode: GlowMode = .rhythm) {
         self.ring = ring
         self.store = store
         self.wakesOnTimer = wakesOnTimer
         let analyzer = StreamAnalyzer(sampleRate: 48_000)
+        var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
+        glowMode.apply(to: analyzer, tracker: &tracker)
         self.analyzer = analyzer
-        tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
+        self.tracker = tracker
         window = [Float](repeating: 0, count: analyzer.config.fftSize)
     }
 
@@ -210,6 +216,21 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             }
             self.applyInterval()
         }
+    }
+
+    /// Режим «Свечения»: анализатор и трекер получают его вместе (`GlowMode.apply`) на очереди анализа,
+    /// до следующего пробуждения. Тот же режим ничего не меняет (трекер сам отбрасывает повтор), другой
+    /// начинает реактивный слой заново. Можно звать с любого потока.
+    func setGlowMode(_ mode: GlowMode) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            mode.apply(to: self.analyzer, tracker: &self.tracker)
+        }
+    }
+
+    /// Режим трекера и признак уровня баса у анализатора. Для тестов.
+    var glowModeForTesting: (mode: GlowMode, measuresBassLevel: Bool) {
+        queue.sync { (mode: tracker.glowMode, measuresBassLevel: analyzer.measuresBassLevel) }
     }
 
     /// Текущий шаг таймера, с. Для тестов.
