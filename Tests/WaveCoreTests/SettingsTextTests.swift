@@ -106,6 +106,26 @@ struct SettingsTextTests {
         #expect(SettingsText.flashLengthHint(scale: .nan) == "Обычные вспышки")
     }
 
+    /// Настройка «Свечение»: сегменты по порядку режимов и подпись под ними на каждый режим.
+    @Test func glowModeTitlesAndCaptions() {
+        #expect(GlowMode.allCases.map(\.title) == ["По ритму", "Ритм и звук", "По звуку"])
+        #expect(SettingsText.glowModeCaption(.rhythm) == "Вспышки только на долях")
+        #expect(SettingsText.glowModeCaption(.hybrid) == "Доли плюс мягкие вспышки на сильных звуках")
+        #expect(SettingsText.glowModeCaption(.sound) == "Вспышки на ударах и нотах баса, как у волн")
+    }
+
+    /// Сохраненный режим (`wf.glowMode`, `rawValue`): без значения и с неизвестным словом «Ритм и звук».
+    @Test func glowModeSettingReadsRawValue() {
+        #expect(GlowMode.settingDefault == .hybrid)
+        #expect(GlowMode.setting(stored: nil) == .hybrid)
+        #expect(GlowMode.setting(stored: "") == .hybrid)
+        #expect(GlowMode.setting(stored: "loud") == .hybrid)
+        #expect(GlowMode.setting(stored: "Rhythm") == .hybrid)
+        for mode in GlowMode.allCases {
+            #expect(GlowMode.setting(stored: mode.rawValue) == mode)
+        }
+    }
+
     @Test func autoSourceCaption() {
         #expect(SettingsText.autoSource(enabled: false, current: "Safari")
             == "Волны переходят к приложению, которое начало играть")
@@ -120,7 +140,8 @@ struct SettingsTextTests {
             SettingsText.flashLengthHint(scale: 0.5), SettingsText.flashLengthHint(scale: 1),
             SettingsText.flashLengthHint(scale: 2),
             SettingsText.autoSource(enabled: false, current: "X"), SettingsText.autoSource(enabled: true, current: "X"),
-        ]
+            SettingsText.frameRateCaption,
+        ] + GlowMode.allCases.flatMap { [$0.title, SettingsText.glowModeCaption($0)] }
         for text in texts {
             #expect(!text.contains { "\u{2014}\u{0451}\u{0401}\u{00B7}\u{2022}".contains($0) }, "\(text)")
         }

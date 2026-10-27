@@ -23,3 +23,23 @@ public enum GlowMode: String, CaseIterable, Sendable, Codable {
         tracker.glowMode = self
     }
 }
+
+extension GlowMode {
+    /// Режим настройки «Свечение» по умолчанию: «Ритм и звук».
+    public static let settingDefault = GlowMode.hybrid
+
+    /// Режим из сохраненной настройки (`wf.glowMode`, `rawValue`): без значения, с пустым или неизвестным
+    /// словом (в том числе режим будущей версии) `settingDefault`.
+    public static func setting(stored: String?) -> GlowMode {
+        stored.flatMap(GlowMode.init(rawValue:)) ?? settingDefault
+    }
+
+    /// Название сегмента настройки «Свечение».
+    public var title: String {
+        switch self {
+        case .rhythm: "По ритму"
+        case .hybrid: "Ритм и звук"
+        case .sound: "По звуку"
+        }
+    }
+}
