@@ -1714,6 +1714,33 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Скрытая четность попадает через две на третью (160 BPM, показанная попадает всегда): ее уверенность
+    /// ходит между 0.24 и 0.43, отношение показанной к ней между 2.3 и 4.1, то есть через порог
+    /// `everyOtherLockRatio` 2.5 на каждом третьем скрытом ударе. Защелка (`parityLeadRelease`, выключение
+    /// ниже 2.0) держит правило показанных долей, и опубликованная уверенность (`gridConfidence`, высота горба
+    /// пульса, мягкое подтверждение бочки) не прыгает между уверенностью всех долей и показанных.
+    @Test func parityLeadHoldsNearTheRatio() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 160)
+        hops.onsets = [true, true, true, false, true, false]
+        hops.beatODF = [60, 50]
+        var toggles = 0
+        var leads: Bool?
+        var led = false
+        hops.feed(&tracker, until: 24) { tracker in
+            guard tracker.now > 8, tracker.shownParity != nil else { return }
+            // Считаются переключения после первого включения правила.
+            let now = tracker.schedule.confidence > tracker.confidence + 1e-9
+            if led, let was = leads, was != now { toggles += 1 }
+            leads = now
+            led = led || now
+        }
+        let period = try #require(tracker.period)
+        try #require(abs(period * 160 / 60 - 1) < 0.02, "tracker at \(60 / period) BPM")
+        #expect(led, "shown beats never led")
+        #expect(toggles == 0, "\(toggles) toggles of the shown-beat rule after it first led")
+    }
+
     /// Темп у порога показа через долю (период 0.42 с, около 143 BPM) с колебанием периода ±1 % за
     /// 4 с: показ через долю, раз включившись, не выключается и не включается снова (у порога
     /// гистерезис, выключение выше `everyOtherPeriod × everyOtherRelease`).

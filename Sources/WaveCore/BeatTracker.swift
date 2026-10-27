@@ -478,6 +478,14 @@ public struct BeatTracker: Sendable {
     /// Показ через долю выключается при периоде выше `everyOtherPeriod` в столько раз (0.42 -> 0.43 с):
     /// у 143 BPM с колебанием периода ±1 % без запаса показ переключался 18 раз за 30 с.
     static let everyOtherRelease = 1.025
+    /// Защелка `shownParityLeads`: включается при отношении от `everyOtherLockRatio` (2.5), выключается
+    /// ниже него, умноженного на это число (2.0). Без защелки одно попадание скрытой четности переводило
+    /// отношение через 2.5, и опубликованная уверенность, горб пульса, мягкое подтверждение бочки и
+    /// проверки «уверенного захвата» прыгали (скрытая четность попадает через две на третью: 14
+    /// переключений за 16 с, с защелкой 0). GTZAN tune (steady): точность всех вспышек 0.8688 -> 0.8689,
+    /// вспышек в долю +2, мимо долей всего / с захватом 2131 / 551 те же, wrongLock 12 / 215; записи
+    /// владельца те же. Выключение ниже 1.5 (0.6): мимо долей 2135 / 553.
+    static let parityLeadRelease = 0.8
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
@@ -515,6 +523,8 @@ public struct BeatTracker: Sendable {
     /// Уверенность и серия попаданий по четности id доли (`everyOtherLockRatio`): при показе через
     /// долю каждая четность считает только свои доли, без показа обе повторяют `confidence` и `hits`.
     private(set) var parityConfidence = SIMD2<Double>(repeating: 0)
+    /// Четность, для которой включена защелка `shownParityLeads`; `nil`, пока она выключена.
+    private var parityLeadOn: UInt64?
     private var parityHits = SIMD2<Int>(repeating: 0)
     private(set) var locked = false
     /// Почему захват потерян в последний раз; `nil`, если захвата еще не было (и после `reset()` без
@@ -664,8 +674,18 @@ public struct BeatTracker: Sendable {
     /// идут и по ее долям.
     private var shownParityLeads: Bool {
         guard parameters.everyOtherLockRatio > 0, let shown = shownParity else { return false }
+        return parityLeadOn == shown
+    }
+
+    /// Защелка `shownParityLeads` после каждого изменения уверенности по четности или показанной четности.
+    private mutating func latchParityLead() {
+        guard parameters.everyOtherLockRatio > 0, let shown = shownParity else {
+            parityLeadOn = nil
+            return
+        }
         let index = Int(shown)
-        return parityConfidence[index] >= parameters.everyOtherLockRatio * parityConfidence[1 - index]
+        let ratio = parameters.everyOtherLockRatio * (parityLeadOn == shown ? Self.parityLeadRelease : 1)
+        parityLeadOn = parityConfidence[index] >= ratio * parityConfidence[1 - index] ? shown : nil
     }
 
     /// Уверенность для захвата, веса показа и защиты захвата: при `shownParityLeads` большая из
@@ -776,6 +796,7 @@ public struct BeatTracker: Sendable {
         confidence = 0
         hits = 0
         parityConfidence = .zero
+        parityLeadOn = nil
         parityHits = .zero
         lastUnlockReason = locked ? .reset : nil
         locked = false
@@ -924,6 +945,7 @@ public struct BeatTracker: Sendable {
         hits = max(hits, parameters.lockHits)
         parityConfidence = SIMD2(repeating: 1)
         parityHits = SIMD2(repeating: hits)
+        latchParityLead()
         locked = true
         disagreements = 0
         dropShadow()
@@ -994,6 +1016,7 @@ public struct BeatTracker: Sendable {
     private mutating func resetConfidence(_ reason: UnlockReason) {
         confidence *= 0.5
         parityConfidence *= 0.5
+        latchParityLead()
         parityHits = .zero
         capWeight()
         hits = 0
@@ -1116,6 +1139,7 @@ public struct BeatTracker: Sendable {
         confidence = shadowConfidence
         parityConfidence = SIMD2(repeating: shadowConfidence)
         parityHits = SIMD2(repeating: shadowHits)
+        latchParityLead()
         capWeight()
         hits = shadowHits
         let wasLocked = locked
@@ -1206,6 +1230,7 @@ public struct BeatTracker: Sendable {
     /// и `nextBeat − 2T`, `nextBeat − 4T`, ...). Показ остается на прежней четности, пока гребенка
     /// другой не выше больше чем на `everyOtherHold`.
     private mutating func updateDisplayOctave() {
+        defer { latchParityLead() }
         // Гистерезис у порога: включается ниже `everyOtherPeriod`, выключается только выше него в
         // `everyOtherRelease` раз, иначе темп у порога с дрожанием периода переключал бы показ.
         let limit = parameters.everyOtherPeriod * (shownParity == nil ? 1 : Self.everyOtherRelease)
@@ -1302,6 +1327,7 @@ public struct BeatTracker: Sendable {
                     parityConfidence = SIMD2(repeating: confidence)
                     parityHits = SIMD2(repeating: hits)
                 }
+                latchParityLead()
                 if locked {
                     // Первая доля после брейка решает: промах значит, что сетка ушла, захват сразу
                     // отпускается. Ее вспышка зафиксирована еще при закрытом вороте и не видна.
