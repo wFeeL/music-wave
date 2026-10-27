@@ -277,6 +277,19 @@ struct OnsetDetectorTests {
         #expect(settling.falsePositives + settled.falsePositives == 0, "false onsets")
     }
 
+    /// Звук под воротом уровня (-80 dBFS, хвост затухания, шипение между треками) не опускает
+    /// порог: после него шум -45 dBFS не дает широкополосных онсетов, кроме самого скачка уровня
+    /// на 10 с (он был и с постоянным порогом). Пока типичный пик шел и по звуку под воротом, здесь
+    /// был онсет шума на 11.17 с.
+    @Test func noiseUnderTheLevelGateDoesNotOpenTheFloor() async {
+        let onsets = await runOffCooperativePool {
+            let count = Int(Self.rate * 10)
+            let samples = Drums.pinkNoise(levelDB: -80, count: count, seed: 3) + Drums.pinkNoise(levelDB: -45, count: count, seed: 3)
+            return Self.analyze(samples).broadband.map(\.event.time).filter { $0 >= 10.2 }
+        }
+        #expect(onsets.isEmpty, "broadband onsets at \(onsets)")
+    }
+
     /// Порог, опущенный по типичному пику, не открывает шум ни на каком уровне: у розового шума пики
     /// не выше 2.5 типичного пика (`peakContrast` 3.2), а его уровень от громкости почти не зависит.
     @Test(arguments: [Float(-10), -35, -50])
@@ -411,6 +424,37 @@ struct OnlinePeakPickerTests {
         let tailStart = 4_500 - 2 * twoSeconds
         let tail = onsets.filter { $0 >= tailStart }
         #expect(tail.count == (tailStart..<4_500).count(where: { $0 % beatHops == 0 }), "tail onsets \(tail)")
+    }
+
+    /// Доли 6 на буграх 1 под воротом уровня (-80 dBFS при `minLevelDB` -60) не трогают типичный пик
+    /// и уровень акцента: потом одиночный пик 7 на -20 dBFS не дает онсета, порог остается 10. Та же
+    /// история над воротом опускает порог до 4.
+    @Test func peaksUnderTheLevelGateKeepTheFloor() {
+        var picker = OnlinePeakPicker(hopDuration: Self.hop, parameters: StreamAnalyzer.broadbandPickerParameters)
+        let quiet = Self.pulses(count: 3_000, beatHops: 94, bump: 1) { _ in 6 }
+        for odf in quiet {
+            _ = picker.process(odf, levelDB: -80)
+        }
+        var fired = false
+        for n in 0..<200 {
+            fired = picker.process(n == 100 ? 7 : 0, levelDB: -20) != nil || fired
+        }
+        #expect(!fired)
+    }
+
+    /// `reset()` возвращает типичный пик и уровень акцента к началу: после истории, где порог
+    /// опустился до 4, одиночный пик 9 в нулях не дает онсета, как у нового выбора пиков.
+    @Test func resetRestoresTheFloor() {
+        var picker = OnlinePeakPicker(hopDuration: Self.hop, parameters: StreamAnalyzer.broadbandPickerParameters)
+        let opened = Self.pulses(count: 3_000, beatHops: 94, bump: 1) { _ in 6 }
+        let before = opened.indices.filter { picker.process(opened[$0], levelDB: -20) != nil }
+        #expect(before.contains { $0 >= 1_500 }, "the floor never opened")
+        picker.reset()
+        var fired = false
+        for n in 0..<100 {
+            fired = picker.process(n == 80 ? 9 : 0, levelDB: -20) != nil || fired
+        }
+        #expect(!fired)
     }
 
     @Test func needsARealLevelRise() {

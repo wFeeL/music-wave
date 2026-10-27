@@ -124,8 +124,9 @@ public struct OnlinePeakPicker: Sendable {
         /// случайный пик шума стоит над T меньше чем в `peakContrast` раз. 0 выключает правило.
         ///
         /// T это скользящее среднее логарифмов высот локальных максимумов odf (максимум в окне
-        /// ±`preMax`, узнается через `preMax` шагов), шаг `typicalGain` на максимум. После `init` и
-        /// `reset()` T = `floor / peakContrast`, то есть порог начинается с `floor`.
+        /// ±`preMax`, узнается через `preMax` шагов, уровень его шага выше `minLevelDB`), шаг
+        /// `typicalGain` на максимум. После `init` и `reset()` T = `floor / peakContrast`, то есть порог
+        /// начинается с `floor`.
         public var peakContrast: Float
         /// Нижняя граница опущенного порога.
         public var lowFloor: Float
@@ -225,7 +226,7 @@ public struct OnlinePeakPicker: Sendable {
     }
 
     /// Порог odf сейчас: `floor` или ниже, по типичному пику и уровню акцента.
-    var effectiveFloor: Float {
+    private var effectiveFloor: Float {
         let p = parameters
         guard p.peakContrast > 0 else { return p.floor }
         return min(p.floor, max(p.lowFloor, p.peakContrast * typical, p.accentFloor * accent))
@@ -266,9 +267,13 @@ public struct OnlinePeakPicker: Sendable {
         let earlierLevel = levelRing[(ringIndex - riseLagHops + capacity) % capacity]
 
         let p = parameters
-        // Шаг `preMax` назад: локальный максимум в окне ±preMax вокруг него обновляет типичный пик.
-        let candidate = odfRing[(ringIndex - preMaxHops + capacity) % capacity]
-        if p.peakContrast > 0, candidate > 0, candidate > recentMax, candidate > odf, candidate >= olderMax {
+        // Шаг `preMax` назад: локальный максимум в окне ±preMax вокруг него обновляет типичный пик,
+        // если уровень того шага выше `minLevelDB`. Звук под воротом (хвост затухания, шипение
+        // между треками) иначе опускал бы порог до прихода слышимого звука.
+        let candidateIndex = (ringIndex - preMaxHops + capacity) % capacity
+        let candidate = odfRing[candidateIndex]
+        if p.peakContrast > 0, candidate > 0, levelRing[candidateIndex] > p.minLevelDB,
+           candidate > recentMax, candidate > odf, candidate >= olderMax {
             if p.accentFloor > 0, candidate > p.peakContrast * typical {
                 logAccent += p.typicalGain * (log(candidate) - logAccent)
                 accent = exp(logAccent)
