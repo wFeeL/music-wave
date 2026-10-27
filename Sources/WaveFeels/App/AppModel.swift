@@ -117,8 +117,8 @@ final class AppModel {
     /// Период кадров острова, с: не короче периода экрана, периода выбранной «Частоты кадров»
     /// (`AppSettings.frameRate`) и, в энергосбережении, 1/30 (`RenderPacing.cadencePeriod`).
     /// Единственное место, где частота кадров превращается в период: от него идут шаг
-    /// `TimelineView` (`timelineInterval`) и период отрисовки `renderPeriod`, а через него
-    /// упреждение показа и выборка свечения.
+    /// `TimelineView` (`timelineInterval`) и период отрисовки `renderPeriod`, а через него выборка
+    /// свечения (R/2). Упреждение показа от него не зависит (`presentationTiming`).
     var cadencePeriod: Double {
         RenderPacing.cadencePeriod(refreshPeriod: refreshPeriod, frameRate: settings.frameRate, lowPower: lowPower)
     }
@@ -136,11 +136,17 @@ final class AppModel {
     /// Период отрисовки R, с: медиана последних 60 интервалов кадров в пределах 1/120...1/30
     /// (энергосбережение 30 Гц, ProMotion), но не короче `cadencePeriod`
     /// (`RenderPacing.effectivePeriod`): кадр не показывается чаще выбранной частоты и экрана.
-    /// До 60 кадров `cadencePeriod`: на 30 кадрах упреждение показа сразу два периода по 1/30 с,
-    /// и сдвиг синхронизации не меняет смысла. Медиана считается при записи кадра в замер
-    /// (`recordRender`) раз в 15 кадров, а не на каждом чтении.
+    /// До 60 кадров `cadencePeriod`: на 30 кадрах сразу 1/30 с. Медиана считается при записи кадра
+    /// в замер (`recordRender`) раз в 15 кадров, а не на каждом чтении.
     var renderPeriod: Double {
         RenderPacing.effectivePeriod(measured: measuredRenderPeriod, refreshPeriod: cadencePeriod)
+    }
+    /// Упреждение показа и период выборки свечения острова (`PresentationTiming`): упреждение два
+    /// периода экрана `refreshPeriod` при любой «Частоте кадров» и в энергосбережении, свечение на
+    /// середину кадра по `renderPeriod`. То же берет калибровка (`IslandPreview`), поэтому сдвиг
+    /// синхронизации, подобранный ею, подходит острову и на 30, и на 60 кадрах.
+    var presentationTiming: PresentationTiming {
+        PresentationTiming(refreshPeriod: refreshPeriod, framePeriod: renderPeriod)
     }
     /// Простой отрисовки: волны ровные, свечения и «вздоха» нет дольше
     /// `RenderIdleDetector.settle`, остров не в переходе. Тогда остров рисуется не чаще
@@ -1514,9 +1520,10 @@ final class AppModel {
 
     /// Шаг анимации острова на момент `now` (секунды хоста, `CACurrentMediaTime()`).
     ///
-    /// Кадр будет на экране в `tP = now + presentationLead(R)`, `R = renderPeriod`: на этот момент
-    /// берется кадр анализа, смешанный из соседних (`FrameStore.frame(at:)`), и свечение доли по
-    /// расписанию (`BeatGlow`, с памятью о вспышках). Уровни слоев и общий уровень идут через пружины
+    /// Кадр будет на экране в `tP = now + lead`, `lead` это два периода экрана, а свечение
+    /// центрируется на кадре по `R = renderPeriod` (`presentationTiming`): на момент `tP` берется
+    /// кадр анализа, смешанный из соседних (`FrameStore.frame(at:)`), и свечение доли по расписанию
+    /// (`BeatGlow`, с памятью о вспышках). Уровни слоев и общий уровень идут через пружины
     /// (`LevelSpring`), фазы волн по сглаженным уровням (при «Уменьшении движения» вдвое медленнее).
     /// «Вздох» по весу показа расписания (`BeatPulse.breath`): с полным весом пружина, получившая
     /// свечение на 50 мс раньше, без веса само свечение, между ними смесь. Мягкий пульс
@@ -1548,8 +1555,9 @@ final class AppModel {
     /// Снимки (`previewing`) получают заданные кадр, свечение, «вздох», фазу переливания и
     /// состояние «Спектра» без шага, без пульса и без мягкой остановки, детектор не трогают.
     func islandVisuals(now: Double, timelineTime: Double, reduceMotion: Bool) -> IslandVisuals {
-        let period = renderPeriod
-        let presented = now + LatencyCalculator.presentationLead(refreshPeriod: period)
+        let timing = presentationTiming
+        let period = timing.framePeriod
+        let presented = timing.presented(at: now)
         let sampled = store.frame(at: presented)
         if previewing {
             let glow = reduceMotion ? 0 : previewGlow
@@ -1932,10 +1940,10 @@ extension AppModel {
     static let rhythmSectionTitle = "Ритм"
 
     /// «Записать 30 с»: запись ритма с версией, сборкой, устройством вывода, режимом задержки,
-    /// периодом отрисовки и настройками, от которых зависит видимое свечение («Уменьшение
-    /// движения» системы, яркость свечения, «вздох», мягкий пульс, энергосбережение). Задержку,
-    /// сдвиг и частоту берет сама запись у анализа, «Уменьшение движения» и пульс на кадрах
-    /// отмечает `islandVisuals`.
+    /// периодом отрисовки, упреждением показа и настройками, от которых зависит видимое свечение
+    /// («Уменьшение движения» системы, яркость свечения, «вздох», мягкий пульс, энергосбережение).
+    /// Задержку, сдвиг и частоту берет сама запись у анализа, «Уменьшение движения» и пульс на
+    /// кадрах отмечает `islandVisuals`.
     func startRhythmRecording() {
         let info = Bundle.main.infoDictionary ?? [:]
         let latencyMode: String
@@ -1952,6 +1960,7 @@ extension AppModel {
             deviceUID: output.deviceUID,
             latencyMode: latencyMode,
             renderPeriod: renderPeriod,
+            presentationLead: presentationTiming.lead,
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
             glowIntensity: settings.glowIntensity,
             beatPulse: settings.beatPulse,
@@ -2135,7 +2144,7 @@ extension AppModel {
     private func rhythmSection() -> DiagnosticsSection {
         let schedule = store.schedule
         let tempo = schedule.bpm.flatMap { $0.isFinite ? "\(Int($0.rounded())) BPM" : nil } ?? "нет"
-        let lead = LatencyCalculator.presentationLead(refreshPeriod: renderPeriod)
+        let lead = presentationTiming.lead
         return DiagnosticsSection(title: Self.rhythmSectionTitle, rows: [
             DiagnosticsRow(label: "Темп", value: tempo),
             DiagnosticsRow(label: "Уверенность", value: String(format: "%.2f", schedule.confidence)),

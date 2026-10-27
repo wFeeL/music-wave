@@ -320,6 +320,24 @@ struct RhythmLogTests {
         #expect(Self.meta().flashLength == nil)
     }
 
+    /// Упреждение показа (два периода экрана, с 1.3) пишется в meta рядом с периодом кадров и читается
+    /// назад, прогон журнала берет его в цепочку. Журнал без поля читается с `nil`, тогда прогон считает
+    /// упреждение по периоду кадров; версия схемы та же.
+    @Test func presentationLeadRoundTripsAndReachesTheReplay() throws {
+        var meta = Self.meta()
+        meta.renderPeriod = 1.0 / 30
+        meta.presentationLead = 2.0 / 60
+        let log = RhythmLog(meta: meta, kicks: [], onsets: [], schedules: [], flashes: [])
+        let decoded = try RhythmLog.decode(try log.encoded())
+        #expect(decoded.schemaVersion == RhythmLog.currentSchemaVersion)
+        #expect(decoded.meta.presentationLead == 2.0 / 60)
+        let config = RhythmReplay.config(for: decoded.meta, options: RhythmReplay.Options())
+        #expect(config.presentationLead == 2.0 / 60)
+        #expect(abs(config.renderRate - 30) < 1e-9)
+        #expect(Self.meta().presentationLead == nil)
+        #expect(RhythmReplay.config(for: Self.meta(), options: RhythmReplay.Options()).presentationLead == nil)
+    }
+
     /// Вес показа пишется в расписания (новое расписание, когда вес сменился на 0.02 и больше), мягкий
     /// пульс кадров в итог записи (кадров с пульсом от `ambientVisible` и пик), выключатель пульса в
     /// meta. Журнал без этих полей (1.1 и B4) читается с `nil`, ключи `nil` не пишутся.

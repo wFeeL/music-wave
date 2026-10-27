@@ -238,19 +238,48 @@ struct RenderPacingTests {
         #expect(RenderPacing.cadencePeriod(refreshPeriod: 1.0 / 120, frameRate: 60, lowPower: true) == 1.0 / 30)
     }
 
-    /// Задержка показа и выборка свечения берут период выбранной частоты: на 30 кадрах это два
-    /// периода по 1/30 с, а не 2/60, поэтому сдвиг синхронизации (мс от момента звука до вспышки)
-    /// не зависит от частоты кадров: свечение по расписанию сэмплируется в момент показа кадра.
-    @Test func renderDelayUsesTheChosenRatePeriod() {
-        for screen in [1.0 / 60, 1.0 / 120] {
-            let thirty = RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: 30, lowPower: false)
-            let sixty = RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: 60, lowPower: false)
-            #expect(abs(LatencyCalculator.presentationLead(refreshPeriod: thirty) - 2.0 / 30) < 1e-12)
-            #expect(abs(LatencyCalculator.presentationLead(refreshPeriod: sixty) - 2.0 / 60) < 1e-12)
-            // Замер на 30 кадрах не короче периода выбранной частоты, до замера берется он же.
-            #expect(RenderPacing.effectivePeriod(measured: nil, refreshPeriod: thirty) == 1.0 / 30)
-            #expect(RenderPacing.effectivePeriod(measured: 1.0 / 60, refreshPeriod: thirty) == 1.0 / 30)
+    /// Упреждение показа это два периода экрана при любой «Частоте кадров» и в энергосбережении:
+    /// конвейер компоновки идет по кадрам экрана. Период выборки свечения (R/2 в `BeatGlow`) идет за
+    /// частотой кадров приложения. На экране 60 Гц и 60 кадрах все как в 1.2: 33 мс и R 1/60.
+    @Test func presentationLeadFollowsTheScreenAndCentringTheFrameRate() {
+        func timing(screen: Double, rate: Int, lowPower: Bool, measured: Double? = nil) -> PresentationTiming {
+            let cadence = RenderPacing.cadencePeriod(refreshPeriod: screen, frameRate: rate, lowPower: lowPower)
+            let period = RenderPacing.effectivePeriod(measured: measured, refreshPeriod: cadence)
+            return PresentationTiming(refreshPeriod: screen, framePeriod: period)
         }
+        let base = timing(screen: 1.0 / 60, rate: 60, lowPower: false)
+        #expect(abs(base.lead - 2.0 / 60) < 1e-12)
+        #expect(base.framePeriod == 1.0 / 60)
+        #expect(base.presented(at: 100) == 100 + base.lead)
+        // Экран 60 Гц, 30 кадров: упреждение то же, кадр держится 1/30 с.
+        let thirty = timing(screen: 1.0 / 60, rate: 30, lowPower: false)
+        #expect(thirty.lead == base.lead)
+        #expect(thirty.framePeriod == 1.0 / 30)
+        // Экран 120 Гц: упреждение 2/120 и при 60, и при 30 кадрах.
+        for rate in [60, 30] {
+            let fast = timing(screen: 1.0 / 120, rate: rate, lowPower: false)
+            #expect(abs(fast.lead - 2.0 / 120) < 1e-12, "rate \(rate)")
+            #expect(fast.framePeriod == 1 / Double(rate), "rate \(rate)")
+        }
+        // Энергосбережение: кадры 1/30 (до замера и по замеру), упреждение по экрану.
+        for screen in [1.0 / 60, 1.0 / 120] {
+            for measured in [nil, 1.0 / 30] as [Double?] {
+                let saving = timing(screen: screen, rate: 60, lowPower: true, measured: measured)
+                #expect(abs(saving.lead - 2 * screen) < 1e-12)
+                #expect(saving.framePeriod == 1.0 / 30)
+            }
+        }
+        // Пропуски кадров удлиняют R, но не упреждение.
+        let slow = timing(screen: 1.0 / 60, rate: 60, lowPower: false, measured: 1.0 / 40)
+        #expect(slow.lead == base.lead)
+        #expect(slow.framePeriod == 1.0 / 40)
+        // Странные значения: экран 1/60 с, период кадров по экрану.
+        for bad in [Double.nan, .infinity, 0, -1] {
+            let odd = PresentationTiming(refreshPeriod: bad, framePeriod: bad)
+            #expect(abs(odd.lead - 2.0 / 60) < 1e-12)
+            #expect(odd.framePeriod == 1.0 / 60)
+        }
+        #expect(PresentationTiming(refreshPeriod: 1.0 / 120, framePeriod: .nan).framePeriod == 1.0 / 120)
     }
 
     @Test func resetMedianDropsIntervalsOfTheOldRate() throws {
@@ -277,10 +306,8 @@ struct RenderPacingTests {
         #expect(RenderPacing.effectivePeriod(measured: 1.0 / 120, refreshPeriod: 1.0 / 60) == 1.0 / 60)
         #expect(RenderPacing.effectivePeriod(measured: 1.0 / 40, refreshPeriod: 1.0 / 60) == 1.0 / 40)
         #expect(RenderPacing.effectivePeriod(measured: nil, refreshPeriod: 1.0 / 60) == 1.0 / 60)
-        // Энергосбережение: замер 30 Гц дает упреждение показа от 33 мс и больше.
-        let lowPower = RenderPacing.effectivePeriod(measured: 1.0 / 30, refreshPeriod: 1.0 / 60)
-        #expect(lowPower == 1.0 / 30)
-        #expect(LatencyCalculator.presentationLead(refreshPeriod: lowPower) >= 0.033)
+        // Энергосбережение: замер 30 Гц дает период кадров 1/30.
+        #expect(RenderPacing.effectivePeriod(measured: 1.0 / 30, refreshPeriod: 1.0 / 60) == 1.0 / 30)
         // Остров переехал на экран 120 Гц, замер еще со старого экрана 60 Гц: держится замер.
         #expect(RenderPacing.effectivePeriod(measured: 1.0 / 60, refreshPeriod: 1.0 / 120) == 1.0 / 60)
         #expect(RenderPacing.effectivePeriod(measured: .nan, refreshPeriod: 1.0 / 60) == 1.0 / 60)

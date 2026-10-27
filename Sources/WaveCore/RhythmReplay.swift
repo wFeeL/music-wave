@@ -199,7 +199,8 @@ public enum RhythmReplay {
         )
     }
 
-    /// Настройка цепочки для записи: задержка, сдвиг и частота отрисовки устройства.
+    /// Настройка цепочки для записи: задержка, сдвиг, частота отрисовки и упреждение показа устройства
+    /// (журналы до 1.3 без упреждения: два периода отрисовки).
     public static func config(for meta: RhythmLog.Meta, options: Options) -> OfflineBeatChain.Config {
         var config = OfflineBeatChain.Config(seed: options.seed)
         config.outputLatency = meta.outputLatency
@@ -207,6 +208,7 @@ public enum RhythmReplay {
         if meta.renderPeriod.isFinite, meta.renderPeriod > 0 {
             config.renderRate = 1 / meta.renderPeriod
         }
+        config.presentationLead = meta.presentationLead
         config.trackerParameters = options.trackerParameters
         config.softPulse = true
         return config

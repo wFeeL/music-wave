@@ -17,7 +17,8 @@ import Synchronization
 /// Схемы: 1 (1.1 и 1.2); 2 (1.3) добавляет в расписания яркость предсказанных долей, гонку фаз и
 /// отношение гребенки (`Schedule.amplitudes`, `race`, `combRatio`). Читаются обе; незнакомые поля
 /// пропускаются, новые поля необязательны, поэтому поле, которое добавит более новая сборка без смены
-/// схемы, старую не ломает.
+/// схемы, старую не ломает. Так в 1.3 без смены схемы добавлены `meta.flashLength` и
+/// `meta.presentationLead`: необязательные поля схему не меняют.
 public struct RhythmLog: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 2
     /// Схемы, которые читает `decode`.
@@ -80,8 +81,13 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         /// Сдвиг синхронизации, с которым шел анализ, секунды (плюс это позже).
         public var syncOffset: Double
         public var sampleRate: Double
-        /// Период отрисовки острова в начале записи, секунды.
+        /// Период кадров острова в начале записи, секунды: R, на середину которого `BeatGlow` берет
+        /// свечение (`PresentationTiming.framePeriod`).
         public var renderPeriod: Double
+        /// Упреждение показа в начале записи, секунды: два периода экрана (`PresentationTiming.lead`,
+        /// с 1.3). В журналах до 1.3 поля нет (`nil`): тогда упреждение было `2 × renderPeriod`. Поле
+        /// необязательное, схема та же.
+        public var presentationLead: Double?
         /// «Уменьшение движения» было включено в начале или на любом кадре записи: тогда свечения
         /// нет и вспышек устройства не бывает.
         public var reduceMotion: Bool
@@ -128,6 +134,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             syncOffset: Double = 0,
             sampleRate: Double = 0,
             renderPeriod: Double = 1.0 / 60,
+            presentationLead: Double? = nil,
             reduceMotion: Bool = false,
             glowIntensity: Double = 1,
             beatPulse: Bool = true,
@@ -155,6 +162,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.syncOffset = syncOffset
             self.sampleRate = sampleRate
             self.renderPeriod = renderPeriod
+            self.presentationLead = presentationLead
             self.reduceMotion = reduceMotion
             self.glowIntensity = glowIntensity
             self.beatPulse = beatPulse

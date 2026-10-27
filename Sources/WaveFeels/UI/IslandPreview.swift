@@ -172,16 +172,17 @@ final class PreviewPlayer {
 
 extension PreviewPlayer {
     /// Кадр калибровки на `now` секунд хоста (`CACurrentMediaTime()`), по тем же правилам, что
-    /// у острова (`AppModel.islandVisuals`): кадр будет на экране в `now + presentationLead(R)`,
-    /// на этот момент свечение по расписанию `glowSchedule` через `BeatGlow` с памятью, `R` это
-    /// `refreshPeriod`. Волны тихие, к басу прибавляется акцент доли. «Вздоха» нет: он опережает
-    /// свечение и мешал бы сравнивать вспышку со щелчком. «Уменьшение движения» свечение здесь не
-    /// гасит: без вспышки калибровать нечего.
-    func calibrationVisuals(now: Double, refreshPeriod: Double, palette: [PaletteColor]) -> IslandVisuals {
+    /// у острова (`AppModel.islandVisuals`): кадр будет на экране в `timing.presented(at: now)`
+    /// (упреждение два периода экрана), на этот момент свечение по расписанию `glowSchedule` через
+    /// `BeatGlow` с памятью, центр кадра по `timing.framePeriod`. Вызывающий передает
+    /// `AppModel.presentationTiming`, то же, что у острова. Волны тихие, к басу прибавляется акцент
+    /// доли. «Вздоха» нет: он опережает свечение и мешал бы сравнивать вспышку со щелчком.
+    /// «Уменьшение движения» свечение здесь не гасит: без вспышки калибровать нечего.
+    func calibrationVisuals(now: Double, timing: PresentationTiming, palette: [PaletteColor]) -> IslandVisuals {
         var glow: Float = 0
         if let glowSchedule, now.isFinite {
-            let presented = now + LatencyCalculator.presentationLead(refreshPeriod: refreshPeriod)
-            glow = glowState.value(at: presented, schedule: glowSchedule(presented), refreshPeriod: refreshPeriod)
+            let presented = timing.presented(at: now)
+            glow = glowState.value(at: presented, schedule: glowSchedule(presented), refreshPeriod: timing.framePeriod)
         }
         var frame = WaveFrame.silent
         frame.layers = BeatGlow.accented(frame.layers, glow: glow)
@@ -201,8 +202,10 @@ extension PreviewPlayer {
 /// (`PreviewPlayer.isActive`, у калибровки окно настроек не видно), `TimelineView` стоит.
 ///
 /// С игроком калибровки (`PreviewPlayer.isCalibrating`) часы кадров это часы хоста, как у острова,
-/// период кадров берется у модели (`AppModel.cadencePeriod`: экран острова и «Частота кадров»), а яркость свечения не
-/// ниже яркости по умолчанию, чтобы вспышку было видно и при слабом свечении в настройках.
+/// частота кадров та же, что у острова (с энергосбережением), упреждение показа и период выборки
+/// свечения берутся у модели (`AppModel.presentationTiming`), а яркость свечения не ниже яркости по
+/// умолчанию, чтобы вспышку было видно и при слабом свечении в настройках. Предпросмотр без калибровки
+/// идет с выбранной частотой без учета энергосбережения.
 struct IslandPreview: View {
     static let stripSize = CGSize(width: 640, height: 150)
     static let notchSize = SnapshotRenderer.notchSize
@@ -261,13 +264,14 @@ struct IslandPreview: View {
                     ) {
                         TimelineView(.animation(
                             minimumInterval: RenderPacing.timelineInterval(
-                                refreshPeriod: model.refreshPeriod, lowPower: false, frameRate: model.settings.frameRate
+                                refreshPeriod: model.refreshPeriod, lowPower: calibrating && model.lowPower,
+                                frameRate: model.settings.frameRate
                             ),
                             paused: !active
                         )) { context in
                             let visuals = calibrating
                                 ? player.calibrationVisuals(
-                                    now: CACurrentMediaTime(), refreshPeriod: model.cadencePeriod, palette: palette
+                                    now: CACurrentMediaTime(), timing: model.presentationTiming, palette: palette
                                 )
                                 : player.visuals(
                                     now: context.date.timeIntervalSinceReferenceDate, palette: palette,

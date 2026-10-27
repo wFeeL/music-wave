@@ -11,7 +11,8 @@ import Foundation
 /// пришедшие к этому моменту, и публикует расписание, сдвинутое на
 /// `hostClock(n) − n / rate + outputLatency + syncOffset`. Рендер с частотой `renderRate` (фаза
 /// `renderPhase` или случайная) в момент `tEval` берет последнее расписание, опубликованное до него,
-/// и считает свечение на момент показа `tP = tEval + 2 / renderRate`. Событие свечения это кадр, где
+/// и считает свечение на момент показа `tP = tEval + presentationLead` (без него `2 / renderRate`: экран
+/// с частотой рендера). Событие свечения это кадр, где
 /// свечение выросло больше чем на `eventRise` против прошлого кадра; его время это `tP` кадра.
 /// Мягкий пульс (`Config.softPulse`) считается отдельно, как у приложения: энергия атак каждого шага
 /// (`BeatTracker.ambientEnergy`) публикуется кадром в `FrameStore` на момент центра окна плюс
@@ -41,6 +42,10 @@ public struct OfflineBeatChain: Sendable {
         public var wakeJitter = 0.002
         /// Частота кадров рендера, Гц.
         public var renderRate = 60.0
+        /// Упреждение показа, секунды: `tP = tEval + presentationLead`. `nil` (и не конечное или
+        /// отрицательное) дает `2 / renderRate`, как у экрана с частотой рендера. Прогон журнала берет его
+        /// из `RhythmLog.Meta.presentationLead`: с 1.3 упреждение идет от периода экрана, а не кадров.
+        public var presentationLead: Double?
         /// Фаза рендера в долях периода кадра, 0..<1; `nil` берет случайную по `seed`.
         public var renderPhase: Double?
         /// Задержка вывода, секунды: на столько слышимый момент позже момента в файле.
@@ -351,6 +356,7 @@ public struct OfflineBeatChain: Sendable {
 
     private static func render(_ analysis: Analysis, config: Config) -> Result {
         let renderPeriod = 1 / config.renderRate
+        let lead = config.presentationLead.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? 2 * renderPeriod
         var phaseRNG = Noise(seed: config.seed &+ 0x5EED)
         let phase = config.renderPhase ?? Double(phaseRNG.nextUnit() * 0.5 + 0.5)
         var glow = BeatGlow()
@@ -379,7 +385,7 @@ public struct OfflineBeatChain: Sendable {
                 published = analysis.publications[publication].schedule
                 publication += 1
             }
-            let tP = tEval + 2 * renderPeriod
+            let tP = tEval + lead
             let value = glow.value(at: tP, schedule: published, refreshPeriod: renderPeriod)
             if value - previous > eventRise {
                 flashes.append(

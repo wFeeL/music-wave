@@ -247,29 +247,33 @@ struct IslandPreviewTests {
     }
 
     /// Калибровка: свечение только по расписанию метронома на момент показа кадра, как у острова
-    /// (`now + presentationLead`, вспышка за `BeatGlow.lead` до слышимого щелчка); волны тихие,
-    /// «вздоха» нет, хотя в демо есть и свечение, и «вздох».
+    /// (`PresentationTiming`: упреждение два периода экрана, вспышка за `BeatGlow.lead` и половину
+    /// кадра до слышимого щелчка); волны тихие, «вздоха» нет, хотя в демо есть и свечение, и «вздох».
+    /// На 30 кадрах экрана 60 Гц упреждение то же, половина кадра длиннее.
     @Test func calibrationGlowFollowsTheMetronomeAtPresentationTime() {
         let cache = PreviewTimelineCache()
         cache.timeline = Self.timeline(seconds: 2) { _ in (level: 0.8, glow: 0.9, pulse: 0.5) }
         let metronome = MetronomeSchedule(start: 100)
         let latency = 0.02
-        let player = PreviewPlayer(cache: cache, glowSchedule: { time in
-            metronome.beatSchedule(at: time, outputLatency: latency, offsetMs: 0)
-        })
-        #expect(player.isCalibrating)
-        let refresh = 1.0 / 60
-        let lead = LatencyCalculator.presentationLead(refreshPeriod: refresh)
-        // Начало вспышки щелчка 3 на экране; кадры рисуются за `lead` до показа.
-        let onset = metronome.clickTime(3) + latency - BeatGlow.lead - refresh / 2
         let palette = PaletteExtractor.fallback
-        let before = player.calibrationVisuals(now: onset - 0.1 - lead, refreshPeriod: refresh, palette: palette)
-        let flash = player.calibrationVisuals(now: onset + 0.001 - lead, refreshPeriod: refresh, palette: palette)
-        #expect(before.glow < 0.1)
-        #expect(flash.glow > 0.9)
-        #expect(flash.pulse == 0)
-        #expect(flash.sampled == .silent)
-        #expect(flash.frame.level == 0)
+        for frames in [1.0 / 60, 1.0 / 30] {
+            // Свой игрок на каждый период: память свечения не переходит из прогона в прогон.
+            let player = PreviewPlayer(cache: cache, glowSchedule: { time in
+                metronome.beatSchedule(at: time, outputLatency: latency, offsetMs: 0)
+            })
+            #expect(player.isCalibrating)
+            let timing = PresentationTiming(refreshPeriod: 1.0 / 60, framePeriod: frames)
+            #expect(abs(timing.lead - 2.0 / 60) < 1e-12)
+            // Начало вспышки щелчка 3 на экране; кадры рисуются за `timing.lead` до показа.
+            let onset = metronome.clickTime(3) + latency - BeatGlow.lead - frames / 2
+            let before = player.calibrationVisuals(now: onset - 0.1 - timing.lead, timing: timing, palette: palette)
+            let flash = player.calibrationVisuals(now: onset + 0.001 - timing.lead, timing: timing, palette: palette)
+            #expect(before.glow < 0.1, "frame period \(frames)")
+            #expect(flash.glow > 0.9, "frame period \(frames)")
+            #expect(flash.pulse == 0)
+            #expect(flash.sampled == .silent)
+            #expect(flash.frame.level == 0)
+        }
     }
 
     /// Окно настроек ужимается до видимой области экрана и сдвигается внутрь нее; окно, которое

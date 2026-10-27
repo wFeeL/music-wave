@@ -9,6 +9,25 @@ struct OfflineBeatChainTests {
         Drums.fourOnFloor(bpm: 120, seconds: 12, hats: .eighths)
     }
 
+    /// Упреждение показа задается отдельно от частоты рендера: кадр, нарисованный в `tEval`, показан в
+    /// `tEval + presentationLead`; без него (и с не конечным или отрицательным) `2 / renderRate`.
+    @Test func presentationLeadSetsTheShownMoment() {
+        let samples = [Float](repeating: 0, count: 48_000)
+        func firstShown(_ lead: Double?) -> Double {
+            var config = OfflineBeatChain.Config(seed: 1)
+            config.renderRate = 30
+            config.renderPhase = 0
+            config.softPulse = true
+            config.recordAmbientTrace = true
+            config.presentationLead = lead
+            return OfflineBeatChain.run(samples: samples, sampleRate: 48_000, config: config).ambientTrace.first?.time ?? -1
+        }
+        #expect(abs(firstShown(nil) - 2.0 / 30) < 1e-9)
+        #expect(abs(firstShown(2.0 / 60) - 2.0 / 60) < 1e-9)
+        #expect(abs(firstShown(-1) - 2.0 / 30) < 1e-9)
+        #expect(abs(firstShown(.nan) - 2.0 / 30) < 1e-9)
+    }
+
     /// Прогон, записанный со старым `SyncHarness` до переноса цепочки в WaveCore (четыре на пол
     /// 120 BPM, 12 с, `seed` 3, фаза рендера 0.3): перенос не должен менять ни одной вспышки. Записан
     /// заново при настройке 1.1 (захват после пяти попаданий, смесь за долю, приглушенные онсеты без

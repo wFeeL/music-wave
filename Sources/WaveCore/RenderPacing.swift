@@ -148,15 +148,19 @@ public struct RenderPacing: Sendable {
     /// положительного 1/60 с) и не короче периода выбранной частоты `frameRate`
     /// (`normalizedFrameRate`); в режиме энергосбережения не короче 1/30. Единственное место, где
     /// настройка «Частота кадров» превращается в период: от него считаются шаг `TimelineView`
-    /// (`timelineInterval`), упреждение показа (`LatencyCalculator.presentationLead`) и выборка
-    /// свечения, поэтому сдвиг синхронизации, подобранный на одной частоте, сохраняет смысл на
-    /// другой: кадр всегда показывается на два периода позже момента отрисовки. Экран 120 Гц
-    /// при 60 дает 1/60, при 30 дает 1/30; экран 60 Гц при 60 дает 1/60.
+    /// (`timelineInterval`) и период кадров для выборки свечения (`PresentationTiming.framePeriod`,
+    /// центр кадра на экране через R/2). Упреждение показа от частоты кадров не зависит: оно идет от
+    /// периода экрана (`PresentationTiming.lead`). Экран 120 Гц при 60 дает 1/60, при 30 дает 1/30;
+    /// экран 60 Гц при 60 дает 1/60.
     public static func cadencePeriod(refreshPeriod: Double, frameRate: Int, lowPower: Bool) -> Double {
-        let screen = refreshPeriod.isFinite && refreshPeriod > 0 ? refreshPeriod : 1.0 / 60
         let chosen = 1 / Double(normalizedFrameRate(frameRate))
-        let period = max(screen, chosen)
+        let period = max(screenPeriod(refreshPeriod), chosen)
         return lowPower ? max(period, 1.0 / 30) : period
+    }
+
+    /// Период экрана `refreshPeriod`; не конечный или не положительный дает 1/60 с.
+    public static func screenPeriod(_ refreshPeriod: Double) -> Double {
+        refreshPeriod.isFinite && refreshPeriod > 0 ? refreshPeriod : 1.0 / 60
     }
 
     /// Наименьший интервал `TimelineView(.animation(minimumInterval:))` острова, с:
@@ -169,9 +173,10 @@ public struct RenderPacing: Sendable {
         return intervalSlack * period
     }
 
-    /// Период отрисовки для упреждения показа, с: замер `measured` (без конечного замера период
-    /// экрана), но не короче периода экрана `refreshPeriod`. Кадр не показывается чаще экрана,
-    /// лишние пересчеты сцены между кадрами экрана упреждение не укорачивают.
+    /// Период отрисовки для выборки свечения (`PresentationTiming.framePeriod`), с: замер `measured`
+    /// (без конечного замера `refreshPeriod`), но не короче `refreshPeriod` (приложение передает
+    /// период кадров `cadencePeriod`). Кадр не показывается чаще экрана и выбранной частоты, лишние
+    /// пересчеты сцены между кадрами период не укорачивают.
     public static func effectivePeriod(measured: Double?, refreshPeriod: Double) -> Double {
         guard let measured, measured.isFinite else { return refreshPeriod }
         return max(measured, refreshPeriod)
@@ -304,6 +309,39 @@ public struct RenderPacing: Sendable {
         let mean = values.reduce(0, +) / Double(values.count)
         let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
         return variance.squareRoot()
+    }
+}
+
+/// Когда кадр, нарисованный сейчас, будет на экране, и какой период кадров центрирует на нем
+/// свечение. Одно правило у острова (`AppModel.islandVisuals`) и у калибровки
+/// (`PreviewPlayer.calibrationVisuals`), поэтому сдвиг синхронизации, подобранный калибровкой,
+/// подходит острову.
+///
+/// Упреждение показа `lead` это два периода экрана (`LatencyCalculator.presentationLead`): глубина
+/// конвейера компоновки идет по кадрам экрана, а не по частоте кадров приложения. Кадр, отданный к
+/// кадру экрана N, попадает на стекло примерно через два кадра экрана при любой «Частоте кадров» и в
+/// энергосбережении. От периода кадров приложения `framePeriod` (R) зависит только, сколько кадр
+/// держится на экране: `BeatGlow` берет свечение на середину этого времени (R/2). На 60 кадрах и
+/// экране 60 Гц упреждение 33 мс, как в 1.2; на 30 кадрах оно то же, меняется только R/2, поэтому
+/// сдвиг синхронизации заново подбирать не нужно.
+public struct PresentationTiming: Sendable, Equatable {
+    /// Через сколько секунд после отрисовки кадр на экране.
+    public var lead: Double
+    /// Период кадров приложения R, с: `refreshPeriod` для `BeatGlow.value` и записи ритма.
+    public var framePeriod: Double
+
+    /// `refreshPeriod`: период экрана (`RenderPacing.screenPeriod`, без конечного положительного
+    /// 1/60 с). `framePeriod`: период кадров приложения (у острова `AppModel.renderPeriod`), без
+    /// конечного положительного период экрана.
+    public init(refreshPeriod: Double, framePeriod: Double) {
+        let screen = RenderPacing.screenPeriod(refreshPeriod)
+        lead = LatencyCalculator.presentationLead(refreshPeriod: screen)
+        self.framePeriod = framePeriod.isFinite && framePeriod > 0 ? framePeriod : screen
+    }
+
+    /// Момент показа кадра, нарисованного в `now` (секунды хоста).
+    public func presented(at now: Double) -> Double {
+        now + lead
     }
 }
 
