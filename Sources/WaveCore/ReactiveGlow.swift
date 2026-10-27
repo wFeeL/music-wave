@@ -81,7 +81,9 @@ public struct ReactiveGlow: Sendable {
     public static let bassPeakWindow = 4.0
     public static let bassSalience: Float = 6
     public static let bassRiseEpsilon: Float = 0.5
-    /// Уровень баса сглаживается средним стольких шагов (последний и прошлые).
+    /// Уровень баса сглаживается средним стольких шагов (последний и прошлые). Среднее берется по
+    /// децибелам, а не по мощности: так считал прототип разбора (`variants.py`, `uniform_filter1d` по
+    /// уровню в дБ), и все его числа и пороги (подъем 8 дБ, сила `smoothstep(8, 16, подъем)`) получены с ним.
     static let bassMeanHops = 4
     /// События ближе этого (секунды) сливаются в одно (`BeatTracker`): раннее время, большая сила.
     public static let mergeWindow = 0.08
@@ -194,6 +196,7 @@ public struct ReactiveGlow: Sendable {
         }
         guard level >= top - Self.bassRange else { return nil }
         let size = min(hops, rises.count)
+        guard size > 0 else { return nil }
         for age in 1...size {
             scratch[age - 1] = rises[(hops - age + rises.count) % rises.count]
         }
@@ -218,6 +221,7 @@ public struct ReactiveGlow: Sendable {
 
     /// Медиана прошлых значений (до `medianHops`).
     private mutating func median() -> Float {
+        guard count > 0 else { return 0 }
         for age in 1...count {
             scratch[age - 1] = past(age)
         }

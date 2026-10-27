@@ -55,4 +55,25 @@ struct GlowEvaluationTests {
         let summary = BeatEvaluation.summarize(name: "g", scores: [file, file])
         #expect(summary.glow.flashes == 4 && summary.glow.visibleFrames == 6)
     }
+
+    /// Источник вспышки (`OfflineBeatChain.startedEvent`): для долей и бочек правило 1.3 (самое позднее
+    /// начавшееся событие, в том числе доля с яркостью 0), так что метки «По ритму» в журналах те же.
+    /// Реактивное событие берется, если оно началось позже или если позднее событие сетки с яркостью 0.
+    @Test func startedEventKeepsThe13RuleForGridAndKicks() {
+        let kick = GlowEvent(id: BeatTracker.onsetIDFlag, time: 1.00, amplitude: 0.4, predicted: false)
+        let silentBeat = GlowEvent(id: 7, time: 1.02, amplitude: 0, predicted: true)
+        let beat = GlowEvent(id: 8, time: 1.02, amplitude: 0.8, predicted: true)
+        let reactive = GlowEvent(id: BeatTracker.reactiveIDFlag, time: 1.01, amplitude: 0.3, predicted: false, reactive: true)
+        func started(_ events: [GlowEvent]) -> GlowEvent? {
+            let schedule = BeatSchedule(events: events, bpm: nil, period: nil, confidence: 0, locked: false)
+            return OfflineBeatChain.startedEvent(in: schedule, by: 1.1, refreshPeriod: 1.0 / 30)
+        }
+        #expect(started([kick, silentBeat]) == silentBeat)
+        #expect(started([kick, beat]) == beat)
+        #expect(started([kick, silentBeat, reactive]) == reactive)
+        #expect(started([kick, beat, reactive]) == beat)
+        #expect(started([kick, reactive]) == reactive)
+        #expect(started([GlowEvent(id: 9, time: 1.2, amplitude: 1, predicted: true)]) == nil)
+    }
 }
+

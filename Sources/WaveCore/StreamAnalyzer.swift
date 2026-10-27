@@ -56,7 +56,8 @@ public struct HopResult: Sendable {
     public var kickLevelDB: Float
     /// `10 · log10` суммы мощностей полос басового слоя (`WaveLayer.bass`, центры до 250 Гц) плюс 1e-12, как
     /// у полос: синус амплитуды A дает A². Вход нот баса реактивного слоя (`ReactiveGlow`); в тишине около
-    /// -111 dBFS (пол каждой полосы -120).
+    /// -111 dBFS (пол каждой полосы -120). Считается, только когда `StreamAnalyzer.measuresBassLevel`, иначе
+    /// -120.
     public var bassLevelDB: Float
     /// Первый шаг со звуком после тишины не короче `StreamAnalyzer.silenceGap`: потоки онсетов начались
     /// заново, трекер начинается заново (`BeatTracker.Parameters.silenceRestart`).
@@ -175,6 +176,9 @@ public final class StreamAnalyzer {
     private static let bassPowerFloor = 1e-12
 
     public private(set) var config: AnalysisConfig
+    /// Считать `HopResult.bassLevelDB` (вход нот баса `ReactiveGlow`); без него поле равно -120, и шаг стоит
+    /// столько же, сколько в 1.3. Ставится вместе с режимом свечения: `GlowMode.measuresBassLevel`.
+    public var measuresBassLevel = false
 
     private var fft: RealFFT
     private var mapper: BandMapper
@@ -323,13 +327,16 @@ public final class StreamAnalyzer {
         }
         let soundReturned = trackSilence(maxLevelDB)
 
-        // Басовый слой: сумма мощностей его полос.
-        var bassPower = 0.0
-        for band in layerRanges[WaveLayer.bass.rawValue] {
-            let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
-            bassPower += pow(10, Double(db) / 10)
+        // Басовый слой: сумма мощностей его полос, только для реактивного слоя.
+        var bassLevelDB = Self.floorDB
+        if measuresBassLevel {
+            var bassPower = 0.0
+            for band in layerRanges[WaveLayer.bass.rawValue] {
+                let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
+                bassPower += pow(10, Double(db) / 10)
+            }
+            bassLevelDB = Float(10 * log10(bassPower + Self.bassPowerFloor))
         }
-        let bassLevelDB = Float(10 * log10(bassPower + Self.bassPowerFloor))
 
         // Бочка: поток по бинам до 150 Гц и их мощность.
         var kickPower: Float = 0

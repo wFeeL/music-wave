@@ -511,8 +511,18 @@ public struct BeatTracker: Sendable {
     /// системы и без трека false, и трекер начинается заново целиком.
     public var keepsTempoAfterSilence = false
     /// Режим свечения (`GlowMode`): какие события идут в расписание. Анализ, сетка, захват и пульс от него
-    /// не зависят, поэтому режим можно менять на ходу. По умолчанию `rhythm`, расписание как в 1.3.
-    public var glowMode = GlowMode.rhythm
+    /// не зависят, поэтому режим можно менять на ходу. По умолчанию `rhythm`, расписание как в 1.3. В
+    /// `rhythm` реактивный слой не работает совсем (шаг стоит столько же, сколько в 1.3); при каждой смене
+    /// режима слой начинается заново и после `ReactiveGlow.warmUp` дает события (старые события другого
+    /// режима не возвращаются). Приложение вместе с режимом ставит `StreamAnalyzer.measuresBassLevel`
+    /// (`GlowMode.measuresBassLevel`): без него нот баса нет.
+    public var glowMode = GlowMode.rhythm {
+        didSet {
+            guard glowMode != oldValue else { return }
+            reactiveDetector.reset()
+            reactivePast.removeAll(keepingCapacity: true)
+        }
+    }
 
     private var tempo: TempoEstimator
     /// Второе мнение о фазе (real-time PLP) на той же широкополосной функции онсетов.
@@ -629,8 +639,8 @@ public struct BeatTracker: Sendable {
     /// Шагов в окне медианы подтверждения и место под ее расчет.
     private let confirmHops: Int
     private var confirmScratch: [Float]
-    /// Реактивный слой: детектор и последние события (`reactiveCapacity`). Детектор работает в любом режиме,
-    /// поэтому смена режима на ходу видна сразу; в расписание события идут только в `hybrid` и `sound`.
+    /// Реактивный слой: детектор и последние события (`reactiveCapacity`). Работает только в `hybrid` и
+    /// `sound`.
     private var reactiveDetector: ReactiveGlow
     private var reactivePast: [ReactiveEvent]
     private var reactiveCounter: UInt64 = 0
@@ -823,9 +833,11 @@ public struct BeatTracker: Sendable {
         if let onset = hop.kickOnset, !onset.sustained {
             addKickOnset(onset)
         }
-        let reactive = reactiveDetector.process(hop, odf: odf)
-        if let bass = reactive.bass { addReactive(bass) }
-        if let accent = reactive.accent { addReactive(accent) }
+        if glowMode != .rhythm {
+            let reactive = reactiveDetector.process(hop, odf: odf)
+            if let bass = reactive.bass { addReactive(bass) }
+            if let accent = reactive.accent { addReactive(accent) }
+        }
     }
 
     /// Пауза, перемотка или смена источника: темп, фаза, уверенность и ворот начинаются заново.

@@ -281,6 +281,7 @@ public struct OfflineBeatChain: Sendable {
     private static func analyze(samples: [Float], sampleRate rate: Double, config: Config) -> Analysis {
         var rng = Noise(seed: config.seed)
         let analyzer = StreamAnalyzer(sampleRate: rate)
+        analyzer.measuresBassLevel = config.glowMode.measuresBassLevel
         let fftSize = analyzer.config.fftSize
         let hopSize = analyzer.config.hopSize
         var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond, parameters: config.trackerParameters)
@@ -477,18 +478,28 @@ public struct OfflineBeatChain: Sendable {
     }
 
     /// Событие расписания, давшее вспышку на кадре `t`: из начавшихся к этому кадру берется самое
-    /// позднее (начало по `BeatGlow`: `time − lead − R / 2`) с яркостью выше 0 (доля с яркостью 0, скрытая
-    /// показом через долю или в режиме `GlowMode.sound`, вспышки не дает). Это оценка: `BeatGlow` не
-    /// говорит, какое событие дало рост, а событие, которое он счел слишком старым, здесь не отличается от
-    /// обычного. При равных временах остается первое. Без выделения памяти: то же правило зовет запись
-    /// ритма на кадре рендера (`RhythmRecorder.appendFrame`).
+    /// позднее (начало по `BeatGlow`: `time − lead − R / 2`). Это оценка: `BeatGlow` не говорит, какое
+    /// событие дало рост, а событие, которое он счел слишком старым, здесь не отличается от обычного.
+    /// При равных временах остается первое. Для долей и бочек правило 1.3 как есть (в «По ритму» других
+    /// событий нет, и метки вспышек те же). Реактивное событие с яркостью выше 0 (`GlowMode.hybrid`,
+    /// `sound`) берется, если оно началось позже, или если позднее событие сетки с яркостью 0 (в «По звуку»
+    /// у всех долей 0, они вспышки не дают). Без выделения памяти: то же правило зовет запись ритма на
+    /// кадре рендера (`RhythmRecorder.appendFrame`).
     static func startedEvent(in schedule: BeatSchedule, by t: Double, refreshPeriod: Double) -> GlowEvent? {
         var best: GlowEvent?
-        for event in schedule.events
-        where event.time.isFinite && event.amplitude > 0 && event.time - BeatGlow.lead - refreshPeriod / 2 <= t {
-            if let current = best, current.time >= event.time { continue }
-            best = event
+        var reactive: GlowEvent?
+        for event in schedule.events where event.time.isFinite && event.time - BeatGlow.lead - refreshPeriod / 2 <= t {
+            if event.reactive {
+                guard event.amplitude > 0 else { continue }
+                if let current = reactive, current.time >= event.time { continue }
+                reactive = event
+            } else {
+                if let current = best, current.time >= event.time { continue }
+                best = event
+            }
         }
-        return best
+        guard let reactive else { return best }
+        guard let grid = best, grid.amplitude > 0, grid.time >= reactive.time else { return reactive }
+        return grid
     }
 }

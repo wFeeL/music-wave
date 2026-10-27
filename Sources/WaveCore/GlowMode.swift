@@ -11,4 +11,7 @@ public enum GlowMode: String, CaseIterable, Sendable, Codable {
     case rhythm
     case hybrid
     case sound
+
+    /// Нужен ли режиму уровень баса анализа (`StreamAnalyzer.measuresBassLevel`): ноты баса реактивного слоя.
+    public var measuresBassLevel: Bool { self != .rhythm }
 }

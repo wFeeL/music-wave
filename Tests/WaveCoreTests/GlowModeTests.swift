@@ -124,15 +124,17 @@ struct GlowModeTests {
         }
     }
 
-    /// Розовый шум от -10 до -50 dBFS по 60 с: реактивный слой почти молчит, не больше одной мягкой
-    /// вспышки на уровень и двух за 300 с (цель плана 0.5 в минуту), ярких нет. «По звуку» берет те же
-    /// события, «По ритму» в шуме не светится (`BeatSyncTests.noiseAloneNeverGlows`).
-    @Test func pinkNoiseStaysAlmostDark() async {
+    /// Розовый шум от -10 до -50 dBFS по 60 с в каждом режиме. «По ритму» не вспыхивает и не светит выше
+    /// порога вспышки 0.2 (цель плана). Реактивный слой почти молчит: не больше одной вспышки на уровень и
+    /// двух за 300 с (цель плана 0.5 в минуту); в «Ритм и звук» она мягкая (не ярче 0.6), в «По звуку» та
+    /// же вспышка в полную яркость (у шумовой вспышки в этом режиме предела 0.2 нет, есть предел числа).
+    @Test(arguments: GlowMode.allCases)
+    func pinkNoiseStaysAlmostDark(mode: GlowMode) async {
         let runs = await runOffCooperativePool { () -> [(level: Int, flashes: Int, peak: Float)] in
             [-10, -20, -30, -40, -50].map { (level: Int) in
                 let noise = Drums.pinkNoise(levelDB: Float(level), count: 60 * 48_000, seed: UInt64(-level))
                 var config = OfflineBeatChain.Config(seed: 1)
-                config.glowMode = .hybrid
+                config.glowMode = mode
                 config.renderRate = 30
                 config.presentationLead = 1.0 / 30
                 let result = OfflineBeatChain.run(samples: noise, sampleRate: 48_000, config: config)
@@ -140,8 +142,91 @@ struct GlowModeTests {
             }
         }
         for run in runs {
-            #expect(run.flashes <= 1 && run.peak <= ReactiveGlow.hybridScale + 1e-6, "\(run.level) dB: \(run.flashes), peak \(run.peak)")
+            switch mode {
+            case .rhythm:
+                #expect(run.flashes == 0 && run.peak < OfflineBeatChain.eventRise, "\(run.level) dB: \(run.flashes), peak \(run.peak)")
+            case .hybrid:
+                #expect(run.flashes <= 1 && run.peak <= ReactiveGlow.hybridScale + 1e-6, "\(run.level) dB: \(run.flashes), peak \(run.peak)")
+            case .sound:
+                #expect(run.flashes <= 1, "\(run.level) dB: \(run.flashes), peak \(run.peak)")
+            }
         }
         #expect(runs.reduce(0) { $0 + $1.flashes } <= 2, "\(runs)")
     }
+
+    /// «По ритму» это 1.3: расписание трекера после каждого шага (id, время, яркость, вид каждого события,
+    /// захват, вес, уверенность) и вспышки цепочки (времена и метки доля/бочка, `startedEvent`) совпадают по
+    /// битам с эталоном, снятым тем же кодом (`RhythmGolden`) на 8935e53. В расписаниях нет реактивных
+    /// событий. Три сцены: захват на 120 BPM, показ через долю на 150 BPM (доли с яркостью 0), хип-хоп.
+    @Test(arguments: [GlowMode.rhythm, nil])
+    func rhythmMatchesTheGoldenOf13(mode: GlowMode?) async {
+        let golden: [String: RhythmGolden.Print] = [
+            "fourOnFloor120": .init(
+                hops: 2247, events: 18711, scheduleHash: 0x1fbe7a452ac1430e, flashes: 24, flashHash: 0x10a2956d1712ab2d,
+                labels: "kkkkkkkPPPPPPPPPPPPPPPPP"
+            ),
+            "fourOnFloor150": .init(
+                hops: 2247, events: 19093, scheduleHash: 0x7313f5fc87f68cf2, flashes: 22, flashHash: 0xe2ad6aa318439666,
+                labels: "kkkkkkkkkkkkpPPPPPPPPP"
+            ),
+            "hipHop90": .init(
+                hops: 2247, events: 17874, scheduleHash: 0x3d5b869a5201e383, flashes: 14, flashHash: 0x88649df8a7d0627a,
+                labels: "kkkkPPPPPPPPPP"
+            ),
+        ]
+        let prints = await runOffCooperativePool { () -> [(String, RhythmGolden.Print, Int)] in
+            RhythmGolden.scenes.map { name, scene in
+                var reactive = 0
+                let print = RhythmGolden.fingerprint(
+                    scene(), configure: { tracker in if let mode { tracker.glowMode = mode } },
+                    check: { schedule in
+                        reactive += schedule.events.filter { $0.reactive || $0.id & ~BeatTracker.onsetIDFlag & BeatTracker.reactiveIDFlag != 0 }.count
+                    }
+                )
+                return (name, print, reactive)
+            }
+        }
+        for (name, print, reactive) in prints {
+            #expect(print == golden[name], "\(name): \(print)")
+            #expect(reactive == 0, "\(name): \(reactive) reactive events in rhythm schedules")
+        }
+    }
+
+    /// Смена режима посреди трека: в «По ритму» реактивных событий в расписании нет; после возврата в
+    /// «Ритм и звук» слой начинается заново (первое событие не раньше `ReactiveGlow.warmUp` после смены), и
+    /// события до смены не возвращаются.
+    @Test func modeSwitchRestartsTheReactiveLayer() async {
+        let checks = await runOffCooperativePool { () -> (rhythmReactive: Int, firstAfter: Double?, switchBack: Double, stale: Int) in
+            let scene = SharedScenes.steady120
+            let analyzer = StreamAnalyzer(sampleRate: scene.sampleRate)
+            analyzer.measuresBassLevel = true
+            var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
+            tracker.glowMode = .hybrid
+            var rhythmReactive = 0
+            var firstAfter: Double?
+            var before: Set<UInt64> = []
+            var stale = 0
+            let switchBack = 12.0
+            for hop in analyzer.processSignal(scene.samples) {
+                if hop.endTime >= 8, hop.endTime < switchBack { tracker.glowMode = .rhythm }
+                if hop.endTime >= switchBack { tracker.glowMode = .hybrid }
+                tracker.process(hop)
+                let reactive = tracker.schedule.events.filter(\.reactive)
+                if hop.endTime < 8 {
+                    before.formUnion(reactive.map(\.id))
+                } else if hop.endTime < switchBack {
+                    rhythmReactive += reactive.count
+                } else {
+                    stale += reactive.filter { before.contains($0.id) }.count
+                    if firstAfter == nil, let first = reactive.first { firstAfter = first.time }
+                }
+            }
+            return (rhythmReactive, firstAfter, switchBack, stale)
+        }
+        #expect(checks.rhythmReactive == 0)
+        #expect(checks.stale == 0)
+        let first = checks.firstAfter ?? 0
+        #expect(first >= checks.switchBack + ReactiveGlow.warmUp - 0.02 && first <= checks.switchBack + ReactiveGlow.warmUp + 1, "first \(first)")
+    }
 }
+
