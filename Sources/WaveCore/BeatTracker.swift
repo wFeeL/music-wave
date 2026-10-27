@@ -52,7 +52,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    пульса стоит на сетке ФАПЧ с высотой `уверенность × g_E`, пока длинное среднее уровня полосы бочки
 ///    (`ambientAverage`) не ниже порога шума волн `LevelProcessor.noiseFloorDB`; на накате (брейк без
 ///    бочки) с высотой `уверенность × coastConfidence`, по попаданиям широкополосных онсетов в доли
-///    наката. На события, уверенность и вес пульс не влияет.
+///    наката. В тишине (`HopResult.silent`) горб гаснет за `silenceFade` (`soundPresence`). На события,
+///    уверенность и вес пульс не влияет.
 ///
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей; на быстрой сетке доли другой четности, чем `shownParity`,
@@ -459,6 +460,14 @@ public struct BeatTracker: Sendable {
     /// вывода 134 мс +22 мс против +8 мс), 0.005 с почти то же, что 0.01.
     static let ambientAttack = 0.010
     static let ambientRelease = 0.150
+    /// За столько секунд горб мягкого пульса гаснет в тишине (`HopResult.silent`: самая громкая полоса
+    /// ниже `StreamAnalyzer.silenceLevelDB`) и возвращается со звуком (`soundPresence`). Без этого
+    /// накат после брейка, ушедшего в тишину (конец трека, пауза всего звука системы), держал горб:
+    /// захват на накате промахами не отпускается, а `coastConfidence` падает только на четверть за
+    /// долю. Горб от 0.05 был виден около 2 долей, слабый до 8 долей, и остров не уходил в простой,
+    /// если «Мягкая остановка» выключена. 0.3 с короче доли и не дольше угасания мягкой остановки
+    /// (`SoftStop.duration`); короткие провалы ниже порога внутри трека почти не заметны.
+    static let silenceFade = 0.3
     /// После сброса с памятью темпа гребенка ищет фазу по прежнему периоду, когда в истории столько
     /// долей: у каждой задержки гребенки тогда столько же зубцов, одна громкая атака на «и» фазу не
     /// ставит. Целое число долей: при 2.5 у задержек ближе к «сейчас» на зубец больше, и выбор
@@ -598,6 +607,11 @@ public struct BeatTracker: Sendable {
     private var ambientHeld: Float = 0
     private var ambientRise = AttackRelease(attack: BeatTracker.ambientAttack, release: 0)
     private let ambientFallPerHop: Float
+    /// Множитель горба мягкого пульса 0...1: со звуком 1, в тишине (`HopResult.silent`) идет к 0 за
+    /// `silenceFade`, со звуком обратно к 1 за то же время. Сброс ставит 1.
+    private(set) var soundPresence: Float = 1
+    /// Шаг `soundPresence` за шаг анализа.
+    private let soundPresencePerHop: Float
     /// Энергия мягкого пульса последнего шага (`AmbientInfo.energy`); относится к окну этого шага.
     /// Анализ кладет ее в кадр шага (`WaveFrame.kickEnergy`), рендер берет ее из кадра на момент показа.
     public private(set) var ambientEnergy: Float = 0
@@ -621,6 +635,7 @@ public struct BeatTracker: Sendable {
         // Спад огибающей exp(−t / 10 с) в децибелах: 20 / ln 10 дБ на постоянную времени.
         longFallPerHopDB = Float(20 / log(10.0) / (Self.longRelease * framesPerSecond))
         ambientFallPerHop = Float(exp(-1 / (Self.ambientRelease * framesPerSecond)))
+        soundPresencePerHop = Float(1 / (Self.silenceFade * framesPerSecond))
         past = []
         past.reserveCapacity(Self.pastCapacity + 1)
         confirmHops = max(Int((Self.confirmWindow * framesPerSecond).rounded()), 1)
@@ -663,13 +678,18 @@ public struct BeatTracker: Sendable {
     /// разбора (240 с, 120 BPM, брейк без бочки 120-135 с, хэты восьмыми): пульс от 0.05 в брейке на
     /// 57 % кадров при задержке вывода 134 мс (61 % при 20 мс), только от атак 48 % (45 %), с энергией от
     /// отношения уровней 0.2 %; вспышки и `wave-eval` те же.
+    ///
+    /// В тишине высота обеих веток умножается на `soundPresence`: горб гаснет за `silenceFade` и стоит
+    /// на нуле, пока звука нет, даже если захват идет накатом.
     private var ambient: AmbientInfo {
         guard let nextBeat, let period else { return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0) }
         if isCoasting {
-            return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence * coastConfidence), energy: 0)
+            let height = Float(gridConfidence * coastConfidence) * soundPresence
+            return AmbientInfo(anchor: nextBeat, period: period, confidence: height, energy: 0)
         }
         guard ambientAudible else { return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0) }
-        return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence) * energyGate, energy: 0)
+        let height = Float(gridConfidence) * energyGate * soundPresence
+        return AmbientInfo(anchor: nextBeat, period: period, confidence: height, energy: 0)
     }
 
     /// Показанная четность попадает заметно чаще скрытой (`everyOtherLockRatio`): решения о захвате
@@ -722,6 +742,9 @@ public struct BeatTracker: Sendable {
         }
         now = hop.endTime
         processedSinceReset = true
+        soundPresence = hop.silent
+            ? max(soundPresence - soundPresencePerHop, 0)
+            : min(soundPresence + soundPresencePerHop, 1)
         // Ворот и вес здесь еще от прошлого шага, до звука самой доли.
         if committedAmplitude == nil, let nextBeat, now >= nextBeat {
             committedAmplitude = predictedAmplitude(id: beatCounter)
@@ -824,6 +847,7 @@ public struct BeatTracker: Sendable {
         ambientHeld = 0
         ambientRise.reset()
         ambientEnergy = 0
+        soundPresence = 1
         past.removeAll(keepingCapacity: true)
         resumePeriod = kept?.period
         processedSinceReset = false

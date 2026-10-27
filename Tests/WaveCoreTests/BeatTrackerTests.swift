@@ -168,6 +168,45 @@ struct BeatTrackerTests {
         #expect(sorted[sorted.count / 2] > 0.5, "median hump height \(sorted[sorted.count / 2])")
     }
 
+    /// Брейк без бочки уходит в тишину (конец трека, пауза всего звука системы), пока захват идет накатом:
+    /// горб мягкого пульса гаснет за `silenceFade` и стоит на нуле, хотя захват держится (промахи наката
+    /// его не отпускают). Раньше горб от 0.05 был виден около 2 долей и слабый до 8 долей, и остров с
+    /// выключенной «Мягкой остановкой» не уходил в простой. До тишины горб на накате виден.
+    @Test func coastedPulseFadesInSilence() async {
+        let scene = Drums.kicklessBreak()
+        let rate = scene.sampleRate
+        let cut = Int(18 * rate)
+        var samples = Array(scene.samples[..<cut])
+        samples.append(contentsOf: [Float](repeating: 0, count: Int(4 * rate)))
+        let signal = samples
+        let hops = await runOffCooperativePool { StreamAnalyzer(sampleRate: rate).processSignal(signal) }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var breakPeak: Float = 0
+        var silentFrom: Double?
+        var lateMax: Float = 0
+        var lockedLate = 0
+        var lateSteps = 0
+        for hop in hops {
+            tracker.process(hop)
+            var frame = hop.frame
+            frame.kickEnergy = tracker.ambientEnergy
+            let value = BeatGlow.ambient(at: hop.endTime, info: tracker.schedule.ambient, frame: frame)
+            if (14..<18).contains(hop.endTime) { breakPeak = max(breakPeak, value) }
+            if hop.silent, silentFrom == nil { silentFrom = hop.endTime }
+            if let silentFrom, hop.endTime >= silentFrom + BeatTracker.silenceFade + 0.05 {
+                lateMax = max(lateMax, value)
+                lateSteps += 1
+                if tracker.schedule.locked { lockedLate += 1 }
+            }
+        }
+        #expect(breakPeak >= RhythmLog.ambientVisible, "pulse peak in the break \(breakPeak)")
+        let start = silentFrom ?? 0
+        #expect(start > 18 && start < 18.1, "silence from \(start)")
+        #expect(lateSteps > 0 && lockedLate == lateSteps, "locked on \(lockedLate) of \(lateSteps) silent steps")
+        #expect(lateMax == 0, "pulse in silence \(lateMax)")
+        #expect(tracker.soundPresence == 0)
+    }
+
     /// Длинная 808 легато, как в журнале 1 владельца (1.2.1): полоса бочки звучит ровно, и энергия от
     /// отношения уровней пульса почти не давала (на журнале 2.5 % кадров). Энергия от атак (онсеты длинной
     /// бочки и широкополосные) дает пульс на нотах: от `RhythmLog.ambientVisible` на четверти шагов и

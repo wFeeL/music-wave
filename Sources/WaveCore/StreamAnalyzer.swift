@@ -57,6 +57,9 @@ public struct HopResult: Sendable {
     /// Первый шаг со звуком после тишины не короче `StreamAnalyzer.silenceGap`: потоки онсетов начались
     /// заново, трекер начинается заново (`BeatTracker.Parameters.silenceRestart`).
     public var soundReturned: Bool
+    /// Самая громкая полоса шага ниже `StreamAnalyzer.silenceLevelDB`: звука нет (пауза, конец трека).
+    /// Мягкий пульс трекера в тишине гаснет (`BeatTracker.silenceFade`).
+    public var silent: Bool
 
     public init(
         frame: WaveFrame,
@@ -67,7 +70,8 @@ public struct HopResult: Sendable {
         broadbandODF: Float,
         kickODF: Float = 0,
         kickLevelDB: Float,
-        soundReturned: Bool = false
+        soundReturned: Bool = false,
+        silent: Bool = false
     ) {
         self.frame = frame
         self.frameTime = frameTime
@@ -78,6 +82,7 @@ public struct HopResult: Sendable {
         self.kickODF = kickODF
         self.kickLevelDB = kickLevelDB
         self.soundReturned = soundReturned
+        self.silent = silent
     }
 }
 
@@ -393,7 +398,8 @@ public final class StreamAnalyzer {
             broadbandODF: broadbandODF,
             kickODF: kickODF,
             kickLevelDB: kickLevelDB,
-            soundReturned: soundReturned
+            soundReturned: soundReturned,
+            silent: maxLevelDB < Self.silenceLevelDB
         )
     }
 
