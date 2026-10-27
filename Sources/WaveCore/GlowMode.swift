@@ -14,4 +14,12 @@ public enum GlowMode: String, CaseIterable, Sendable, Codable {
 
     /// Нужен ли режиму уровень баса анализа (`StreamAnalyzer.measuresBassLevel`): ноты баса реактивного слоя.
     public var measuresBassLevel: Bool { self != .rhythm }
+
+    /// Единая точка настройки режима: ставит трекеру `glowMode` и анализу `measuresBassLevel` вместе, чтобы
+    /// приложение не забыло половину (без уровня баса в `hybrid` и `sound` нет нот баса). Зовется при
+    /// создании и при каждой смене режима на очереди анализа; смена начинает реактивный слой заново.
+    public func apply(to analyzer: StreamAnalyzer, tracker: inout BeatTracker) {
+        analyzer.measuresBassLevel = measuresBassLevel
+        tracker.glowMode = self
+    }
 }

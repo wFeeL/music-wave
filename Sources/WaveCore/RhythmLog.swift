@@ -17,8 +17,8 @@ import Synchronization
 /// Схемы: 1 (1.1 и 1.2); 2 (1.3) добавляет в расписания яркость предсказанных долей, гонку фаз и
 /// отношение гребенки (`Schedule.amplitudes`, `race`, `combRatio`). Читаются обе; незнакомые поля
 /// пропускаются, новые поля необязательны, поэтому поле, которое добавит более новая сборка без смены
-/// схемы, старую не ломает. Так в 1.3 без смены схемы добавлены `meta.flashLength` и
-/// `meta.presentationLead`: необязательные поля схему не меняют.
+/// схемы, старую не ломает. Так в 1.3 без смены схемы добавлены `meta.flashLength`,
+/// `meta.presentationLead`, `meta.glowMode` и `Flash.reactive`: необязательные поля схему не меняют.
 public struct RhythmLog: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 2
     /// Схемы, которые читает `decode`.
@@ -101,6 +101,12 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var flashLength: Double?
         /// «Мягкий пульс» включен; в журналах до 1.2 поля нет (`nil`).
         public var softPulse: Bool?
+        /// Режим свечения записи (`GlowMode.rawValue`: `rhythm`, `hybrid`, `sound`); в журналах до режимов
+        /// поля нет (`nil`, то есть «По ритму»), незнакомое значение читается как `rhythm`
+        /// (`resolvedGlowMode`). Прогон идет в этом режиме. Поле необязательное, схема та же.
+        public var glowMode: String?
+        /// Режим свечения записи для прогона: `nil` и незнакомое значение дают `rhythm`.
+        public var resolvedGlowMode: GlowMode { glowMode.flatMap(GlowMode.init(rawValue:)) ?? .rhythm }
         /// Режим энергосбережения в начале записи (рендер до 30 кадров в секунду, облегченный вид).
         public var lowPower: Bool
         /// Сэмплов, обрезанных до ±1 при записи в 16 бит: прогон видит их не такими, как анализ.
@@ -140,6 +146,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             beatPulse: Bool = true,
             flashLength: Double? = nil,
             softPulse: Bool? = nil,
+            glowMode: String? = nil,
             lowPower: Bool = false,
             clippedSamples: Int = 0,
             startHostSeconds: Double = 0,
@@ -168,6 +175,7 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.beatPulse = beatPulse
             self.flashLength = flashLength
             self.softPulse = softPulse
+            self.glowMode = glowMode
             self.lowPower = lowPower
             self.clippedSamples = clippedSamples
             self.startHostSeconds = startHostSeconds
@@ -238,11 +246,16 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var predicted: Bool
         /// Расписание на этом кадре было с захватом.
         public var locked: Bool
+        /// Вспышку дало реактивное событие (`GlowEvent.reactive`, режимы «Ритм и звук» и «По звуку»); оценка,
+        /// как `predicted`. Ключ пишется только у реактивных вспышек: в «По ритму» и в журналах до режимов
+        /// его нет (`nil`, то есть не реактивная).
+        public var reactive: Bool?
 
-        public init(time: Double, predicted: Bool, locked: Bool) {
+        public init(time: Double, predicted: Bool, locked: Bool, reactive: Bool? = nil) {
             self.time = time
             self.predicted = predicted
             self.locked = locked
+            self.reactive = reactive
         }
     }
 
@@ -445,11 +458,11 @@ public struct RhythmRecorder: Sendable {
             meta.ambientPeak = max(meta.ambientPeak ?? 0, shown)
         }
         guard glowRise > OfflineBeatChain.eventRise else { return }
+        let started = OfflineBeatChain.startedEvent(in: schedule, by: presentedHost, refreshPeriod: refreshPeriod)
         flashes.append(
             RhythmLog.Flash(
-                time: Self.rounded(time),
-                predicted: OfflineBeatChain.startedEvent(in: schedule, by: presentedHost, refreshPeriod: refreshPeriod)?.predicted ?? false,
-                locked: schedule.locked
+                time: Self.rounded(time), predicted: started?.predicted ?? false, locked: schedule.locked,
+                reactive: started?.reactive == true ? true : nil
             )
         )
     }
@@ -457,6 +470,12 @@ public struct RhythmRecorder: Sendable {
     /// «Уменьшение движения» включено на кадре записи.
     public mutating func noteReduceMotion() {
         meta.reduceMotion = true
+    }
+
+    /// Режим свечения сменился на `mode`: запись одного режима, поэтому другой режим кончает ее
+    /// (`settingsChanged`). Тот же режим, что в `meta.glowMode` (`nil` это `rhythm`), ничего не меняет.
+    public mutating func noteGlowMode(_ mode: GlowMode) {
+        if mode != meta.resolvedGlowMode { stop(.settingsChanged) }
     }
 
     /// Кончает запись с причиной `reason`; первая причина остается.
@@ -596,6 +615,11 @@ public final class RhythmSession: Sendable {
 
     public func noteReduceMotion() {
         recorder.withLock { $0.noteReduceMotion() }
+    }
+
+    /// См. `RhythmRecorder.noteGlowMode`.
+    public func noteGlowMode(_ mode: GlowMode) {
+        recorder.withLock { $0.noteGlowMode(mode) }
     }
 
     /// Запись и ее звук в 16 бит.

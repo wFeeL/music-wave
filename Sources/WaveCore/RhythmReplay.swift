@@ -200,7 +200,8 @@ public enum RhythmReplay {
     }
 
     /// Настройка цепочки для записи: задержка, сдвиг, частота отрисовки и упреждение показа устройства
-    /// (журналы до 1.3 без упреждения: два периода отрисовки).
+    /// (журналы до 1.3 без упреждения: два периода отрисовки) и режим свечения записи (`meta.glowMode`, без
+    /// него «По ритму»).
     public static func config(for meta: RhythmLog.Meta, options: Options) -> OfflineBeatChain.Config {
         var config = OfflineBeatChain.Config(seed: options.seed)
         config.outputLatency = meta.outputLatency
@@ -211,6 +212,7 @@ public enum RhythmReplay {
         config.presentationLead = meta.presentationLead
         config.trackerParameters = options.trackerParameters
         config.softPulse = true
+        config.glowMode = meta.resolvedGlowMode
         return config
     }
 
@@ -353,6 +355,7 @@ extension RhythmReplay.Report {
                 + "end \(meta.endReason.rawValue), rendered frames \(meta.renderedFrames)"
                 + (meta.renderedUntil.map { " until \(String(format: "%.2f", $0)) s" } ?? "")
         )
+        lines.append("glow mode: \(meta.resolvedGlowMode.rawValue)" + (meta.glowMode == nil ? " (not logged)" : ""))
         lines.append(
             "device settings: reduce motion \(meta.reduceMotion ? "on" : "off"), glow intensity "
                 + "\(String(format: "%.2f", meta.glowIntensity)), beat pulse \(meta.beatPulse ? "on" : "off"), "
@@ -381,6 +384,12 @@ extension RhythmReplay.Report {
             "predicted flashes: device \(devicePredicted) of \(deviceFlashes.count), replay \(replayPredicted) of \(replayFlashes.count); "
                 + "locked flashes: device \(deviceFlashes.filter(\.locked).count), replay \(replayFlashes.filter(\.locked).count)"
         )
+        let deviceReactive = deviceFlashes.filter { $0.reactive == true }.count
+        let replayReactive = replayFlashes.filter(\.reactive).count
+        lines.append(
+            "grid/reactive flashes: device \(deviceFlashes.count - deviceReactive)/\(deviceReactive), "
+                + "replay \(replayFlashes.count - replayReactive)/\(replayReactive)"
+        )
         lines.append(softPulseLine)
         lines.append("")
         lines.append(Self.row(["tempo/lock", "first lock s", "locked share", "lock changes", "median BPM", "last BPM", "mean weight"]))
@@ -396,7 +405,7 @@ extension RhythmReplay.Report {
             let replayTimes = replayFlashes.map(\.time)
             for flash in deviceFlashes {
                 let nearest = replayTimes.min { abs($0 - flash.time) < abs($1 - flash.time) }
-                let kind = (flash.predicted ? "beat" : "kick") + (flash.locked ? " L" : "")
+                let kind = (flash.reactive == true ? "react" : flash.predicted ? "beat" : "kick") + (flash.locked ? " L" : "")
                 lines.append(Self.row([
                     String(format: "%.3f", flash.time),
                     kind,
