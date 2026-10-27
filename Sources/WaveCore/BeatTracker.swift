@@ -415,8 +415,13 @@ public struct BeatTracker: Sendable {
 
     /// Старший бит id онсетов бочки.
     public static let onsetIDFlag: UInt64 = 1 << 63
+    /// Второй бит id реактивных событий (`ReactiveGlow`).
+    public static let reactiveIDFlag: UInt64 = 1 << 62
     /// Сколько прошедших событий остается в расписании.
     static let pastCapacity = 8
+    /// Сколько последних реактивных событий остается в расписании (отдельно от `past`, чтобы сетка и
+    /// бочки в расписании не зависели от режима).
+    static let reactiveCapacity = 8
     /// Зубцов гребенки фазы и вес каждого следующего (более старого).
     static let phaseTeeth = 5
     static let phaseToothWeight = 0.75
@@ -624,6 +629,18 @@ public struct BeatTracker: Sendable {
     /// Шагов в окне медианы подтверждения и место под ее расчет.
     private let confirmHops: Int
     private var confirmScratch: [Float]
+    /// Реактивный слой: детектор и последние события (`reactiveCapacity`). Детектор работает в любом режиме,
+    /// поэтому смена режима на ходу видна сразу; в расписание события идут только в `hybrid` и `sound`.
+    private var reactiveDetector: ReactiveGlow
+    private var reactivePast: [ReactiveEvent]
+    private var reactiveCounter: UInt64 = 0
+
+    /// Реактивное событие: сила 0.5...1 (полная яркость «По звуку»).
+    private struct ReactiveEvent: Sendable {
+        var id: UInt64
+        var time: Double
+        var strength: Float
+    }
 
     public init(framesPerSecond: Double, parameters: Parameters = .init()) {
         precondition(framesPerSecond > 0, "framesPerSecond must be positive")
@@ -643,6 +660,9 @@ public struct BeatTracker: Sendable {
         past.reserveCapacity(Self.pastCapacity + 1)
         confirmHops = max(Int((Self.confirmWindow * framesPerSecond).rounded()), 1)
         confirmScratch = [Float](repeating: 0, count: confirmHops)
+        reactiveDetector = ReactiveGlow(framesPerSecond: framesPerSecond)
+        reactivePast = []
+        reactivePast.reserveCapacity(Self.reactiveCapacity + 1)
     }
 
     /// Расписание в секундах потока: до 8 прошедших событий и две следующие предсказанные доли. В режиме
@@ -660,6 +680,12 @@ public struct BeatTracker: Sendable {
             events.removeAll { !$0.predicted && !$0.reactive }
             for index in events.indices where events[index].predicted {
                 events[index].amplitude = 0
+            }
+        }
+        if glowMode != .rhythm {
+            let scale: Float = glowMode == .sound ? 1 : ReactiveGlow.hybridScale
+            for event in reactivePast {
+                events.append(GlowEvent(id: event.id, time: event.time, amplitude: event.strength * scale, predicted: false, reactive: true))
             }
         }
         events.sort { $0.time < $1.time }
@@ -797,6 +823,9 @@ public struct BeatTracker: Sendable {
         if let onset = hop.kickOnset, !onset.sustained {
             addKickOnset(onset)
         }
+        if let event = reactiveDetector.process(hop, odf: odf) {
+            addReactive(event)
+        }
     }
 
     /// Пауза, перемотка или смена источника: темп, фаза, уверенность и ворот начинаются заново.
@@ -860,6 +889,8 @@ public struct BeatTracker: Sendable {
         ambientEnergy = 0
         soundPresence = 1
         past.removeAll(keepingCapacity: true)
+        reactiveDetector.reset()
+        reactivePast.removeAll(keepingCapacity: true)
         resumePeriod = kept?.period
         processedSinceReset = false
         if let kept {
@@ -872,15 +903,19 @@ public struct BeatTracker: Sendable {
 
     /// Новая частота шагов (смена частоты дискретизации): все состояние начинается заново, как после
     /// `reset()`, а счетчики id продолжают расти, чтобы `BeatGlow` не принял новые события за старые.
-    /// Захват, который был, теряется с причиной `.reset`.
+    /// Захват, который был, теряется с причиной `.reset`. Режим свечения остается.
     public mutating func reconfigure(framesPerSecond: Double) {
         precondition(framesPerSecond > 0, "framesPerSecond must be positive")
         let beats = beatCounter
         let onsets = onsetCounter
+        let reactives = reactiveCounter
         let wasLocked = locked
+        let mode = glowMode
         self = BeatTracker(framesPerSecond: framesPerSecond, parameters: parameters)
         beatCounter = beats + 2
         onsetCounter = onsets
+        reactiveCounter = reactives
+        glowMode = mode
         if wasLocked { lastUnlockReason = .reset }
     }
 
@@ -1511,6 +1546,23 @@ public struct BeatTracker: Sendable {
         guard amplitude > 0 else { return }
         archive(GlowEvent(id: Self.onsetIDFlag | onsetCounter, time: onset.time, amplitude: amplitude, predicted: false))
         onsetCounter += 1
+    }
+
+    /// Реактивное событие в расписание (`reactivePast`), id из своего счетчика. Событие ближе
+    /// `ReactiveGlow.mergeWindow` к прошлому сливается с ним (тот же id, раннее время, большая сила):
+    /// растущая функция онсетов дает событие на шаге подъема и еще одно, сильнее, шагом позже, а это одна
+    /// атака и одна вспышка.
+    private mutating func addReactive(_ event: ReactiveGlow.Event) {
+        if let last = reactivePast.indices.last, event.time - reactivePast[last].time < ReactiveGlow.mergeWindow {
+            reactivePast[last].time = min(reactivePast[last].time, event.time)
+            reactivePast[last].strength = max(reactivePast[last].strength, event.strength)
+            return
+        }
+        reactivePast.append(ReactiveEvent(id: Self.reactiveIDFlag | reactiveCounter, time: event.time, strength: event.strength))
+        reactiveCounter += 1
+        if reactivePast.count > Self.reactiveCapacity {
+            reactivePast.removeFirst()
+        }
     }
 
     /// Насколько онсет бочки похож на удар, а не на всплеск шума в трех бинах бочки, 0...1.
