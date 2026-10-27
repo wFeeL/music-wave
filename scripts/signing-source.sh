@@ -35,9 +35,9 @@ warn_partial_pair() {
     local dir=$1
     [[ -d "$dir" ]] || return 0
     if [[ -f "$dir/$SIGNING_P12_NAME" && ! -f "$dir/$SIGNING_PASSWORD_NAME" ]]; then
-        echo "ВНИМАНИЕ: в «$dir» нет файла $SIGNING_PASSWORD_NAME, эта папка пропущена." >&2
+        echo "ВНИМАНИЕ: в «${dir}» нет файла $SIGNING_PASSWORD_NAME, эта папка пропущена." >&2
     elif [[ ! -f "$dir/$SIGNING_P12_NAME" && -f "$dir/$SIGNING_PASSWORD_NAME" ]]; then
-        echo "ВНИМАНИЕ: в «$dir» нет файла $SIGNING_P12_NAME, эта папка пропущена." >&2
+        echo "ВНИМАНИЕ: в «${dir}» нет файла $SIGNING_P12_NAME, эта папка пропущена." >&2
     fi
     return 0
 }
@@ -71,7 +71,7 @@ find_signing_dir() {
 import_signing_dir() {
     local src=${1:-} dest
     if ! signing_dir_has_pair "$src"; then
-        echo "В папке «$src» нет двух файлов: $SIGNING_P12_NAME и $SIGNING_PASSWORD_NAME." >&2
+        echo "В папке «${src}» нет двух файлов: $SIGNING_P12_NAME и $SIGNING_PASSWORD_NAME." >&2
         return 1
     fi
     dest=$(signing_app_support_dir)

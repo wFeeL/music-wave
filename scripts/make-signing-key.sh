@@ -41,13 +41,13 @@ if EXISTING=$(find_signing_dir 2> /dev/null); then
     exit 0
 fi
 if [[ -e "$DEST/$SIGNING_P12_NAME" || -e "$DEST/$SIGNING_PASSWORD_NAME" ]]; then
-    ui_error "В «$DEST» лежит только часть ключа. Проверьте папку: если ключ потерян, уберите ее и запустите скрипт снова." >&2
+    ui_error "В «${DEST}» лежит только часть ключа. Проверьте папку: если ключ потерян, уберите ее и запустите скрипт снова." >&2
     exit 1
 fi
 for old in "$HOME"/Downloads/music-wave-develop*/signing; do
     if signing_dir_has_pair "$old"; then
         {
-            ui_warn "В «$old» лежит старый ключ подписи. Новый создавать не нужно, укажите эту папку при сборке:"
+            ui_warn "В «${old}» лежит старый ключ подписи. Новый создавать не нужно, укажите эту папку при сборке:"
             ui_info "bash scripts/build-local.sh --signing-dir \"$old\" --install"
         } >&2
         exit 1
@@ -85,7 +85,7 @@ extendedKeyUsage = critical,codeSigning
 subjectKeyIdentifier = hash
 EOF
 
-ui_sub "Создаю сертификат «$CN»"
+ui_sub "Создаю сертификат «${CN}»"
 "$OPENSSL" req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 -config "$WORK/cert.cnf" \
     -keyout "$WORK/key.pem" -out "$WORK/cert.pem" 2> "$WORK/openssl.log" ||
     { cat "$WORK/openssl.log" >&2; ui_error "Не удалось создать сертификат." >&2; exit 1; }
@@ -99,7 +99,7 @@ LEAF=$(normalize_hash "${LEAF#*=}")
 ui_ok "Сертификат создан"
 # p12 должен читаться тем же путем, что и при сборке, и давать тот же хэш.
 if ! CHECK=$(signing_leaf_hash "$WORK") || [[ "$CHECK" != "$LEAF" ]]; then
-    ui_error "Созданный ключ не прошел проверку, в «$DEST» ничего не записано." >&2
+    ui_error "Созданный ключ не прошел проверку, в «${DEST}» ничего не записано." >&2
     exit 1
 fi
 

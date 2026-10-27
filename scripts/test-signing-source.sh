@@ -196,6 +196,14 @@ rm -rf "$HOME/Downloads"
 if find_downloads_signing_dir "$(printf '0%.0s' $(seq 1 40))" > /dev/null 2>&1; then rc=0; else rc=$?; fi
 check "Загрузки: пусто, код 1" eq "$rc" 1
 
+# --- переменные перед не-ASCII символами ---
+# bash 3.2 в macOS читает первый байт «»» или «█» как часть имени: "$CN»" дает
+# «CN?: unbound variable». Такие переменные пишутся в фигурных скобках: "${CN}»".
+BARE=$(perl -ne 'print "$ARGV:$.: $_" if !/^\s*#/ && /\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]/; close ARGV if eof' \
+    "$SCRIPT_DIR"/*.sh || true)
+check "скрипты: \$имя перед не-ASCII символом взято в скобки" eq "$BARE" ""
+[[ -z "$BARE" ]] || printf '%s\n' "$BARE"
+
 # --- sign.sh в CI без сертификата ---
 
 rm -rf "$HOME/Library"

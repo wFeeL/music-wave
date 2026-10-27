@@ -96,7 +96,7 @@ ui_progress_filter() { # файл...
             filled=$((done * width / total))
             bar=""
             for ((i = 0; i < width; i++)); do
-                if [[ $i -lt $filled ]]; then bar="$bar█"; else bar="$bar░"; fi
+                if [[ $i -lt $filled ]]; then bar="${bar}█"; else bar="${bar}░"; fi
             done
             printf -v text '%3d%%  %d/%d  %s' "$pct" "$done" "$total" "$text"
             text=${text:0:$((cols - width - 8))}

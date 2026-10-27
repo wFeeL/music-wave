@@ -116,7 +116,7 @@ if [[ -n "$SIGNING_DIR_ARG" ]]; then
         SIGNING_DIR_ARG="$SIGNING_DIR_ARG/signing"
     fi
     if ! signing_dir_has_pair "$SIGNING_DIR_ARG"; then
-        echo "В папке «$SIGNING_DIR_ARG» нет двух файлов: wavefeels-signing.p12 и password.txt." >&2
+        echo "В папке «${SIGNING_DIR_ARG}» нет двух файлов: wavefeels-signing.p12 и password.txt." >&2
         exit 2
     fi
 fi
@@ -378,7 +378,7 @@ import_checked_key() { # папка
     signing_leaf_matches "$src" "$EXPECTED_LEAF" || rc=$?
     case $rc in
         0) ui_ok "Хэш сертификата совпал с ожидаемым." ;;
-        1) fail "Сертификат в «$src» не тот, которым подписано установленное приложение. С ним macOS снова спросит доступ к звуку, поэтому ключ не импортирован. Нужна копия с ключом WaveFeels Self-Signed." ;;
+        1) fail "Сертификат в «${src}» не тот, которым подписано установленное приложение. С ним macOS снова спросит доступ к звуку, поэтому ключ не импортирован. Нужна копия с ключом WaveFeels Self-Signed." ;;
         *)
             warn "Хэш сертификата до подписи проверить не удалось (openssl не прочитал файл). Проверка пройдет после подписи, в «Application Support» ключ сохранится только если она успешна."
             PENDING_KEY_DIR=$src
@@ -397,14 +397,14 @@ import_checked_key() { # папка
 }
 
 if [[ -n "$SIGNING_DIR_ARG" ]]; then
-    say "Импортирую ключ подписи из «$SIGNING_DIR_ARG»"
+    say "Импортирую ключ подписи из «${SIGNING_DIR_ARG}»"
     import_checked_key "$SIGNING_DIR_ARG"
 elif [[ -n "${SIGNING_P12_BASE64:-}" ]]; then
     ui_ok "Ключ из переменных SIGNING_P12_BASE64 и SIGNING_P12_PASSWORD"
 elif KEY_DIR=$(find_signing_dir); then
     ui_ok "Ключ подписи: $KEY_DIR"
 elif OLD_COPY=$(find_downloads_signing_dir "$EXPECTED_LEAF"); then
-    say "Нашел старую копию с ключом подписи: «$OLD_COPY»"
+    say "Нашел старую копию с ключом подписи: «${OLD_COPY}»"
     import_checked_key "$OLD_COPY"
 else
     fail "Не нашел ключ подписи. Если WaveFeels на этом маке еще не ставили, создайте ключ: bash scripts/make-signing-key.sh. Если ключ лежит в старой копии: bash scripts/build-local.sh --signing-dir <папка со старой копией>/signing --install"
