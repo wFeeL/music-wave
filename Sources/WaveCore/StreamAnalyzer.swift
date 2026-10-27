@@ -54,6 +54,10 @@ public struct HopResult: Sendable {
     /// `10 · log10` суммарной мощности бинов бочки (до 150 Гц, без бина 0), деленной на ENBW окна
     /// Ханна, как у полос `BandMapper`: синус амплитуды A дает A². Пол -120 dBFS.
     public var kickLevelDB: Float
+    /// `10 · log10` суммы мощностей полос басового слоя (`WaveLayer.bass`, центры до 250 Гц) плюс 1e-12, как
+    /// у полос: синус амплитуды A дает A². Вход нот баса реактивного слоя (`ReactiveGlow`); в тишине около
+    /// -111 dBFS (пол каждой полосы -120).
+    public var bassLevelDB: Float
     /// Первый шаг со звуком после тишины не короче `StreamAnalyzer.silenceGap`: потоки онсетов начались
     /// заново, трекер начинается заново (`BeatTracker.Parameters.silenceRestart`).
     public var soundReturned: Bool
@@ -70,6 +74,7 @@ public struct HopResult: Sendable {
         broadbandODF: Float,
         kickODF: Float = 0,
         kickLevelDB: Float,
+        bassLevelDB: Float = -120,
         soundReturned: Bool = false,
         silent: Bool = false
     ) {
@@ -81,6 +86,7 @@ public struct HopResult: Sendable {
         self.broadbandODF = broadbandODF
         self.kickODF = kickODF
         self.kickLevelDB = kickLevelDB
+        self.bassLevelDB = bassLevelDB
         self.soundReturned = soundReturned
         self.silent = silent
     }
@@ -165,6 +171,8 @@ public final class StreamAnalyzer {
     static let silenceLevelDB = broadbandPickerParameters.minLevelDB
     private static let hannENBW: Float = 1.5
     private static let floorDB: Float = -120
+    /// Прибавка к мощности басового слоя перед логарифмом (`HopResult.bassLevelDB`).
+    private static let bassPowerFloor = 1e-12
 
     public private(set) var config: AnalysisConfig
 
@@ -315,6 +323,14 @@ public final class StreamAnalyzer {
         }
         let soundReturned = trackSilence(maxLevelDB)
 
+        // Басовый слой: сумма мощностей его полос.
+        var bassPower = 0.0
+        for band in layerRanges[WaveLayer.bass.rawValue] {
+            let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
+            bassPower += pow(10, Double(db) / 10)
+        }
+        let bassLevelDB = Float(10 * log10(bassPower + Self.bassPowerFloor))
+
         // Бочка: поток по бинам до 150 Гц и их мощность.
         var kickPower: Float = 0
         let kickODF = spectrum.withUnsafeBufferPointer { spectrum in
@@ -398,6 +414,7 @@ public final class StreamAnalyzer {
             broadbandODF: broadbandODF,
             kickODF: kickODF,
             kickLevelDB: kickLevelDB,
+            bassLevelDB: bassLevelDB,
             soundReturned: soundReturned,
             silent: maxLevelDB < Self.silenceLevelDB
         )

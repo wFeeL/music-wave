@@ -823,9 +823,9 @@ public struct BeatTracker: Sendable {
         if let onset = hop.kickOnset, !onset.sustained {
             addKickOnset(onset)
         }
-        if let event = reactiveDetector.process(hop, odf: odf) {
-            addReactive(event)
-        }
+        let reactive = reactiveDetector.process(hop, odf: odf)
+        if let bass = reactive.bass { addReactive(bass) }
+        if let accent = reactive.accent { addReactive(accent) }
     }
 
     /// Пауза, перемотка или смена источника: темп, фаза, уверенность и ворот начинаются заново.

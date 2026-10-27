@@ -66,14 +66,16 @@ struct GlowModeTests {
     /// сетки).
     @Test(arguments: [0.211, 0.020])
     func soundModeFlashesOnTheKicks(latency: Double) async {
-        let (scene, results) = await Self.run(
-            { SharedScenes.steady120 }, modes: [.sound, .rhythm], latency: latency, sync: latency > 0.1 ? -0.02 : 0
-        )
+        let sync = latency > 0.1 ? -0.02 : 0
+        let (scene, results) = await Self.run({ SharedScenes.steady120 }, modes: [.sound, .rhythm], latency: latency, sync: sync)
         let kicks = scene.kicks.map { $0 + latency }
         let expected = kicks.filter { $0 >= 2.05 && $0 <= 22.95 }.count
         let flashes = results[0].flashes.filter { $0.time >= 2 && $0.time <= 23 }
         let offsets = Self.offsets(flashes, reference: kicks)
-        #expect(results[0].flashes.allSatisfy { $0.time >= ReactiveGlow.warmUp + latency }, "\(results[0].flashes.prefix(3))")
+        // Прогрев: события с 1.5 с потока (центр окна ноты баса чуть раньше конца шага), вспышка на сдвиг и
+        // опережение раньше слышимого момента.
+        let firstAllowed = ReactiveGlow.warmUp - 0.011 + latency + sync - BeatGlow.lead - 1.0 / 30
+        #expect(results[0].flashes.allSatisfy { $0.time >= firstAllowed }, "\(results[0].flashes.prefix(3))")
         #expect(Double(offsets.count) >= 0.9 * Double(expected), "on kicks \(offsets.count) of \(expected)")
         #expect(flashes.count - offsets.count <= 1, "off the kicks \(flashes.count - offsets.count)")
         // Одна вспышка на удар: подъем функции онсетов на двух шагах сливается в одно событие.
@@ -101,5 +103,45 @@ struct GlowModeTests {
         }
         #expect(hybrid.flashes.filter(\.reactive).allSatisfy { $0.peak <= ReactiveGlow.hybridScale + 1e-6 })
     }
-}
 
+    /// 808 без удара (трек T2 владельца, `Drums.glide808`): «Ритм и звук» и «По звуку» не темные (темнота
+    /// после прогрева не больше 0.35), вспышки идут на нотах (не дальше 70 мс от начала ноты не меньше 0.8
+    /// всех) и в «Ритм и звук» мягкие. Это заслуга нот баса: на одних акцентах потока здесь 3 вспышки за
+    /// 22 с (темнота 0.93), «По ритму» темно все время, как у T2 в 1.3.
+    @Test func gliding808IsNotDark() async {
+        let latency = 0.211
+        let (scene, results) = await Self.run({ Drums.glide808() }, modes: [.hybrid, .sound], latency: latency)
+        let notes = scene.kicks.map { $0 + latency }
+        for (mode, result) in zip([GlowMode.hybrid, .sound], results) {
+            let flashes = result.flashes.filter { $0.time >= 2 + latency && $0.time <= 24 + latency }
+            let dark = BeatMetrics.darkSpans(detections: flashes.map(\.time), from: 2 + latency, to: 24 + latency, gap: 1.5).total / 22
+            let onNotes = Self.offsets(flashes, reference: notes).count
+            #expect(dark <= 0.35, "\(mode) dark \(dark), flashes \(flashes.count)")
+            #expect(Double(onNotes) >= 0.8 * Double(flashes.count), "\(mode) on notes \(onNotes) of \(flashes.count)")
+            if mode == .hybrid {
+                #expect(flashes.filter(\.reactive).allSatisfy { $0.peak <= ReactiveGlow.hybridScale + 1e-6 })
+            }
+        }
+    }
+
+    /// Розовый шум от -10 до -50 dBFS по 60 с: реактивный слой почти молчит, не больше одной мягкой
+    /// вспышки на уровень и двух за 300 с (цель плана 0.5 в минуту), ярких нет. «По звуку» берет те же
+    /// события, «По ритму» в шуме не светится (`BeatSyncTests.noiseAloneNeverGlows`).
+    @Test func pinkNoiseStaysAlmostDark() async {
+        let runs = await runOffCooperativePool { () -> [(level: Int, flashes: Int, peak: Float)] in
+            [-10, -20, -30, -40, -50].map { (level: Int) in
+                let noise = Drums.pinkNoise(levelDB: Float(level), count: 60 * 48_000, seed: UInt64(-level))
+                var config = OfflineBeatChain.Config(seed: 1)
+                config.glowMode = .hybrid
+                config.renderRate = 30
+                config.presentationLead = 1.0 / 30
+                let result = OfflineBeatChain.run(samples: noise, sampleRate: 48_000, config: config)
+                return (level, result.flashes.count, result.peakGlow)
+            }
+        }
+        for run in runs {
+            #expect(run.flashes <= 1 && run.peak <= ReactiveGlow.hybridScale + 1e-6, "\(run.level) dB: \(run.flashes), peak \(run.peak)")
+        }
+        #expect(runs.reduce(0) { $0 + $1.flashes } <= 2, "\(runs)")
+    }
+}

@@ -20,9 +20,31 @@ import Foundation
 /// `hybridScale` (мягкие вспышки 0.3-0.6). Показ (`BeatGlow`) тот же, что у сетки: опережение, правило
 /// опоздания, спад по периоду. События ближе `mergeWindow` трекер сливает в одно.
 ///
-/// `process` не выделяет памяти: кольца выделены в `init`, медиана считается только на шагах-кандидатах
-/// выбором Хоара (`BeatTracker.select`).
+/// Второй источник это ноты баса (`HopResult.bassLevelDB`, мощность басового слоя, среднее 4 шагов): 808 без
+/// удара (трек T2 журналов владельца: скользящие ноты, широкополосных онсетов на 51 долю 6-21) дает подъем
+/// уровня, а не перепад потока. Событие ноты на шаге, где:
+/// - подъем над минимумом прошлых `bassRiseWindow` секунд не меньше `bassRise` дБ;
+/// - уровень не ниже максимума за `bassPeakWindow` секунд минус `bassRange` дБ и выше `minLevelDB`;
+/// - подъем не меньше `bassSalience` × (медиана подъемов за `window` секунд + `bassRiseEpsilon` дБ): ровный
+///   бас и шум дают много подъемов, и порог растет с ними (без этого бас розового шума светил бы на 99.7 %
+///   кадров, с ним событий почти нет);
+/// - прошлое событие ноты дальше `refractory`, прогрев как у потока.
+/// Время это центр окна шага (`HopResult.frameTime`), сила `0.5 + 0.5 × smoothstep(8, 16, подъем)`.
+///
+/// `process` не выделяет памяти: кольца выделены в `init`, медианы считаются только на шагах-кандидатах
+/// выбором Хоара (`BeatTracker.select`), максимум уровня за 4 с тоже.
 public struct ReactiveGlow: Sendable {
+    /// События шага: нота баса и акцент потока (оба могут быть, нота раньше по времени).
+    public struct Events: Sendable, Equatable {
+        public var bass: Event?
+        public var accent: Event?
+
+        public init(bass: Event? = nil, accent: Event? = nil) {
+            self.bass = bass
+            self.accent = accent
+        }
+    }
+
     /// Событие слоя: время на оси онсетов (секунды потока) и сила 0.5...1.
     public struct Event: Sendable, Equatable {
         public var time: Double
@@ -51,6 +73,16 @@ public struct ReactiveGlow: Sendable {
     public static let minLevelDB: Float = -60
     /// Сколько прошлых шагов должны быть не выше шага события.
     static let localMaxHops = 3
+    /// Ноты баса: подъем, его окно, диапазон от максимума и его окно, выраженность.
+    public static let bassRise: Float = 8
+    public static let bassRiseFull: Float = 16
+    public static let bassRiseWindow = 0.08
+    public static let bassRange: Float = 15
+    public static let bassPeakWindow = 4.0
+    public static let bassSalience: Float = 6
+    public static let bassRiseEpsilon: Float = 0.5
+    /// Уровень баса сглаживается средним стольких шагов (последний и прошлые).
+    static let bassMeanHops = 4
     /// События ближе этого (секунды) сливаются в одно (`BeatTracker`): раннее время, большая сила.
     public static let mergeWindow = 0.08
     /// Яркость слоя в «Ритм и звук» относительно полной.
@@ -70,6 +102,13 @@ public struct ReactiveGlow: Sendable {
     private var hops = 0
     private var lastHop = Int.min / 2
     private var lastValue: Float = 0
+    /// Ноты баса: сырые уровни для среднего, сглаженные уровни (кольцо на 4 с), подъемы (кольцо на
+    /// `medianHops`), шаг прошлого события.
+    private let riseHops: Int
+    private var bassRaw: [Float]
+    private var bassLevels: [Float]
+    private var rises: [Float]
+    private var lastBassHop = Int.min / 2
 
     public init(framesPerSecond: Double) {
         precondition(framesPerSecond > 0, "framesPerSecond must be positive")
@@ -80,6 +119,10 @@ public struct ReactiveGlow: Sendable {
         peakFall = Float(exp(-hop / Self.peakRelease))
         history = [Float](repeating: 0, count: medianHops)
         scratch = [Float](repeating: 0, count: medianHops)
+        riseHops = max(Int(Self.bassRiseWindow / hop), 1)
+        bassRaw = [Float](repeating: 0, count: Self.bassMeanHops)
+        bassLevels = [Float](repeating: 0, count: max(Int(Self.bassPeakWindow / hop), riseHops) + 1)
+        rises = [Float](repeating: 0, count: medianHops)
     }
 
     /// Сброс вместе с трекером: история, пик и прогрев начинаются заново.
@@ -91,11 +134,12 @@ public struct ReactiveGlow: Sendable {
         hops = 0
         lastHop = Int.min / 2
         lastValue = 0
+        lastBassHop = Int.min / 2
     }
 
-    /// Шаг анализа: функция онсетов `odf` (не отрицательная) и шаг `hop` (время и уровень). Событие, если
-    /// шаг его дал.
-    public mutating func process(_ hop: HopResult, odf: Float) -> Event? {
+    /// Шаг анализа: функция онсетов `odf` (не отрицательная) и шаг `hop` (время, уровни). События, если
+    /// шаг их дал.
+    public mutating func process(_ hop: HopResult, odf: Float) -> Events {
         let value = odf.isFinite ? max(odf, 0) : 0
         defer {
             history[write] = value
@@ -103,6 +147,12 @@ public struct ReactiveGlow: Sendable {
             count = min(count + 1, history.count)
             hops += 1
         }
+        let bass = bassNote(hop)
+        return Events(bass: bass, accent: accent(hop, value: value))
+    }
+
+    /// Акцент широкополосной функции онсетов.
+    private mutating func accent(_ hop: HopResult, value: Float) -> Event? {
         peak = max(peak * peakFall, value)
         guard value > Self.broadbandFloor, hops >= warmUpHops, hop.frame.rawLevelDB >= Self.minLevelDB else { return nil }
         for age in 1...Self.localMaxHops where age <= count && value < past(age) { return nil }
@@ -114,6 +164,51 @@ public struct ReactiveGlow: Sendable {
         lastValue = value
         let brightness = 0.5 + 0.5 * BeatTracker.smoothstep(Self.relativePeak, 1, strength)
         return Event(time: hop.endTime - StreamAnalyzer.onsetLag, strength: brightness)
+    }
+
+    /// Нота баса. Кольца уровней и подъемов пишутся на каждом шаге (`hops` еще номер этого шага).
+    private mutating func bassNote(_ hop: HopResult) -> Event? {
+        let raw = hop.bassLevelDB.isFinite ? hop.bassLevelDB : -120
+        bassRaw[hops % bassRaw.count] = raw
+        let available = min(hops + 1, bassRaw.count)
+        var sum: Float = 0
+        for age in 0..<available {
+            sum += bassRaw[(hops - age + bassRaw.count) % bassRaw.count]
+        }
+        let level = sum / Float(available)
+        bassLevels[hops % bassLevels.count] = level
+        var rise: Float = 0
+        if hops >= riseHops {
+            var low = Float.infinity
+            for age in 1...riseHops {
+                low = min(low, bassLevel(age: age))
+            }
+            rise = level - low
+        }
+        // Медиане нужны подъемы прошлых шагов: кольцо пишется после нее.
+        defer { rises[hops % rises.count] = rise }
+        guard hops >= warmUpHops, rise >= Self.bassRise, level > Self.minLevelDB, hops - lastBassHop >= refractoryHops else { return nil }
+        var top = level
+        for age in 1..<bassLevels.count where age <= hops {
+            top = max(top, bassLevel(age: age))
+        }
+        guard level >= top - Self.bassRange else { return nil }
+        let size = min(hops, rises.count)
+        for age in 1...size {
+            scratch[age - 1] = rises[(hops - age + rises.count) % rises.count]
+        }
+        let median = scratch.withUnsafeMutableBufferPointer { buffer in
+            BeatTracker.select(UnsafeMutableBufferPointer(rebasing: buffer[0..<size]), rank: size / 2)
+        }
+        guard rise >= Self.bassSalience * (median + Self.bassRiseEpsilon) else { return nil }
+        lastBassHop = hops
+        let strength = 0.5 + 0.5 * BeatTracker.smoothstep(Self.bassRise, Self.bassRiseFull, rise)
+        return Event(time: hop.frameTime, strength: strength)
+    }
+
+    /// Сглаженный уровень баса `age` шагов назад (0 это этот шаг).
+    private func bassLevel(age: Int) -> Float {
+        bassLevels[(hops - age + bassLevels.count) % bassLevels.count]
     }
 
     /// Значение `age` шагов назад (1 это прошлый шаг).

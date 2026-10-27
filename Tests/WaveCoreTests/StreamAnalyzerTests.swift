@@ -350,6 +350,23 @@ struct StreamAnalyzerTests {
         #expect(silent.kickLevelDB == -120)
     }
 
+    /// Уровень басового слоя (`HopResult.bassLevelDB`): сумма мощностей полос слоя (центры до 250 Гц).
+    /// Нижние полосы без своих бинов берут мощность соседнего бина (`BandMapper`), поэтому синус в басу
+    /// входит в сумму несколько раз; уровень идет за амплитудой дБ в дБ, 1 кГц в слой не попадает, тишина у
+    /// пола.
+    @Test func bassLevelIsBassLayerPower() throws {
+        func level(_ frequency: Double, _ amplitude: Float) throws -> Float {
+            let samples = TestSignals.sine(frequency: frequency, amplitude: amplitude, sampleRate: Self.rate, count: 24_000)
+            return try #require(StreamAnalyzer(sampleRate: Self.rate).processSignal(samples).last).bassLevelDB
+        }
+        let loud = try level(80, 0.5)
+        #expect(loud > Float(10 * log10(0.25)) - 1 && loud < 0)
+        #expect(abs(loud - (try level(80, 0.05)) - 20) < 0.5)
+        #expect(try level(1000, 0.5) < -60)
+        let silent = try #require(StreamAnalyzer(sampleRate: Self.rate).processSignal(TestSignals.silence(count: 2048)).last)
+        #expect(silent.bassLevelDB <= -110)
+    }
+
     @Test func spectrumIntoMatchesArrayVersion() {
         for size in [1024, 2048] {
             let fft = RealFFT(size: size)

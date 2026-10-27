@@ -327,6 +327,47 @@ enum Drums {
         return DrumScene(samples: samples, sampleRate: sampleRate, beats: beats, kicks: notes, snares: [], hats: [])
     }
 
+    /// 808 без удара, как трек T2 журналов владельца 1.3 (разбор `2026-10-27-wavefeels-1.3-glow`): ноты баса
+    /// по шестнадцатым 0, 2, 6, 8, 11 и 14 из 16 (две на долях, три на «и», одна мимо), у каждой мягкая атака
+    /// `attack` (перепада бочки 7.5 дБ за 16 мс нет), высота скользит от 1.3 f к f за 60 мс, нота держится
+    /// 70 % промежутка до следующей и спадает с τ 40 мс, так что между нотами полоса баса на 10 дБ и больше
+    /// тише. Поверх плотная середина: пэд и розовый шум на `textureDB` dBFS (вокал и пэды трека), из-за нее
+    /// широкополосная функция онсетов на нотах не выделяется над своей медианой. Начала нот в `kicks`.
+    static func glide808(
+        bpm: Double = 103.2, seconds: Double = 24, levelDB: Float = -12, attack: Double = 0.06, textureDB: Float = -30,
+        sampleRate: Double = 48_000
+    ) -> DrumScene {
+        let sixteenth = 60 / bpm / 4
+        let steps: Set<Int> = [0, 2, 6, 8, 11, 14]
+        let pitches: [Double] = [49, 55, 44, 52]
+        var notes: [Double] = []
+        var step = 0
+        while 0.25 + Double(step) * sixteenth < seconds - 0.3 {
+            if steps.contains(step % 16) { notes.append(0.25 + Double(step) * sixteenth) }
+            step += 1
+        }
+        var samples = [Float](repeating: 0, count: Int(seconds * sampleRate))
+        let amplitude = pow(10, Double(levelDB) / 20) * 2.0.squareRoot()
+        for (index, start) in notes.enumerated() {
+            let length = (index + 1 < notes.count ? notes[index + 1] : seconds) - start
+            let hold = 0.7 * length
+            let frequency = pitches[index % pitches.count]
+            var phase = 0.0
+            add(into: &samples, at: start, length: length, sampleRate: sampleRate) { t in
+                phase += 2 * Double.pi * frequency * (1 + 0.3 * exp(-t / 0.02)) / sampleRate
+                let envelope = min(t / attack, 1) * (t < hold ? 1 : exp(-(t - hold) / 0.04))
+                return Float(amplitude * envelope * sin(phase))
+            }
+        }
+        pad(into: &samples, from: 0, to: seconds, gain: 0.3, sampleRate: sampleRate)
+        let texture = pinkNoise(levelDB: textureDB, count: samples.count, seed: 5)
+        for index in samples.indices {
+            samples[index] += texture[index]
+        }
+        let beats = stride(from: 0.25, to: seconds, by: 60 / bpm).map { $0 }
+        return DrumScene(samples: samples, sampleRate: sampleRate, beats: beats, kicks: notes, snares: [], hats: [])
+    }
+
     /// Только розовый шум на `levelDB` dBFS, без долей.
     static func noiseOnly(
         levelDB: Float = -20, seconds: Double = 12, sampleRate: Double = 48_000, seed: UInt64 = 1
