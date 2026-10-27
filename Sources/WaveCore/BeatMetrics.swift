@@ -148,6 +148,47 @@ public enum BeatMetrics {
         return (changes, unlocks)
     }
 
+    /// Где детекция относительно сетки долей.
+    public enum Place: String, Sendable, Codable, CaseIterable {
+        /// Ближайшая доля в окне.
+        case on
+        /// Не на доле, но в окне середины между двумя соседними долями: вспышка на «и».
+        case half
+        /// Ни то ни другое (или долей нет).
+        case other
+    }
+
+    /// Место детекции `time` против долей `beats` (по возрастанию): доля в окне ±`window` дает `on`,
+    /// иначе середина соседних долей в том же окне дает `half`, иначе `other`. Середины есть только между
+    /// долями: до первой и после последней половины доли нет. Правило то же, что `cls` в скриптах разбора
+    /// записей владельца (`dpcls.py`). Без выделения памяти.
+    public static func place(of time: Double, beats: [Double], window: Double) -> Place {
+        guard let nearest = nearestIndex(of: time, in: beats) else { return .other }
+        if abs(time - beats[nearest]) <= window + edge { return .on }
+        var closest = Double.infinity
+        if nearest > 0 { closest = min(closest, abs(time - (beats[nearest - 1] + beats[nearest]) / 2)) }
+        if nearest + 1 < beats.count { closest = min(closest, abs(time - (beats[nearest] + beats[nearest + 1]) / 2)) }
+        return closest <= window + edge ? .half : .other
+    }
+
+    /// Темнота на отрезке `[from, to]`: промежутки длиннее `gap` секунд между началом, детекциями и
+    /// концом; сумма их длин и самый длинный. Детекции вне отрезка не считаются.
+    public static func darkSpans(detections: [Double], from: Double, to: Double, gap: Double) -> (total: Double, longest: Double) {
+        guard to > from else { return (0, 0) }
+        var total = 0.0
+        var longest = 0.0
+        var previous = from
+        for time in detections.sorted() + [to] where time >= from && time <= to {
+            let span = time - previous
+            if span > gap {
+                total += span
+                longest = max(longest, span)
+            }
+            previous = time
+        }
+        return (total, longest)
+    }
+
     /// Процентиль по ближайшему рангу: значение с номером `ceil(fraction * n)` по возрастанию; `nil`
     /// для пустого списка.
     public static func percentile(_ values: [Double], _ fraction: Double) -> Double? {
@@ -155,6 +196,11 @@ public enum BeatMetrics {
         let sorted = values.sorted()
         let rank = Int((fraction * Double(sorted.count)).rounded(.up))
         return sorted[min(max(rank, 1), sorted.count) - 1]
+    }
+
+    /// Расстояние от `time` до ближайшего момента отсортированного списка; бесконечность для пустого.
+    public static func nearestDistance(to time: Double, in sorted: [Double]) -> Double {
+        nearestIndex(of: time, in: sorted).map { abs(sorted[$0] - time) } ?? .infinity
     }
 
     // MARK: Внутреннее

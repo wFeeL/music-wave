@@ -76,6 +76,60 @@ struct OfflineBeatChainTests {
         #expect(result.lockTime.map { $0 > 0 && $0 < 8 } == true)
     }
 
+    /// Принудительный сброс с памятью темпа (`resetInterval`): сбросы на сроках по времени потока, с
+    /// захватом перед ними, после каждого свечение возвращается на доли (бочка на каждой доле: в
+    /// разборе 1.2.1 32 из 32 возобновлений на доле). Без интервала сбросов нет и прогон тот же.
+    @Test func forcedResetsKeepTempoAndResumeOnTheBeat() async {
+        let (scene, plain, reset, trackerOnly) = await runOffCooperativePool {
+            let scene = Drums.fourOnFloor(bpm: 120, seconds: 24, hats: .eighths)
+            var config = OfflineBeatChain.Config(seed: 3)
+            let plain = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            config.resetInterval = 7
+            let reset = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            config.resetAnalyzer = false
+            let trackerOnly = OfflineBeatChain.run(samples: scene.samples, sampleRate: scene.sampleRate, config: config)
+            return (scene, plain, reset, trackerOnly)
+        }
+        #expect(plain.resets.isEmpty)
+        #expect(reset.resets.count == 3)
+        let hop = StreamAnalyzer(sampleRate: scene.sampleRate).config.hopDuration
+        for (reset, due) in zip(reset.resets, [7.0, 14, 21]) {
+            #expect(reset.time >= due && reset.time < due + hop, "reset at \(reset.time)")
+            #expect(reset.locked)
+        }
+        #expect(trackerOnly.resets.map(\.time) == reset.resets.map(\.time))
+        let resume = BeatEvaluation.resume(result: reset, annotations: scene.beats, duration: 24, window: 0.07)
+        #expect(resume.resets == 3 && resume.withFlash == 3 && resume.firstOn == 3)
+        #expect(resume.offBeat == 0 && resume.partlyOffBeat == 0)
+        #expect(resume.flashes > 0 && resume.matched == resume.flashes)
+        #expect((resume.medianDelay ?? 9) < 2)
+    }
+
+    /// Смена трека через тишину, как у всего звука системы: 120 BPM, секунда нулей, 90 BPM с середины
+    /// доли. После тишины трекер начинается заново, и до конца сцены вспышки только на долях второго трека:
+    /// ни пика на возобновлении, ни прежней сетки 120 BPM, которая держалась накатом через тишину.
+    @Test func trackChangeThroughSilenceStartsCold() async {
+        let (second, result) = await runOffCooperativePool {
+            let first = Drums.fourOnFloor(bpm: 120, seconds: 10, hats: .eighths)
+            let second = Drums.fourOnFloor(bpm: 90, seconds: 12, hats: .eighths, seed: 2)
+            let cut = Int(0.25 * second.sampleRate)
+            let samples = first.samples + [Float](repeating: 0, count: Int(second.sampleRate)) + Array(second.samples[cut...])
+            let result = OfflineBeatChain.run(samples: samples, sampleRate: first.sampleRate, config: OfflineBeatChain.Config(seed: 4))
+            return (second, result)
+        }
+        // Первый трек захвачен до тишины: перезапуск сбрасывает настоящий захват, а не пустой трекер.
+        #expect(result.lockTime.map { $0 < 10 } == true)
+        #expect(result.states.last { $0.time < 10 }?.locked == true)
+        let back = 11.0
+        let beats = result.audible(second.beats.filter { $0 > 0.25 }.map { $0 - 0.25 + back })
+        let after = result.flashes.filter { $0.time > back + result.outputLatency }
+        #expect(after.count >= 10)
+        for flash in after {
+            let nearest = beats.map { abs($0 - flash.time) }.min() ?? 1
+            #expect(nearest < 0.07, "flash at \(flash.time), \(flash.predicted ? "grid" : "kick"), nearest beat \(nearest)")
+        }
+    }
+
     /// Те же сэмплы и `seed` дают тот же результат, а фазы рендера меняют только вспышки: состояния
     /// и онсеты у них общие.
     @Test func analysisIsDeterministicAndShared() async {
@@ -165,9 +219,10 @@ struct OfflineBeatChainTests {
     /// Энергия мягкого пульса идет по слышимой оси, как уровни волн: кадр шага публикуется на центр
     /// окна плюс задержка вывода, рендер берет кадр на момент показа. С задержкой AirPods (210 мс) и с
     /// наибольшей ручной (500 мс) подъем энергии на каждой бочке (половина пути от фона до пика)
-    /// приходится на слышимый момент бочки с точностью до шага анализа, а пик (окно Ханна 43 мс и
-    /// атака огибающей 10 мс) не дальше 40 мс после нее и выше 1.4. Энергия из расписания опережала бы бочку
-    /// почти на всю задержку вывода. Рендер 1000 Гц, чтобы видеть шаг анализа.
+    /// приходится на слышимый момент бочки с точностью до шага анализа, а пик (атака энергии 10 мс) не
+    /// дальше 40 мс после нее и выше 0.5 (энергия это сила онсета, у ясной бочки 0.68-0.86). Энергия из
+    /// расписания опережала бы бочку почти на всю задержку вывода. Рендер 1000 Гц, чтобы видеть шаг
+    /// анализа.
     @Test(arguments: [0.21, 0.5])
     func ambientEnergyLandsOnTheAudibleKick(latency: Double) async {
         let (scene, result) = await runOffCooperativePool {
@@ -190,8 +245,8 @@ struct OfflineBeatChainTests {
             let riseOffset = (rise?.time ?? -.infinity) - audible
             #expect(abs(riseOffset) <= hop, "kick \(kick): energy rise \(riseOffset * 1000) ms from the audible kick")
             #expect(peak.time >= audible && peak.time - audible <= 0.04, "kick \(kick): peak \((peak.time - audible) * 1000) ms")
-            // Ясный горб энергии: среднее идет за огибающей, поэтому пик 1.49-2.0, а не около 2.
-            #expect(peak.energy > 1.4)
+            // Ясный горб энергии на каждой бочке.
+            #expect(peak.energy > 0.5, "kick \(kick): peak energy \(peak.energy)")
             checked += 1
         }
         #expect(checked >= 15)

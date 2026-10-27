@@ -22,7 +22,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    кругу в `(−T/2, T/2]`) больше чем на `phaseJump · T`, а его оценка выше оценки гребенки у фазы
 ///    ФАПЧ больше чем на `phaseJumpMargin`, на `phaseJumpChecks` проверках подряд, ФАПЧ прыгает на него
 ///    с теми же последствиями, что и смена темпа. При уверенном захвате вместо скачка кандидат идет
-///    тенью и должен выиграть гонку (`raceBeats`, `raceVotes`), сетка берет его счет. Тень при
+///    тенью и должен выиграть гонку (`raceBeats`, `raceVotes`, накопленные доводы гребенки
+///    `raceEvidenceChecks`), сетка берет его счет. Тень при
 ///    уверенном захвате предлагает real-time PLP (`PLPTracker` на той же функции онсетов), когда он
 ///    сам уверен (`plpShadow`), иначе гребенка;
 /// 3. широкополосный онсет у ближайшей доли (в пределах `matchWindow · T`) подстраивает фазу
@@ -30,7 +31,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    события свечения;
 /// 4. когда окно доли закрылось, уверенность сдвигается к попаданию или промаху на `confidenceGain`.
 ///    Захват при уверенности от `lockConfidence` и `lockHits` попаданиях подряд, отпускание ниже
-///    `unlockConfidence`. Смена темпа на другую сетку и скачок фазы делят уверенность пополам, обнуляют
+///    `unlockConfidence`; при показе через долю считаются и одни показанные доли, когда они попадают
+///    заметно чаще скрытых (`everyOtherLockRatio`). Смена темпа на другую сетку и скачок фазы делят уверенность пополам, обнуляют
 ///    счет попаданий и отпускают захват (`beat-sync.md` 2.6). Причина последней потери захвата в
 ///    `lastUnlockReason`;
 /// 5. энергетический ворот: пик уровня бочки держится и спадает на `gateFallPerBeatDB` за долю (при
@@ -43,12 +45,14 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    пока фаза не найдена) не растет. Новая сетка (смена темпа, скачок фазы,
 ///    перехват тенью) сразу получает вес не выше цели по своей уверенности. `locked` для диагностики и
 ///    метрик, на показ влияет только через это правило роста;
-/// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): уровень полосы бочки в амплитуде идет
-///    в короткую огибающую (атака `ambientAttack`, спад `ambientRelease`), а она в длинное среднее
-///    (`ambientAverage`); энергия (`ambientEnergy`) это их отношение, 0, пока среднее ниже порога шума
-///    волн `LevelProcessor.noiseFloorDB`. Она относится к окну шага и идет к рендеру только в кадре
-///    (`WaveFrame.kickEnergy`) по слышимой оси, в расписании энергия 0. Горб пульса стоит на сетке ФАПЧ
-///    с высотой `уверенность × g_E`. На события, уверенность и вес пульс не влияет.
+/// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): энергия (`ambientEnergy`) идет от атак,
+///    а не от сетки: сила онсета шага (широкополосного или бочки, в том числе длинной 808) держится и
+///    спадает с `ambientRelease`, энергия догоняет ее с `ambientAttack`. Она относится к окну шага и идет
+///    к рендеру только в кадре (`WaveFrame.kickEnergy`) по слышимой оси, в расписании энергия 0. Горб
+///    пульса стоит на сетке ФАПЧ с высотой `уверенность × g_E`, пока длинное среднее уровня полосы бочки
+///    (`ambientAverage`) не ниже порога шума волн `LevelProcessor.noiseFloorDB`; на накате (брейк без
+///    бочки) с высотой `уверенность × coastConfidence`, по попаданиям широкополосных онсетов в доли
+///    наката. На события, уверенность и вес пульс не влияет.
 ///
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей; на быстрой сетке доли другой четности, чем `shownParity`,
@@ -58,7 +62,9 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// на GTZAN tune против правила «вес выше 0.5» точность всех вспышек 0.8549 -> 0.8572, вспышек мимо
 /// долей 2391 -> 2356), остальные светятся с яркостью
 /// `clamp(strength, onsetFloor, 1) × (offGridScale + (1 − offGridScale) × (1 − вес)) × подтверждение`
-/// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Прошедшие события остаются в
+/// (см. `kickConfirmation`) и id из своего счетчика со старшим битом. Онсет длинной бочки
+/// (`OnsetEvent.sustained`, 808 поверх громкой полосы бочки) не светится совсем: на синкопе 808 и на
+/// нотах баса такие онсеты чаще мимо доли (`StreamAnalyzer.kickPickerParameters`). Прошедшие события остаются в
 /// расписании (до 8), чтобы рендер довел их спад. Оба счетчика id только растут, в том числе через
 /// `reset()` и смену темпа: `BeatGlow` помнит id 2 с.
 ///
@@ -66,7 +72,7 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 /// период, половина уверенности, захват в счете попаданий, средняя сила онсетов и период
 /// `TempoEstimator` остаются. Пока у нового потока нет своей оценки темпа (2 с истории), фазу на
 /// каждой проверке ищет гребенка по прежнему периоду, как только в истории `resumeHistoryBeats`
-/// долей, и сетка вспыхивает примерно через секунду, а не через 3-5 с.
+/// долей, и сетка вспыхивает примерно через две секунды, а не через 3-5 с.
 ///
 /// `process` не выделяет памяти, `schedule` собирает новый массив событий при каждом чтении.
 public struct BeatTracker: Sendable {
@@ -87,6 +93,20 @@ public struct BeatTracker: Sendable {
         public var lockConfidence: Double
         /// Попаданий подряд для захвата.
         public var lockHits: Int
+        /// Проверка фазы при захвате: захвата нет, пока оценка гребенки у «и» сетки (доля ФАПЧ + T/2)
+        /// выше оценки у доли ФАПЧ больше чем в это число раз (0 выключает). Попадания не различают долю
+        /// и «и», когда онсеты есть на обеих восьмых, а акцент на доле видит только гребенка; без
+        /// захвата сетка светится по весу показа как прежде, но неверная фаза не получает защиты захвата
+        /// (гонка вместо скачка, приглушение бочки между долями). На GTZAN tune (steady) к доводам гонки:
+        /// вспышек с захватом мимо долей 576 -> 555, wrongLock 12 / 231 -> 12 / 215, точность захвата
+        /// 0.9409 -> 0.9429, а вспышки почти те же (всего мимо долей 2080 -> 2081, точность всех вспышек
+        /// 0.8675 -> 0.8674); доля времени с захватом 0.3506 -> 0.3490. При 1 wrongLock 9 / 181 и
+        /// вспышек с захватом мимо долей 512, но вспышек мимо долей всего 2104 и точность всех вспышек
+        /// 0.8661 (без захвата фаза прыгает по гребенке сразу, и прыжки чаще мимо); 1.2 хуже 1.5 по
+        /// всем числам; 1.35 и 1.75 почти как 1.5 (554 / 560 вспышек с захватом мимо долей, доля
+        /// времени с захватом 0.3482 / 0.3497). Отклонено: проверка только при онсетах на «и» (wrongLock
+        /// 12-13 / 245-257, вспышек с захватом мимо долей 574-592).
+        public var lockPhaseCheck: Double
         public var unlockConfidence: Double
         /// Расхождение гребенки и ФАПЧ (доля периода), после которого фаза прыгает.
         public var phaseJump: Double
@@ -115,6 +135,14 @@ public struct BeatTracker: Sendable {
         /// варианты, по одному изменению: верхний край 0.65: 0.8565, 0.431, 2349 / 766, wrongLock 16 / 315
         /// (вес при захвате еще не полный, бочка между долями проходит); нижний край 0.50: 0.8548, 0.419,
         /// 2317 / 763; спад за 2 доли вместо 6: 0.8552, 0.417, 2291 / 767, wrongLock 16 / 336.
+        ///
+        /// Спад за 12 долей, а не за 6 (разбор журналов 1.2.1, исправление C): после нескольких промахов
+        /// сетка гаснет медленнее, вспышки на долях держатся через короткие места без атак. GTZAN tune
+        /// (steady, 60 Гц) против 6: точность всех вспышек 0.8681 -> 0.8688, вспышек 15832 -> 16248, мимо
+        /// долей всего / с захватом 2089 / 555 -> 2131 / 551, покрытие долей 0.4259 -> 0.4370, wrongLock
+        /// 12 / 215 без изменений; seed 2 и 120 Гц так же. Записи владельца (15 подряд): на долю 210 -> 234,
+        /// на «и» 25 -> 32, мимо 26 -> 30. Спад за 9 долей: 0.8687, 16080 / 2111 (553); за 16: 0.8687,
+        /// 16401 / 2154 (551), wrongLock 12 / 216, у владельца на долю 240, на «и» 34.
         public var weightLow: Double
         public var weightHigh: Double
         public var weightRiseBeats: Double
@@ -157,10 +185,63 @@ public struct BeatTracker: Sendable {
         /// Голоса гребенки нужны: на попаданиях одних неверный захват набирает их не реже тени на верной
         /// фазе, и тень проигрывала (wrongLock 19-20). 3 голоса, то есть скачок через 5 проверок
         /// (1.25 с) вместо 2, лучший замер; 2 и 4-8 голосов давали 17-18 файлов.
+        ///
+        /// Предел гонки 16 долей (было 8) вместе с доводами (`raceEvidenceChecks`): гонку, которую
+        /// доводы не решили, держать дольше. На GTZAN tune (steady) к доводам с пределом 8 точность всех
+        /// вспышек 0.8666 -> 0.8676, вспышек мимо долей всего / с захватом 2102 / 600 -> 2080 / 576,
+        /// wrongLock 13 / 260 -> 12 / 231, покрытие долей 0.4225 -> 0.4217. Без доводов предел 16
+        /// стоил покрытия (0.4216 -> 0.4181), а в эмуляции журнала 2 темнота гонки росла с 4.8 до 9.3 с.
         public var raceBeats: Int
         public var raceMargin: Double
         public var raceLimit: Int
         public var raceVotes: Int
+        /// Исход гонки по накопленным доводам гребенки. На каждой проверке темпа во время гонки (и на той,
+        /// что ее запустила) берутся оценки гребенки у доли тени и у доли ФАПЧ. Тень перехватывает сетку
+        /// при закрытии окна своей доли, когда проверок не меньше `raceEvidenceChecks`, за тень не
+        /// меньше `raceEvidenceShare` из них, среднее отношение оценок тени и ФАПЧ не ниже
+        /// `raceEvidenceRatio`, а тень попала не меньше чем в `raceEvidenceHits` своих закрытых долей.
+        /// Среднее отношение ниже `raceDropRatio` после стольких же проверок бросает тень раньше
+        /// `raceLimit`: гребенка за текущую сетку, и приглушение гонки снимается. 0 проверок выключает
+        /// оба исхода.
+        ///
+        /// Голосам (`raceVotes`) нужны проверки подряд выше `1 + phaseJumpMargin`, одна проверка ниже
+        /// обнуляет счет, а перевес по попаданиям (`raceBeats`) невозможен, пока текущая сетка попадает
+        /// в каждую долю. В журнале 2 владельца (хэт на каждой восьмой, бочка на доле, трекер на «и»)
+        /// отношение держалось 1.04-1.44, в среднем около 1.2: тень не набрала трех голосов, была
+        /// брошена через 8 долей, и захват на «и» вернулся в полную силу. С доводами (эмуляция того же
+        /// звука) перехват на 7.84 с слышимой оси вместо никогда.
+        ///
+        /// На GTZAN tune (steady) гребенка в гонке так же часто за неверную по разметке фазу: при 6
+        /// проверках и попаданиях тени 0.75 точность всех вспышек 0.8681 -> 0.8659, wrongLock 12 / 220
+        /// -> 14 / 267; при 8 проверках и попаданиях во все доли тени 0.8666 и 13 / 260 (вместе с
+        /// `raceLimit` 16 0.8676 и 12 / 231). Из лишних вспышек мимо долей почти все в pop.00082, где
+        /// все полосы звука (бочка, середина, верх) сильнее на половине доли разметки. Отклоненные
+        /// варианты: второе мнение по гребенке функции бочки (на регги она за неверную фазу в 3 гонках
+        /// из 4), исход на проверке, а не при закрытии окна тени (точность 0.8663-0.8667, вспышек мимо
+        /// долей +20), захват после перехвата без серии попаданий (вспышки те же, захвата мимо долей
+        /// больше), требование попаданий и от текущей сетки.
+        public var raceEvidenceChecks: Int
+        public var raceEvidenceShare: Double
+        public var raceEvidenceRatio: Double
+        public var raceEvidenceHits: Double
+        public var raceDropRatio: Double
+        /// Старт гонки по накопленным доводам, когда попадания не различают долю и «и»: при уверенном
+        /// захвате без гонки каждая проверка, где гребенка стоит у половины периода от ФАПЧ (не дальше
+        /// `matchWindow` периода от нее) с отношением оценок не ниже этого значения, засчитывается за
+        /// смену фазы. Когда среднее таких проверок (со спадом `raceStartGain`) доходит до
+        /// `raceEvidenceShare`, а онсеты на «и» сетки идут так же часто (их среднее, как уверенность, не
+        /// ниже `raceEvidenceShare`), гребенка запускает тень, даже если ни одна проверка не выше
+        /// `1 + phaseJumpMargin` (0 выключает). Механизм журнала 2 владельца в чистом виде: хэт на каждой
+        /// восьмой, акцент на доле дает отношение 1.16-1.33, и без этого правила захват на «и» не
+        /// оспаривается никогда (в журнале гонку запустили две случайные проверки выше 1.35). Без условия
+        /// на онсеты «и» без онсетов, чуть сильнее доли по гребенке, раз за разом приглушала верный захват
+        /// (`phaseJumpNeedsAClearlyStrongerComb`). На GTZAN tune (steady) к доводам гонки с пределом 16:
+        /// вспышек мимо долей всего / с захватом 2080 / 576 без изменений, wrongLock 12 / 231 тот же,
+        /// вспышек в долю на 12 меньше (точность 0.8676 -> 0.8675, покрытие долей 0.4217 -> 0.4215): в
+        /// country.00082 и reggae.00018 трекер на половинном темпе разметки, обе фазы доли, и гонка без
+        /// исхода приглушает сетку до предела. Без условия на онсеты и с любым смещением гребенки (не
+        /// только у половины периода) GTZAN тот же, а покрытие захвата 0.3506 -> 0.3501.
+        public var raceStartRatio: Double
         /// Яркость предсказанных долей текущей сетки, пока идет гонка (`shadowNext` есть): гребенка уже
         /// сомневается в фазе, и уверенные вспышки на возможно неверной доле хуже тусклых. На GTZAN tune
         /// без приглушения вспышек с захватом мимо долей 836, при 0.5 / 0.4 / 0.3 / 0.2 828 / 816 / 785 /
@@ -213,6 +294,28 @@ public struct BeatTracker: Sendable {
         /// Запас перехвата показа через долю: гребенка другой четности должна быть выше гребенки
         /// показанной больше чем в `1 + everyOtherHold` раза (0.5 это в 1.5 раза).
         public var everyOtherHold: Double
+        /// Захват на показанных долях: при показе через долю каждая четность id копит свою уверенность
+        /// и серию попаданий, и когда уверенность показанной четности не ниже уверенности скрытой,
+        /// умноженной на это число, захват, его отпускание и вес показа идут от большей из уверенностей
+        /// (всех долей или показанных) и от большей серии. Сетка двойного темпа, у которой онсеты есть
+        /// только на каждой второй доле (журнал владельца, трек D, 157 BPM: шесть попаданий подряд на
+        /// показанных долях и промахи между ними), иначе держит уверенность около 0.5 и не захватывается
+        /// никогда, хотя по показанным долям она уверена как сетка половинного темпа. 0 выключает.
+        ///
+        /// На GTZAN tune (steady) 2.5: вспышек мимо долей всего и с захватом столько же (2088 и 555),
+        /// wrongLock 12 / 215 тот же, вспышек в долю на 43 больше (покрытие долей 0.4244 -> 0.4258,
+        /// точность всех вспышек 0.8677 -> 0.8681), доля времени с захватом 0.3507 -> 0.3510; трек D
+        /// владельца: доля времени с захватом 0.03 -> 0.05, все вспышки с захватом в долю. Отклоненные
+        /// варианты: считать только показанные доли (захват на быстрых треках, где попадают обе
+        /// четности, вдвое медленнее: доля времени с захватом 0.3464, wrongLock 13 / 226); правило
+        /// показанных долей без условия на скрытую четность (0.3544, но вспышек с захватом мимо долей
+        /// 575 и wrongLock 13 / 235: сетка на «и», у которой попадают обе четности, захватывается
+        /// быстрее); отношение 1.5 / 1.75 / 2 (вспышек с захватом мимо долей 564 / 562 / 558); 3 как 2.5,
+        /// но на 7 вспышек в долю меньше.
+        public var everyOtherLockRatio: Double
+        /// Звук вернулся после тишины (`HopResult.soundReturned`): трекер начинается заново, как после
+        /// `reset(keepTempo: keepsTempoAfterSilence)`. false выключает.
+        public var silenceRestart: Bool
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -225,6 +328,7 @@ public struct BeatTracker: Sendable {
             confidenceGain: Double = 0.25,
             lockConfidence: Double = 0.6,
             lockHits: Int = 5,
+            lockPhaseCheck: Double = 1.5,
             unlockConfidence: Double = 0.25,
             phaseJump: Double = 0.12,
             phaseJumpChecks: Int = 2,
@@ -235,7 +339,7 @@ public struct BeatTracker: Sendable {
             weightLow: Double = 0.30,
             weightHigh: Double = 0.60,
             weightRiseBeats: Double = 1.5,
-            weightFallBeats: Double = 6,
+            weightFallBeats: Double = 12,
             weightHits: Int = 3,
             kickConfirmFloor: Float = 0,
             kickConfirmLow: Float = 7,
@@ -243,13 +347,21 @@ public struct BeatTracker: Sendable {
             carryPhase: Double = 0.25,
             raceBeats: Int = 4,
             raceMargin: Double = 0.1,
-            raceLimit: Int = 8,
+            raceLimit: Int = 16,
             raceVotes: Int = 3,
+            raceEvidenceChecks: Int = 8,
+            raceEvidenceShare: Double = 0.75,
+            raceEvidenceRatio: Double = 1.15,
+            raceEvidenceHits: Double = 1,
+            raceDropRatio: Double = 1,
+            raceStartRatio: Double = 1.15,
             raceDim: Float = 0.2,
             coastGate: Float = 0.1,
             plpShadow: Double = 0.8,
             everyOtherPeriod: Double = 0.42,
             everyOtherHold: Double = 0.5,
+            everyOtherLockRatio: Double = 2.5,
+            silenceRestart: Bool = true,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -259,6 +371,7 @@ public struct BeatTracker: Sendable {
             self.confidenceGain = confidenceGain
             self.lockConfidence = lockConfidence
             self.lockHits = lockHits
+            self.lockPhaseCheck = lockPhaseCheck
             self.unlockConfidence = unlockConfidence
             self.phaseJump = phaseJump
             self.phaseJumpChecks = phaseJumpChecks
@@ -279,11 +392,19 @@ public struct BeatTracker: Sendable {
             self.raceMargin = raceMargin
             self.raceLimit = raceLimit
             self.raceVotes = raceVotes
+            self.raceEvidenceChecks = raceEvidenceChecks
+            self.raceEvidenceShare = raceEvidenceShare
+            self.raceEvidenceRatio = raceEvidenceRatio
+            self.raceEvidenceHits = raceEvidenceHits
+            self.raceDropRatio = raceDropRatio
+            self.raceStartRatio = raceStartRatio
             self.raceDim = raceDim
             self.coastGate = coastGate
             self.plpShadow = plpShadow
             self.everyOtherPeriod = everyOtherPeriod
             self.everyOtherHold = everyOtherHold
+            self.everyOtherLockRatio = everyOtherLockRatio
+            self.silenceRestart = silenceRestart
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -317,29 +438,62 @@ public struct BeatTracker: Sendable {
     static let confirmHigh: Float = 11
     /// Ворот от этого значения считается открытым для мягкого подтверждения бочки.
     static let confirmGateOpen: Float = 0.5
-    /// Энергия мягкого пульса: атака и спад короткой огибающей уровня полосы бочки и постоянная
-    /// времени длинного среднего, секунды (как отношение мгновенного и среднего уровня баса в
-    /// MilkDrop). Среднее берется от самой огибающей, а не от сырого уровня: огибающая идет по пикам,
-    /// и против среднего сырого уровня ровный шум давал отношение около 1.4 (постоянный слой). Ниже
-    /// порога шума волн (`LevelProcessor.noiseFloorDB`, мощность) среднее считается тишиной: энергии и
-    /// горба нет, как нет и волн.
-    static let ambientAttack = 0.010
-    static let ambientRelease = 0.150
+    /// Слышимость полосы бочки для горба пульса: атака и спад короткой огибающей ее уровня и постоянная
+    /// времени длинного среднего от этой огибающей, секунды. Ниже порога шума волн
+    /// (`LevelProcessor.noiseFloorDB`, мощность) среднее считается тишиной: горба нет, как нет и волн.
+    static let ambientLevelAttack = 0.010
+    static let ambientLevelRelease = 0.150
     static let ambientAverage = 2.0
     static let ambientFloorDB: Float = LevelProcessor.noiseFloorDB
+    /// Энергия мягкого пульса от атак (разбор журналов 1.2.1, исправление 4): сила онсета шага
+    /// (`OnsetEvent.strength`, широкополосного или бочки, в том числе длинной 808, которая не светится
+    /// вспышкой) держится и спадает с `ambientRelease`, энергия догоняет ее с `ambientAttack`. Прежняя
+    /// энергия, отношение короткой огибающей уровня полосы бочки к ее среднему, на ровной 808 почти не
+    /// росла: на журнале 1 владельца пульс от 0.05 был на 0.5 % кадров повтора (на устройстве 2.5 %).
+    /// Теперь 41 % кадров (без захвата 41 %), вершины пульса у онсетов анализа в 97 % (было 75 %); у 15
+    /// записей подряд 27 % кадров (было 19 %), вершины у онсетов 94 % (было 38 %). Вспышки и `wave-eval`
+    /// те же (пульс отдельный канал). Спад 0.10 с: журнал 1 29 % кадров; 0.25 с: 60 %, вершины у онсетов
+    /// 84 %, пульс почти не опускается. Атака 0.02 с: вершины на 14 мс позже (на синтетике с задержкой
+    /// вывода 134 мс +22 мс против +8 мс), 0.005 с почти то же, что 0.01.
+    static let ambientAttack = 0.010
+    static let ambientRelease = 0.150
     /// После сброса с памятью темпа гребенка ищет фазу по прежнему периоду, когда в истории столько
-    /// долей: у каждой задержки гребенки тогда хотя бы два зубца, одна громкая атака на «и» фазу не
-    /// ставит.
-    static let resumeHistoryBeats = 2.0
+    /// долей: у каждой задержки гребенки тогда столько же зубцов, одна громкая атака на «и» фазу не
+    /// ставит. Целое число долей: при 2.5 у задержек ближе к «сейчас» на зубец больше, и выбор
+    /// смещается к ним (журнал 2 владельца в петле со сбросами каждые 7.3 с: 18 вспышек на «и» против 10
+    /// при 2).
+    ///
+    /// Три доли, а не две: на двух долях после паузы (плеер поднимает громкость, первые доли тише хэта
+    /// на «и») гребенка чаще ставит «и», и вернувшийся захват светится мимо долей. GTZAN tune (steady),
+    /// сброс каждые 7.3 с: вспышек с захватом мимо долей 376 -> 293, всех мимо долей 2569 -> 2512,
+    /// вспышек в долю 10046 -> 9594, точность вспышек с захватом в первые 2 с после сбросов с захватом
+    /// 0.873 -> 0.935, wrongLock 8 / 118 -> 6 / 85, медиана первой вспышки 1.23 -> 1.22 с (онсеты бочки
+    /// светятся раньше сетки). Журнал 2 владельца в петле со сбросами: вспышек на «и» 10 -> 6, точность
+    /// вспышек с захватом 0.897 -> 0.960. Без сбросов (холодный старт) ничего не меняется.
+    static let resumeHistoryBeats = 3.0
+    /// Шаг среднего проверок для старта гонки по доводам (`raceStartRatio`): около четырех последних.
+    static let raceStartGain = 0.25
     /// Насколько далеко (доля периода) от доли ФАПЧ гребенка октавы показа ищет зубцы.
     static let parityReach = 0.1
     /// Показ через долю выключается при периоде выше `everyOtherPeriod` в столько раз (0.42 -> 0.43 с):
     /// у 143 BPM с колебанием периода ±1 % без запаса показ переключался 18 раз за 30 с.
     static let everyOtherRelease = 1.025
+    /// Защелка `shownParityLeads`: включается при отношении от `everyOtherLockRatio` (2.5), выключается
+    /// ниже него, умноженного на это число (2.0). Без защелки одно попадание скрытой четности переводило
+    /// отношение через 2.5, и опубликованная уверенность, горб пульса, мягкое подтверждение бочки и
+    /// проверки «уверенного захвата» прыгали (скрытая четность попадает через две на третью: 14
+    /// переключений за 16 с, с защелкой 0). GTZAN tune (steady): точность всех вспышек 0.8688 -> 0.8689,
+    /// вспышек в долю +2, мимо долей всего / с захватом 2131 / 551 те же, wrongLock 12 / 215; записи
+    /// владельца те же. Выключение ниже 1.5 (0.6): мимо долей 2135 / 553.
+    static let parityLeadRelease = 0.8
     private static let floorDB: Float = -120
 
     public let framesPerSecond: Double
     public let parameters: Parameters
+    /// Звук после тишины тот же трек (пауза плеера в известном треке): перезапуск с памятью темпа
+    /// (`silenceRestart`). Ставит приложение по памяти трека (`TrackTempoMemory.keepsTempo`); у всего звука
+    /// системы и без трека false, и трекер начинается заново целиком.
+    public var keepsTempoAfterSilence = false
 
     private var tempo: TempoEstimator
     /// Второе мнение о фазе (real-time PLP) на той же широкополосной функции онсетов.
@@ -366,6 +520,12 @@ public struct BeatTracker: Sendable {
     private var committedAmplitude: Float?
     private(set) var confidence = 0.0
     private(set) var hits = 0
+    /// Уверенность и серия попаданий по четности id доли (`everyOtherLockRatio`): при показе через
+    /// долю каждая четность считает только свои доли, без показа обе повторяют `confidence` и `hits`.
+    private(set) var parityConfidence = SIMD2<Double>(repeating: 0)
+    /// Четность, для которой включена защелка `shownParityLeads`; `nil`, пока она выключена.
+    private var parityLeadOn: UInt64?
+    private var parityHits = SIMD2<Int>(repeating: 0)
     private(set) var locked = false
     /// Почему захват потерян в последний раз; `nil`, если захвата еще не было (и после `reset()` без
     /// захвата). Меняется только при потере захвата: смена темпа без захвата причину не трогает,
@@ -384,6 +544,9 @@ public struct BeatTracker: Sendable {
     private var processedSinceReset = false
     /// Последние доли прошли накатом (`isCoasting`): следующая закрытая доля решает судьбу захвата.
     private var coasted = false
+    /// Доли наката с широкополосным онсетом: среднее с шагом `confidenceGain` по долям, закрытым на
+    /// накате (промахи тоже идут), 0 вне наката. Высота горба пульса в брейке без бочки (`ambient`).
+    private(set) var coastConfidence = 0.0
     /// Теневая фаза: следующая доля другой фазы того же периода, которую гребенка предложила вместо
     /// мгновенного скачка. Считает попадания по тем же широкополосным онсетам; `nil`, пока гонки нет.
     private(set) var shadowNext: Double?
@@ -394,6 +557,21 @@ public struct BeatTracker: Sendable {
     private var shadowBeats = 0
     private var shadowLead = 0
     private var shadowVotes = 0
+    /// Доводы гонки (`raceEvidenceChecks`): проверок с ее начала, из них за тень, сумма отношений
+    /// оценки гребенки у тени к оценке у ФАПЧ и попадания тени.
+    private(set) var raceChecks = 0
+    private var raceFavour = 0
+    private var raceRatioSum = 0.0
+    private var raceShadowHits = 0
+    /// Среднее со спадом проверок, на которых гребенка за «и» (`raceStartRatio`).
+    private var raceStartEvidence = 0.0
+    /// Онсеты на «и» сетки (у `nextBeat − T/2`): было ли в текущей доле и их среднее по долям с шагом
+    /// `confidenceGain`, как у уверенности.
+    private var halfMatched = false
+    private(set) var halfConfidence = 0.0
+    /// Отношение лучшей оценки гребенки к оценке у фазы ФАПЧ на последней проверке темпа
+    /// (`BeatSchedule.combRatio`); `nil` до первой проверки с сеткой.
+    private(set) var combRatio: Double?
     private var strengthEMA: Float = 0
     /// Id доли `nextBeat`, у `nextBeat + T` на 1 больше.
     private var beatCounter: UInt64 = 0
@@ -409,11 +587,15 @@ public struct BeatTracker: Sendable {
     public private(set) var energyGate: Float = 0
     /// Вес показа 0...1: яркость предсказанных долей и приглушение онсетов бочки (`BeatSchedule.weight`).
     private(set) var displayWeight: Float = 0
-    /// Короткая огибающая и длинное среднее уровня полосы бочки (амплитуда) для мягкого пульса;
-    /// первый шаг ставит обе на свой уровень.
-    private var ambientShort = AttackRelease(attack: BeatTracker.ambientAttack, release: BeatTracker.ambientRelease)
+    /// Короткая огибающая и длинное среднее уровня полосы бочки (амплитуда) для слышимости горба
+    /// пульса; первый шаг ставит обе на свой уровень.
+    private var ambientShort = AttackRelease(attack: BeatTracker.ambientLevelAttack, release: BeatTracker.ambientLevelRelease)
     private var ambientLong = AttackRelease(attack: BeatTracker.ambientAverage, release: BeatTracker.ambientAverage)
     private var ambientPrimed = false
+    /// Сила последних атак для энергии пульса: скачком вверх до силы онсета, спад с `ambientRelease`.
+    private var ambientHeld: Float = 0
+    private var ambientRise = AttackRelease(attack: BeatTracker.ambientAttack, release: 0)
+    private let ambientFallPerHop: Float
     /// Энергия мягкого пульса последнего шага (`AmbientInfo.energy`); относится к окну этого шага.
     /// Анализ кладет ее в кадр шага (`WaveFrame.kickEnergy`), рендер берет ее из кадра на момент показа.
     public private(set) var ambientEnergy: Float = 0
@@ -436,6 +618,7 @@ public struct BeatTracker: Sendable {
         odfRing = [Float](repeating: 0, count: Int((Double(Self.phaseTeeth + 1) * longest * framesPerSecond).rounded(.up)) + 4)
         // Спад огибающей exp(−t / 10 с) в децибелах: 20 / ln 10 дБ на постоянную времени.
         longFallPerHopDB = Float(20 / log(10.0) / (Self.longRelease * framesPerSecond))
+        ambientFallPerHop = Float(exp(-1 / (Self.ambientRelease * framesPerSecond)))
         past = []
         past.reserveCapacity(Self.pastCapacity + 1)
         confirmHops = max(Int((Self.confirmWindow * framesPerSecond).rounded()), 1)
@@ -456,22 +639,66 @@ public struct BeatTracker: Sendable {
             events: events,
             bpm: period.map { 60 / $0 },
             period: period,
-            confidence: confidence,
+            confidence: gridConfidence,
             locked: locked,
             unlockReason: locked ? nil : lastUnlockReason,
             weight: displayWeight,
-            ambient: ambient
+            ambient: ambient,
+            race: shadowNext.map { RaceInfo(shadow: $0, dim: parameters.raceDim) },
+            combRatio: combRatio
         )
     }
 
     /// Вход мягкого пульса: сетка ФАПЧ (без темпа период 0) и высота горба `уверенность × g_E` (0 в
     /// тишине). Энергия 0: она относится к звуку, который слышен только через задержку вывода, и идет
     /// к рендеру в кадре (`WaveFrame.kickEnergy`), иначе пульс опережал бы бочку.
+    ///
+    /// На накате (`isCoasting`, брейк без бочки при захвате) ворот закрыт, и горб высотой
+    /// `уверенность × g_E` гас, хотя хэты или малый держали долю (разбор журналов 1.2.1, исправление D).
+    /// Там высота `уверенность × coastConfidence`: доля наката с широкополосным онсетом поднимает горб, доля
+    /// без него опускает, так что в брейке с одним пэдом горба нет. Слышимость полосы бочки на накате не
+    /// нужна (онсеты есть только от -60 dBFS). Только пульс: сетка наката не вспыхивает. Синтетика
+    /// разбора (240 с, 120 BPM, брейк без бочки 120-135 с, хэты восьмыми): пульс от 0.05 в брейке на
+    /// 57 % кадров при задержке вывода 134 мс (61 % при 20 мс), только от атак 48 % (45 %), с энергией от
+    /// отношения уровней 0.2 %; вспышки и `wave-eval` те же.
     private var ambient: AmbientInfo {
-        guard let nextBeat, let period, ambientAudible else {
-            return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0)
+        guard let nextBeat, let period else { return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0) }
+        if isCoasting {
+            return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence * coastConfidence), energy: 0)
         }
-        return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(confidence) * energyGate, energy: 0)
+        guard ambientAudible else { return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0) }
+        return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence) * energyGate, energy: 0)
+    }
+
+    /// Показанная четность попадает заметно чаще скрытой (`everyOtherLockRatio`): решения о захвате
+    /// идут и по ее долям.
+    private var shownParityLeads: Bool {
+        guard parameters.everyOtherLockRatio > 0, let shown = shownParity else { return false }
+        return parityLeadOn == shown
+    }
+
+    /// Защелка `shownParityLeads` после каждого изменения уверенности по четности или показанной четности.
+    private mutating func latchParityLead() {
+        guard parameters.everyOtherLockRatio > 0, let shown = shownParity else {
+            parityLeadOn = nil
+            return
+        }
+        let index = Int(shown)
+        let ratio = parameters.everyOtherLockRatio * (parityLeadOn == shown ? Self.parityLeadRelease : 1)
+        parityLeadOn = parityConfidence[index] >= ratio * parityConfidence[1 - index] ? shown : nil
+    }
+
+    /// Уверенность для захвата, веса показа и защиты захвата: при `shownParityLeads` большая из
+    /// уверенности всех долей и уверенности показанных.
+    var gridConfidence: Double {
+        guard shownParityLeads, let shown = shownParity else { return confidence }
+        return max(confidence, parityConfidence[Int(shown)])
+    }
+
+    /// Серия попаданий для захвата и роста веса, как `gridConfidence`.
+    private var gridHits: Int {
+        guard shownParityLeads, let shown = shownParity else { return hits }
+        return max(hits, parityHits[Int(shown)])
     }
 
     /// Длинное среднее уровня бочки не ниже `ambientFloorDB`.
@@ -487,6 +714,10 @@ public struct BeatTracker: Sendable {
     public var resumingTempo: Bool { resumePeriod != nil }
 
     public mutating func process(_ hop: HopResult) {
+        if hop.soundReturned, parameters.silenceRestart, processedSinceReset {
+            // Звук после тишины: другой трек или то же место после паузы, фаза прежней сетки ничего не значит.
+            reset(keepTempo: keepsTempoAfterSilence)
+        }
         now = hop.endTime
         processedSinceReset = true
         // Ворот и вес здесь еще от прошлого шага, до звука самой доли.
@@ -525,9 +756,9 @@ public struct BeatTracker: Sendable {
         closeWindows()
         closeShadowWindows()
         updateGate(hop.kickLevelDB)
-        updateAmbient(hop.kickLevelDB)
+        updateAmbient(hop)
         updateWeight()
-        if let onset = hop.kickOnset {
+        if let onset = hop.kickOnset, !onset.sustained {
             addKickOnset(onset)
         }
     }
@@ -564,11 +795,19 @@ public struct BeatTracker: Sendable {
         committedAmplitude = nil
         confidence = 0
         hits = 0
+        parityConfidence = .zero
+        parityLeadOn = nil
+        parityHits = .zero
         lastUnlockReason = locked ? .reset : nil
         locked = false
         disagreements = 0
         proposedByPLP = false
+        raceStartEvidence = 0
+        halfMatched = false
+        halfConfidence = 0
+        combRatio = nil
         coasted = false
+        coastConfidence = 0
         shownParity = nil
         dropShadow()
         strengthEMA = 0
@@ -580,6 +819,8 @@ public struct BeatTracker: Sendable {
         ambientShort.reset()
         ambientLong.reset()
         ambientPrimed = false
+        ambientHeld = 0
+        ambientRise.reset()
         ambientEnergy = 0
         past.removeAll(keepingCapacity: true)
         resumePeriod = kept?.period
@@ -626,6 +867,9 @@ public struct BeatTracker: Sendable {
             current = next - previous
         }
         let comb = phaseCandidate(period: estimate.period, current: current)
+        if let comb, current != nil, comb.currentScore > 0 {
+            combRatio = comb.score / comb.currentScore
+        }
         guard let nextBeat, !estimate.switched else {
             dropShadow()
             if let nextBeat, let previous, let comb, carry(from: previous, next: nextBeat, comb: comb) { return }
@@ -633,7 +877,13 @@ public struct BeatTracker: Sendable {
             if let comb { rephase(to: comb.time) }
             return
         }
-        let plpProposal = locked && confidence >= parameters.lockConfidence ? plpCandidate(period: estimate.period) : nil
+        // Довод гонки на каждой проверке, и на той, что ее запустила.
+        defer {
+            if let shadow = shadowNext, let comb, comb.currentScore > 0 {
+                recordRaceEvidence(shadowScore: phaseScore(at: shadow, period: estimate.period), currentScore: comb.currentScore)
+            }
+        }
+        let plpProposal = locked && gridConfidence >= parameters.lockConfidence ? plpCandidate(period: estimate.period) : nil
         if (plpProposal != nil) != proposedByPLP {
             proposedByPLP = plpProposal != nil
             disagreements = 0
@@ -646,6 +896,18 @@ public struct BeatTracker: Sendable {
         guard let comb else { return }
         let diff = Self.circularDifference(comb.time - nextBeat, period: estimate.period)
         let stronger = comb.score > (1 + parameters.phaseJumpMargin) * comb.currentScore
+        if parameters.raceStartRatio > 0, shadowNext == nil, locked, gridConfidence >= parameters.lockConfidence {
+            let leans = abs(abs(diff) - estimate.period / 2) <= parameters.matchWindow * estimate.period
+                && comb.score >= parameters.raceStartRatio * comb.currentScore
+            raceStartEvidence += Self.raceStartGain * ((leans ? 1 : 0) - raceStartEvidence)
+            if raceStartEvidence >= parameters.raceEvidenceShare, halfConfidence >= parameters.raceEvidenceShare {
+                raceStartEvidence = 0
+                startShadow(at: comb.time)
+                return
+            }
+        } else {
+            raceStartEvidence = 0
+        }
         if abs(diff) > parameters.phaseJump * estimate.period, stronger {
             disagreements += 1
             if let shadow = shadowNext {
@@ -653,7 +915,7 @@ public struct BeatTracker: Sendable {
                 shadowVotes = agrees ? shadowVotes + 1 : 0
             }
             if disagreements >= parameters.phaseJumpChecks, shadowNext == nil {
-                if locked, confidence >= parameters.lockConfidence {
+                if locked, gridConfidence >= parameters.lockConfidence {
                     startShadow(at: comb.time)
                 } else {
                     // Уверенного захвата нет, защищать нечего: скачок сразу, как в 1.1.
@@ -665,6 +927,28 @@ public struct BeatTracker: Sendable {
             disagreements = 0
             shadowVotes = 0
         }
+    }
+
+    /// Уверенный захват на фазе доли `beat` (тесты гонки фаз: трекер пришел в музыку уже на «и», как в
+    /// журнале 2 владельца). Тень и доводы гонки сбрасываются; без темпа ничего не делает.
+    mutating func forceLock(onBeat beat: Double) {
+        guard let period else { return }
+        if let nextBeat, nextBeat <= now {
+            archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
+        }
+        let steps = ((now - beat) / period).rounded(.down) + 1
+        nextBeat = beat + steps * period
+        nextMatched = false
+        committedAmplitude = nil
+        beatCounter += 2
+        confidence = 1
+        hits = max(hits, parameters.lockHits)
+        parityConfidence = SIMD2(repeating: 1)
+        parityHits = SIMD2(repeating: hits)
+        latchParityLead()
+        locked = true
+        disagreements = 0
+        dropShadow()
     }
 
     /// Уверенный PLP вместо гребенки при уверенном захвате (`plpShadow`): расхождение его доли с ФАПЧ
@@ -731,6 +1015,9 @@ public struct BeatTracker: Sendable {
     /// запоминается, только если захват был.
     private mutating func resetConfidence(_ reason: UnlockReason) {
         confidence *= 0.5
+        parityConfidence *= 0.5
+        latchParityLead()
+        parityHits = .zero
         capWeight()
         hits = 0
         if locked { lastUnlockReason = reason }
@@ -773,6 +1060,10 @@ public struct BeatTracker: Sendable {
     private mutating func dropShadow() {
         shadowNext = nil
         shadowVotes = 0
+        raceChecks = 0
+        raceFavour = 0
+        raceRatioSum = 0
+        raceShadowHits = 0
         shadowConfidence = 0
         shadowHits = 0
         shadowMatched = false
@@ -788,19 +1079,48 @@ public struct BeatTracker: Sendable {
             let hit = shadowMatched ? 1.0 : 0.0
             shadowConfidence += parameters.confidenceGain * (hit - shadowConfidence)
             shadowHits = shadowMatched ? shadowHits + 1 : 0
+            if shadowMatched { raceShadowHits += 1 }
             shadowNext = shadow + period
             shadowMatched = false
             shadowBeats += 1
-            shadowLead = shadowConfidence > confidence + parameters.raceMargin ? shadowLead + 1 : 0
+            shadowLead = shadowConfidence > gridConfidence + parameters.raceMargin ? shadowLead + 1 : 0
             if let nextBeat, abs(Self.circularDifference(shadow + period - nextBeat, period: period)) <= parameters.phaseJump * period {
                 // Фазы сошлись: это та же сетка.
                 dropShadow()
-            } else if shadowLead >= parameters.raceBeats || (parameters.raceVotes > 0 && shadowVotes >= parameters.raceVotes) {
+            } else if shadowLead >= parameters.raceBeats || (parameters.raceVotes > 0 && shadowVotes >= parameters.raceVotes)
+                || raceEvidenceFavoursShadow
+            {
                 takeOverShadow()
-            } else if shadowBeats >= parameters.raceLimit {
+            } else if shadowBeats >= parameters.raceLimit || raceEvidenceFavoursGrid {
                 dropShadow()
             }
         }
+    }
+
+    /// Проверка темпа во время гонки: оценки гребенки у доли тени и у доли ФАПЧ.
+    private mutating func recordRaceEvidence(shadowScore: Double, currentScore: Double) {
+        raceChecks += 1
+        if shadowScore > currentScore { raceFavour += 1 }
+        raceRatioSum += shadowScore / currentScore
+    }
+
+    /// Доводы гонки за тень (`raceEvidenceChecks`): гребенка за нее на большинстве проверок с заметным
+    /// перевесом в среднем, и сама тень держится на онсетах.
+    private var raceEvidenceFavoursShadow: Bool {
+        guard parameters.raceEvidenceChecks > 0, raceChecks >= parameters.raceEvidenceChecks, shadowBeats > 0 else {
+            return false
+        }
+        let checks = Double(raceChecks)
+        return Double(raceFavour) >= parameters.raceEvidenceShare * checks
+            && raceRatioSum >= parameters.raceEvidenceRatio * checks
+            && Double(raceShadowHits) >= parameters.raceEvidenceHits * Double(shadowBeats)
+    }
+
+    /// Доводы гонки за текущую сетку: после `raceEvidenceChecks` проверок среднее отношение оценок тени
+    /// и ФАПЧ ниже `raceDropRatio`.
+    private var raceEvidenceFavoursGrid: Bool {
+        guard parameters.raceEvidenceChecks > 0, raceChecks >= parameters.raceEvidenceChecks else { return false }
+        return raceRatioSum < parameters.raceDropRatio * Double(raceChecks)
     }
 
     /// Тень выиграла: сетка переходит на нее с ее уверенностью и счетом попаданий. Захват остается,
@@ -817,6 +1137,9 @@ public struct BeatTracker: Sendable {
         beatCounter += 2
         disagreements = 0
         confidence = shadowConfidence
+        parityConfidence = SIMD2(repeating: shadowConfidence)
+        parityHits = SIMD2(repeating: shadowHits)
+        latchParityLead()
         capWeight()
         hits = shadowHits
         let wasLocked = locked
@@ -841,17 +1164,23 @@ public struct BeatTracker: Sendable {
             }
         }
         guard best > 0 else { return nil }
-        var currentScore = 0.0
-        if let current {
-            // Задержка доли ФАПЧ от «сейчас» на оси онсетов, по кругу периода. Шаг онсета лежит от доли
-            // ФАПЧ до шага в любую сторону, поэтому берется лучшая из трех соседних задержек.
-            let age = (now - StreamAnalyzer.onsetLag - current) / hopDuration
-            let wrapped = Int((age - (age / periodHops).rounded(.down) * periodHops).rounded())
-            for delay in (wrapped - 1)...(wrapped + 1) {
-                currentScore = max(currentScore, combScore(delay: (delay + delays) % delays, periodHops: periodHops))
-            }
-        }
+        let currentScore = current.map { phaseScore(at: $0, period: period) } ?? 0
         return (now - Double(bestDelay) * hopDuration - StreamAnalyzer.onsetLag, best, currentScore)
+    }
+
+    /// Оценка гребенки у фазы доли `beat` (прошлой или будущей). Задержка доли от «сейчас» на оси
+    /// онсетов берется по кругу периода; шаг онсета лежит от доли до шага в любую сторону, поэтому
+    /// берется лучшая из трех соседних задержек.
+    private func phaseScore(at beat: Double, period: Double) -> Double {
+        let periodHops = period * framesPerSecond
+        let delays = max(Int(periodHops.rounded()), 1)
+        let age = (now - StreamAnalyzer.onsetLag - beat) / hopDuration
+        let wrapped = Int((age - (age / periodHops).rounded(.down) * periodHops).rounded())
+        var score = 0.0
+        for delay in (wrapped - 1)...(wrapped + 1) {
+            score = max(score, combScore(delay: (delay + delays) % delays, periodHops: periodHops))
+        }
+        return score
     }
 
     /// Оценка гребенки фазы для задержки `delay` шагов: зубцы через `periodHops`, у каждого максимум
@@ -901,6 +1230,7 @@ public struct BeatTracker: Sendable {
     /// и `nextBeat − 2T`, `nextBeat − 4T`, ...). Показ остается на прежней четности, пока гребенка
     /// другой не выше больше чем на `everyOtherHold`.
     private mutating func updateDisplayOctave() {
+        defer { latchParityLead() }
         // Гистерезис у порога: включается ниже `everyOtherPeriod`, выключается только выше него в
         // `everyOtherRelease` раз, иначе темп у порога с дрожанием периода переключал бы показ.
         let limit = parameters.everyOtherPeriod * (shownParity == nil ? 1 : Self.everyOtherRelease)
@@ -953,6 +1283,7 @@ public struct BeatTracker: Sendable {
 
     private mutating func correct(with onset: OnsetEvent) {
         guard let nextBeat, let period else { return }
+        if abs(onset.time - (nextBeat - period / 2)) < parameters.matchWindow * period { halfMatched = true }
         let previous = nextBeat - period
         let isNext = abs(onset.time - nextBeat) <= abs(onset.time - previous)
         let error = onset.time - (isNext ? nextBeat : previous)
@@ -978,6 +1309,7 @@ public struct BeatTracker: Sendable {
     private mutating func closeWindows() {
         while let nextBeat, let period, now > nextBeat + parameters.matchWindow * period {
             let coasting = isCoasting
+            coastConfidence = coasting ? coastConfidence + parameters.confidenceGain * ((nextMatched ? 1 : 0) - coastConfidence) : 0
             if coasting, !nextMatched {
                 // Брейк без бочки при захвате: доля без онсета не довод против сетки, уверенность,
                 // счет и захват стоят, сетка идет дальше по последнему периоду.
@@ -985,14 +1317,25 @@ public struct BeatTracker: Sendable {
             } else {
                 let hit = nextMatched ? 1.0 : 0.0
                 confidence += parameters.confidenceGain * (hit - confidence)
+                halfConfidence += parameters.confidenceGain * ((halfMatched ? 1.0 : 0.0) - halfConfidence)
                 hits = nextMatched ? hits + 1 : 0
+                if shownParity != nil {
+                    let parity = Int(beatCounter & 1)
+                    parityConfidence[parity] += parameters.confidenceGain * (hit - parityConfidence[parity])
+                    parityHits[parity] = nextMatched ? parityHits[parity] + 1 : 0
+                } else {
+                    parityConfidence = SIMD2(repeating: confidence)
+                    parityHits = SIMD2(repeating: hits)
+                }
+                latchParityLead()
                 if locked {
                     // Первая доля после брейка решает: промах значит, что сетка ушла, захват сразу
                     // отпускается. Ее вспышка зафиксирована еще при закрытом вороте и не видна.
-                    locked = confidence >= parameters.unlockConfidence && (nextMatched || !coasted)
+                    locked = gridConfidence >= parameters.unlockConfidence && (nextMatched || !coasted)
                     if !locked { lastUnlockReason = .misses }
                 } else {
-                    locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
+                    locked = gridConfidence >= parameters.lockConfidence && gridHits >= parameters.lockHits
+                        && phaseBeatsHalf(nextBeat, period: period)
                 }
                 // Атака при закрытом вороте сетку не подтверждает: решает доля с открытым воротом. После
                 // промаха на ней сетка остается скрытой до попадания или новой фазы: вес показа идет от
@@ -1003,9 +1346,17 @@ public struct BeatTracker: Sendable {
             archive(GlowEvent(id: beatCounter, time: nextBeat, amplitude: nextAmplitude, predicted: true))
             self.nextBeat = nextBeat + period
             nextMatched = false
+            halfMatched = false
             committedAmplitude = nil
             beatCounter += 1
         }
+    }
+
+    /// Проверка фазы при захвате (`lockPhaseCheck`): гребенка у «и» доли `beat` не выше гребенки у
+    /// самой доли больше чем в `lockPhaseCheck` раз.
+    private func phaseBeatsHalf(_ beat: Double, period: Double) -> Bool {
+        guard parameters.lockPhaseCheck > 0 else { return true }
+        return phaseScore(at: beat + period / 2, period: period) <= parameters.lockPhaseCheck * phaseScore(at: beat, period: period)
     }
 
     // MARK: Ворот, вес и события
@@ -1027,9 +1378,13 @@ public struct BeatTracker: Sendable {
         energyGate = Self.smoothstep(Self.gateLowDB, Self.gateHighDB, kickGateDB - longPeakDB)
     }
 
-    /// Энергия мягкого пульса: уровень бочки в амплитуде (нечисловой как пол) в короткую огибающую, она
-    /// в длинное среднее, энергия их отношение, 0 ниже `ambientFloorDB`.
-    private mutating func updateAmbient(_ levelDB: Float) {
+    /// Энергия мягкого пульса от онсетов шага и слышимость полосы бочки: ее уровень в амплитуде
+    /// (нечисловой как пол) в короткую огибающую, она в длинное среднее (`ambientAudible`).
+    private mutating func updateAmbient(_ hop: HopResult) {
+        ambientHeld *= ambientFallPerHop
+        holdAttack(hop.broadbandOnset)
+        holdAttack(hop.kickOnset)
+        let levelDB = hop.kickLevelDB
         let level = levelDB.isFinite ? max(levelDB, Self.floorDB) : Self.floorDB
         let amplitude = Float(pow(10.0, Double(level) / 20))
         if ambientPrimed {
@@ -1040,19 +1395,26 @@ public struct BeatTracker: Sendable {
             ambientLong.reset(to: amplitude)
             ambientPrimed = true
         }
-        ambientEnergy = ambientAudible ? ambientShort.value / ambientLong.value : 0
+        ambientEnergy = ambientRise.step(toward: ambientHeld, dt: hopDuration)
+    }
+
+    /// Сила онсета в удержание энергии пульса (нечисловая не идет, вне 0...1 обрезается).
+    private mutating func holdAttack(_ onset: OnsetEvent?) {
+        guard let strength = onset?.strength, strength.isFinite else { return }
+        ambientHeld = max(ambientHeld, min(max(strength, 0), 1))
     }
 
     private mutating func updateWeight() {
         displayWeight = Self.nextWeight(
-            displayWeight, confidence: confidence, beats: hopDuration / (period ?? Self.defaultPeriod), parameters: parameters,
-            rising: nextBeat != nil && (locked || hits >= parameters.weightHits)
+            displayWeight, confidence: gridConfidence, beats: hopDuration / (period ?? Self.defaultPeriod),
+            parameters: parameters,
+            rising: nextBeat != nil && (locked || gridHits >= parameters.weightHits)
         )
     }
 
     /// Новая сетка: вес не выше цели по ее уверенности, старый вес ее не подтверждал.
     private mutating func capWeight() {
-        let target = Self.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(confidence))
+        let target = Self.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(gridConfidence))
         displayWeight = min(displayWeight, target)
     }
 
@@ -1136,7 +1498,7 @@ public struct BeatTracker: Sendable {
             Self.select(UnsafeMutableBufferPointer(rebasing: buffer[0..<count]), rank: count / 2)
         }
         let ratio = max(odf(age: 0), odf(age: 1)) / (median + Self.confirmEpsilon)
-        if period != nil, confidence >= parameters.weightLow, energyGate >= Self.confirmGateOpen {
+        if period != nil, gridConfidence >= parameters.weightLow, energyGate >= Self.confirmGateOpen {
             return max(parameters.kickConfirmFloor, Self.smoothstep(parameters.kickConfirmLow, Self.confirmHigh, ratio))
         }
         return Self.smoothstep(Self.confirmLow, Self.confirmHigh, ratio)

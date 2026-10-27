@@ -80,23 +80,37 @@ public enum RhythmReplay {
         /// Средний по времени вес показа за `[0, end]` (до первой публикации 0); `nil` без публикаций
         /// или если хоть у одной нет веса (журналы до 1.2).
         public var meanWeight: Double?
+        /// Секунды гонки фаз за `[0, end]` и сколько раз она начиналась; `nil`, если гонка не записана
+        /// (журналы схемы 1).
+        public var raceSeconds: Double?
+        public var raceStarts: Int?
+        /// Медиана отношения гребенки по публикациям до `end`, где оно есть; `nil` без него.
+        public var medianCombRatio: Double?
 
+        /// Гонка в расписаниях записи есть только со схемы 2: у каждой строки тогда есть `amplitudes`.
         public init(schedules: [RhythmLog.Schedule], end: Double) {
-            self.init(points: schedules.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason, $0.weight) }, end: end)
+            let logged = !schedules.isEmpty && schedules.allSatisfy { $0.amplitudes != nil }
+            self.init(
+                points: schedules.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason, $0.weight, logged ? $0.race != nil : nil, $0.combRatio) },
+                end: end
+            )
         }
 
         public init(states: [OfflineBeatChain.State], end: Double) {
-            self.init(points: states.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason, $0.weight) }, end: end)
+            self.init(points: states.map { ($0.time, $0.locked, $0.bpm, $0.unlockReason, $0.weight, $0.racing, $0.combRatio) }, end: end)
         }
 
         private init(
-            points: [(time: Double, locked: Bool, bpm: Double?, reason: UnlockReason?, weight: Float?)], end: Double
+            points: [(time: Double, locked: Bool, bpm: Double?, reason: UnlockReason?, weight: Float?, racing: Bool?, ratio: Double?)],
+            end: Double
         ) {
             firstLock = points.first(where: \.locked)?.time
             var locked = 0.0
             var weighted = 0.0
             var changes = 0
             var unlocks: [Unlock] = []
+            var racing = 0.0
+            var starts = 0
             for (index, point) in points.enumerated() where point.time < end {
                 if index > 0, points[index - 1].locked != point.locked {
                     changes += 1
@@ -107,6 +121,10 @@ public enum RhythmReplay {
                 if let weight = point.weight, weight.isFinite {
                     weighted += Double(min(max(weight, 0), 1)) * span
                 }
+                if point.racing == true {
+                    racing += span
+                    if index == 0 || points[index - 1].racing != true { starts += 1 }
+                }
                 guard point.locked else { continue }
                 locked += span
             }
@@ -115,6 +133,10 @@ public enum RhythmReplay {
             meanWeight = complete && end > 0 ? min(weighted / end, 1) : nil
             lockChanges = changes
             self.unlocks = unlocks
+            let raceLogged = !points.isEmpty && points.allSatisfy { $0.racing != nil }
+            raceSeconds = raceLogged ? racing : nil
+            raceStarts = raceLogged ? starts : nil
+            medianCombRatio = BeatMetrics.percentile(points.filter { $0.time < end }.compactMap(\.ratio), 0.5)
             lastBPM = points.last(where: { $0.time < end })?.bpm
             let tempos = points.filter { $0.locked && $0.time < end }.compactMap(\.bpm).sorted()
             if tempos.isEmpty {
@@ -364,6 +386,8 @@ extension RhythmReplay.Report {
         lines.append(Self.timelineRow("replay", replay))
         lines.append(Self.unlockLine("device", device))
         lines.append(Self.unlockLine("replay", replay))
+        lines.append(Self.raceLine("device", device))
+        lines.append(Self.raceLine("replay", replay))
         if options.listFlashes {
             lines.append("")
             lines.append(Self.row(["device s", "kind", "nearest replay s", "diff ms"]))
@@ -406,6 +430,14 @@ extension RhythmReplay.Report {
     private static func unlockLine(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {
         let items = timeline.unlocks.map { String(format: "%.2f s ", $0.time) + ($0.reason?.rawValue ?? "unknown") }
         return "unlocks \(name): " + (items.isEmpty ? "none" : items.joined(separator: ", "))
+    }
+
+    /// Гонка фаз: секунды и сколько раз начиналась, медиана отношения гребенки (`not logged` у журналов
+    /// схемы 1).
+    private static func raceLine(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {
+        guard let seconds = timeline.raceSeconds, let starts = timeline.raceStarts else { return "phase race \(name): not logged" }
+        let ratio = timeline.medianCombRatio.map { String(format: "%.2f", $0) } ?? "-"
+        return "phase race \(name): " + String(format: "%.2f s", seconds) + " in \(starts) races, median comb ratio \(ratio)"
     }
 
     private static func timelineRow(_ name: String, _ timeline: RhythmReplay.Timeline) -> String {

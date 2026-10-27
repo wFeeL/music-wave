@@ -266,6 +266,67 @@ enum Drums {
         return render(spec)
     }
 
+    /// Брейк без бочки: бочка на каждую долю, хэт восьмыми (на доле громче, чем на «и») и бас на слабых
+    /// восьмых; бочка и бас молчат с `at` в течение `length` секунд, хэты идут дальше (синтетика разбора
+    /// 1.2.1: в брейке хэты держат долю, а свечение гасло). Пэд звучит всю сцену.
+    static func kicklessBreak(
+        at: Double = 10, length: Double = 12, bpm: Double = 120, seconds: Double = 30, sampleRate: Double = 48_000,
+        seed: UInt64 = 1
+    ) -> DrumScene {
+        var spec = Spec(seconds: seconds, sampleRate: sampleRate, bpm: { _ in bpm }, seed: seed)
+        spec.silentKicks = at..<(at + length)
+        spec.pads = [(0, seconds, 1)]
+        spec.pattern = { _ in [.kick(0), .hat(0), .hat(0.5, gain: 0.75), .bass(0.5, length: 0.4)] }
+        return render(spec)
+    }
+
+    /// Тихая бочка под пэдом: бочка 808 на каждую долю на `kickDB` дБ ниже пэда, пэд звучит всю
+    /// сцену. Движется мало полос, поэтому пики широкополосной функции на долях около 6-9, а фон
+    /// между ними не выше 1.7: доля ясна, но абсолютный порог 10 ее не видит (как вступление трека C
+    /// в журналах владельца 1.2.1).
+    static func softKicksUnderPad(
+        bpm: Double = 120, seconds: Double = 24, kickDB: Float = -26, sampleRate: Double = 48_000, seed: UInt64 = 1
+    ) -> DrumScene {
+        var spec = Spec(seconds: seconds, sampleRate: sampleRate, bpm: { _ in bpm }, seed: seed)
+        spec.gain = gain(kickDB)
+        spec.pads = [(0, seconds, 1 / spec.gain)]
+        spec.pattern = { _ in [.kick(0)] }
+        return render(spec)
+    }
+
+    /// Длинная 808 легато, как в журнале 1 владельца (1.2.1): бас из нот 808 по шестнадцатым 0, 3, 4,
+    /// 6, 10 и 13 из 16 (синкопа 3-3-2), каждая нота звучит до следующей. Высота падает от 1.6 f до f
+    /// (τ 12 мс), атака 3 мс, прошлая нота затухает за 4 мс и обрывается за `gap` до следующей. Полоса
+    /// бочки все время около `levelDB`, между нотами провал короче окна анализа: подъема на 7.5 дБ за
+    /// 16 мс нет. Начала нот лежат в `kicks`.
+    static func sustained808(
+        bpm: Double = 74, seconds: Double = 20, levelDB: Float = -10, gap: Double = 0.012, sampleRate: Double = 48_000
+    ) -> DrumScene {
+        let sixteenth = 60 / bpm / 4
+        let steps: Set<Int> = [0, 3, 4, 6, 10, 13]
+        let pitches: [Double] = [49, 55, 44, 49, 58, 52]
+        var notes: [Double] = []
+        var step = 0
+        while 0.25 + Double(step) * sixteenth < seconds - 0.2 {
+            if steps.contains(step % 16) { notes.append(0.25 + Double(step) * sixteenth) }
+            step += 1
+        }
+        var samples = [Float](repeating: 0, count: Int(seconds * sampleRate))
+        let amplitude = pow(10, Double(levelDB) / 20) * 2.0.squareRoot()
+        for (index, start) in notes.enumerated() {
+            let length = (index + 1 < notes.count ? notes[index + 1] - gap : seconds) - start
+            let frequency = pitches[index % pitches.count]
+            var phase = 0.0
+            add(into: &samples, at: start, length: length, sampleRate: sampleRate) { t in
+                phase += 2 * Double.pi * frequency * (1 + 0.6 * exp(-t / 0.012)) / sampleRate
+                let envelope = min(t / 0.003, 1) * min(max((length - t) / 0.004, 0), 1)
+                return Float(amplitude * envelope * sin(phase))
+            }
+        }
+        let beats = stride(from: 0.25, to: seconds, by: 60 / bpm).map { $0 }
+        return DrumScene(samples: samples, sampleRate: sampleRate, beats: beats, kicks: notes, snares: [], hats: [])
+    }
+
     /// Только розовый шум на `levelDB` dBFS, без долей.
     static func noiseOnly(
         levelDB: Float = -20, seconds: Double = 12, sampleRate: Double = 48_000, seed: UInt64 = 1
@@ -280,7 +341,7 @@ enum Drums {
 
     private enum Event {
         /// Смещения в долях от начала доли.
-        case kick(Double), snare(Double, gain: Float = 1), hat(Double), bass(Double, length: Double)
+        case kick(Double), snare(Double, gain: Float = 1), hat(Double, gain: Float = 1), bass(Double, length: Double)
     }
 
     private struct Spec {
@@ -295,6 +356,8 @@ enum Drums {
         var gridStart = 0.0
         /// Отрезок, где барабаны и бас молчат.
         var silent: Range<Double>?
+        /// Отрезок, где молчат только бочка и бас.
+        var silentKicks: Range<Double>?
         var pads: [(start: Double, end: Double, gain: Float)] = []
         /// События доли по ее номеру от начала сетки.
         var pattern: (Int) -> [Event] = { _ in [] }
@@ -336,7 +399,7 @@ enum Drums {
                     var t = time(beat: beat, offset: offset)
                     if spec.humanizeSigma > 0 { t += spec.humanizeSigma * rng.nextGaussian() }
                     t = snapped(t)
-                    guard audible(t) else { continue }
+                    guard audible(t), !(spec.silentKicks?.contains(t) ?? false) else { continue }
                     kicks.append(t)
                     if spec.acousticKick {
                         acousticKick(into: &samples, at: t, gain: spec.gain, sampleRate: rate)
@@ -348,14 +411,14 @@ enum Drums {
                     guard audible(t) else { continue }
                     snares.append(t)
                     snare(into: &samples, at: t, gain: spec.gain * gain, sampleRate: rate, rng: &rng)
-                case .hat(let offset):
+                case .hat(let offset, let gain):
                     let t = snapped(time(beat: beat, offset: offset))
                     guard audible(t) else { continue }
                     hats.append(t)
-                    closedHat(into: &samples, at: t, gain: spec.gain, sampleRate: rate, rng: &rng)
+                    closedHat(into: &samples, at: t, gain: spec.gain * gain, sampleRate: rate, rng: &rng)
                 case .bass(let offset, let length):
                     let t = snapped(time(beat: beat, offset: offset))
-                    guard audible(t) else { continue }
+                    guard audible(t), !(spec.silentKicks?.contains(t) ?? false) else { continue }
                     let duration = length * (grid[beat + 1] - grid[beat])
                     bassNote(into: &samples, at: t, duration: duration, gain: spec.gain, sampleRate: rate)
                 }

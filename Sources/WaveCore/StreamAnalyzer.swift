@@ -27,10 +27,14 @@ public struct OnsetEvent: Sendable, Equatable {
     public var time: Double
     /// `clamp(odf / P, 0, 1)`, P это следящий пик функции онсетов (спад 3 с).
     public var strength: Float
+    /// Онсет длинной бочки (808 поверх уже громкой полосы бочки, `OnlinePeakPicker.lastOnsetSustained`):
+    /// он есть в журнале ритма и в огибающей удара, но не светится (`BeatTracker`).
+    public var sustained: Bool
 
-    public init(time: Double, strength: Float) {
+    public init(time: Double, strength: Float, sustained: Bool = false) {
         self.time = time
         self.strength = strength
+        self.sustained = sustained
     }
 }
 
@@ -50,6 +54,9 @@ public struct HopResult: Sendable {
     /// `10 · log10` суммарной мощности бинов бочки (до 150 Гц, без бина 0), деленной на ENBW окна
     /// Ханна, как у полос `BandMapper`: синус амплитуды A дает A². Пол -120 dBFS.
     public var kickLevelDB: Float
+    /// Первый шаг со звуком после тишины не короче `StreamAnalyzer.silenceGap`: потоки онсетов начались
+    /// заново, трекер начинается заново (`BeatTracker.Parameters.silenceRestart`).
+    public var soundReturned: Bool
 
     public init(
         frame: WaveFrame,
@@ -59,7 +66,8 @@ public struct HopResult: Sendable {
         broadbandOnset: OnsetEvent?,
         broadbandODF: Float,
         kickODF: Float = 0,
-        kickLevelDB: Float
+        kickLevelDB: Float,
+        soundReturned: Bool = false
     ) {
         self.frame = frame
         self.frameTime = frameTime
@@ -69,6 +77,7 @@ public struct HopResult: Sendable {
         self.broadbandODF = broadbandODF
         self.kickODF = kickODF
         self.kickLevelDB = kickLevelDB
+        self.soundReturned = soundReturned
     }
 }
 
@@ -99,13 +108,56 @@ public final class StreamAnalyzer {
     /// на фронте меньше), поэтому абсолютная часть ниже, а относительная растет с ударами. Совсем
     /// без ложных онсетов три бина бочки в шуме не обойтись: у розового шума -20 dBFS около 0.17 в
     /// секунду; редкие ложные удары гасят уверенность и захват ритма в трекере.
-    static let kickPickerParameters = OnlinePeakPicker.Parameters(floor: 2.0, relativeFloor: 0.25, minRiseDB: 7.5)
+    ///
+    /// Онсет длинной бочки (`sustained`): 808 легато поверх уже громкой полосы бочки (журнал 1 владельца
+    /// 1.2.1: уровень полосы -9.5...-11.6 дБ все 30 с, на смене ноты провал, подъема на 7.5 дБ нет, 1
+    /// онсет на 55 нот). Пик функции бочки выше `max(0.3, 6 T, 0.25 P)` и уровень на 3 дБ выше минимума
+    /// за 150 мс, который сам выше ворота -60 dBFS. На журнале 1 онсетов бочки 1 -> 41, из них 35 на
+    /// нотах 808 (нот около 55). У розового шума от -10 до -50 dBFS пик не выше 3.7 T, онсетов длинной
+    /// бочки 0 за 720 с. Такие онсеты не светятся (`BeatTracker`): на GTZAN tune (steady) их 781, на
+    /// доле только 47 %. Если бы они светились, без захвата прибавилось бы 20 вспышек на доле и 15
+    /// мимо (точность всех вспышек 0.8677 -> 0.8671, без захвата 0.7460 -> 0.7450). Поэтому они есть
+    /// только в журнале ритма и в огибающей удара, а вспышки и метрики `wave-eval` те же.
+    static let kickPickerParameters = OnlinePeakPicker.Parameters(
+        floor: 2.0, relativeFloor: 0.25, sustainedContrast: 6, sustainedFloor: 0.3, sustainedRiseDB: 3, minRiseDB: 7.5
+    )
     /// Выбор пиков широкополосной функции. Проверки подъема уровня нет: уровень здесь это
     /// максимум полос, его почти всегда держит бочка или бас, и хэт между ними его не поднимает
-    /// (с проверкой 9 дБ хип-хоп дает F 0.6). Шум отсекает порог odf 10: у розового шума -20 dBFS
-    /// пики около 8, у хэта от 30, у бочки и малого 70-90. При пороге 12 на GTZAN (полоса до 11 кГц)
-    /// у половины долей не было онсета, и трекер редко набирал попадания для захвата.
-    static let broadbandPickerParameters = OnlinePeakPicker.Parameters(floor: 10, minRiseDB: -.infinity)
+    /// (с проверкой 9 дБ хип-хоп дает F 0.6). Шум отсекает порог odf 10: у розового шума пики до 8.7
+    /// при любой громкости от -10 до -40 dBFS, у хэта от 30, у бочки и малого 70-90. При пороге 12 на
+    /// GTZAN (полоса до 11 кГц) у половины долей не было онсета, и трекер редко набирал попадания.
+    ///
+    /// Порог 10 опускается до 4 по типичному пику T и уровню акцента A (`OnlinePeakPicker.Parameters`):
+    /// `min(10, max(4, 3.2 T, 0.6 A))`. На тихих и редких аранжировках доли стоят под 10 (журналы
+    /// владельца 1.2.1: медиана пика доли 4.5 во вступлении трека C, 6.9-8.4 у трека A), хотя доля ясна.
+    /// Отрыв 3.2 держит шум: у розового шума от -10 до -50 dBFS пик не выше 2.5 T, онсетов 0 за 870 с.
+    /// Уровень акцента с медленным шагом (около 14 акцентов после сброса, 7 с на 120 BPM) держит порог
+    /// после громких долей и на слабых долях.
+    ///
+    /// GTZAN tune, steady, 60 Гц, против порога 10: prec 0.8674 -> 0.8677, recall 0.4215 -> 0.4244,
+    /// lockedCov 0.3490 -> 0.3507, wrongLock 12 / 215 без изменений, вспышек мимо долей всего / с захватом
+    /// 2081 / 555 -> 2088 / 555. Записи владельца (15 подряд): вспышек на долю 192 -> 210, это темное
+    /// вступление трека C (0 -> 17). Отклонены: постоянный порог 8 / 6 (0.8650 / 0.8559, wrongLock
+    /// 16 / 22, с захватом мимо 768 / 1048, шум дает онсеты); отрыв 2.6 без уровня акцента (0.8668,
+    /// wrongLock 17, с захватом мимо 643: медленные треки 52-66 BPM на удвоенной сетке загораются через
+    /// долю); отрыв 2.2 (на шуме 22 онсета); порог от следящего пика 0.45-0.6 P; быстрый разгон уровня
+    /// акцента (0.8665, с захватом мимо 557-560).
+    static let broadbandPickerParameters = OnlinePeakPicker.Parameters(
+        floor: 10, peakContrast: 3.2, lowFloor: 4, accentFloor: 0.6, minRiseDB: -.infinity
+    )
+    /// Тишина, после которой звук начинает новый поток (`HopResult.soundReturned`): самая громкая полоса
+    /// ниже `silenceLevelDB` не меньше `silenceGap` секунд. Порог уровня тот же, что у выбора пиков
+    /// широкополосной функции: ниже него онсетов нет. Так звучат пауза плеера, во время которой захват
+    /// отдает нули, и промежуток между треками у всего звука системы, где ключа трека нет. Потоки онсетов
+    /// начинаются заново, пока окно не выйдет из тишины (`fftSize / hopSize` шагов), как у нового
+    /// анализатора: переход от тишины к звуку иначе дает пик потока на любой фазе (в пробе пауз GTZAN
+    /// 1442 вспышки бочки в первые 0.1 с после паузы, 1150 из них мимо доли). 0.5 с: на GTZAN tune
+    /// тишина такой длины внутри файла есть в двух файлах, а промежутки между треками обычно длиннее.
+    /// Уровень это уровень захвата: при тихой громкости самого плеера (она действует до захвата) ниже
+    /// порога может уйти и тихое место трека. Тишина считается в шагах анализа (`silenceGap / hopDuration`),
+    /// поэтому в простое острова (шаг на пробуждение) она набирается дольше; трекер там все равно стоит.
+    static let silenceGap = 0.5
+    static let silenceLevelDB = broadbandPickerParameters.minLevelDB
     private static let hannENBW: Float = 1.5
     private static let floorDB: Float = -120
 
@@ -126,6 +178,10 @@ public final class StreamAnalyzer {
     private var broadbandFlux: SuperFlux
     private var kickPicker: OnlinePeakPicker
     private var broadbandPicker: OnlinePeakPicker
+    /// Шагов подряд, где самая громкая полоса ниже `silenceLevelDB`.
+    private var silentHops = 0
+    /// Сколько еще шагов после возврата звука потоки онсетов начинаются заново.
+    private var refillHops = 0
 
     private var spectrum: [Float]
     private var levelsDB: [Float]
@@ -173,7 +229,11 @@ public final class StreamAnalyzer {
 
     /// Пауза, перемотка или смена источника: уровни, пики автоуровня, сглаживание, огибающая,
     /// история функций онсетов и выбор пиков начинаются заново.
-    public func reset() {
+    ///
+    /// `keepOnsetFloor` (пауза в том же треке, как `BeatTracker.reset(keepTempo:)`): типичный пик и уровень
+    /// акцента выбора пиков остаются (`OnlinePeakPicker.reset(keepTypical:)`), и порог широкополосной
+    /// функции, опущенный на тихой аранжировке, не возвращается к 10 на 7 с после каждой паузы.
+    public func reset(keepOnsetFloor: Bool = false) {
         levelProcessor = Self.makeLevelProcessor(for: mapper)
         for index in smoothers.indices {
             smoothers[index].reset()
@@ -184,19 +244,34 @@ public final class StreamAnalyzer {
         envelope = BeatEnvelope(decay: Self.envelopeDecay)
         kickFlux.reset()
         broadbandFlux.reset()
-        kickPicker.reset()
-        broadbandPicker.reset()
+        kickPicker.reset(keepTypical: keepOnsetFloor)
+        broadbandPicker.reset(keepTypical: keepOnsetFloor)
+        silentHops = 0
+        refillHops = 0
     }
+
+    /// Смена трека: типичный пик и уровень акцента выбора пиков начинаются заново (порог широкополосной
+    /// функции снова 10), остальное остается. Новый трек не наследует порог прежнего, в том числе
+    /// сохраненный сбросом `reset(keepOnsetFloor: true)` на паузе прежнего трека перед сменой.
+    public func resetOnsetFloor() {
+        kickPicker.resetTypicalPeak()
+        broadbandPicker.resetTypicalPeak()
+    }
+
+    /// Порог широкополосной функции онсетов сейчас (`OnlinePeakPicker`, опущенный по типичному пику).
+    var broadbandFloor: Float { broadbandPicker.effectiveFloor }
 
     /// Остров снова виден после простоя: история функций онсетов и выбор пиков вместе со следящими
     /// пиками начинаются заново, уровни, автоуровень, сглаживание и огибающая удара остаются. В
     /// простое шаги идут по одному на пробуждение, следящий пик спадает за шаг, а не за 5.3 мс, и
-    /// без сброса держал бы порог онсетов высоким еще секунды.
-    public func resetOnsets() {
+    /// без сброса держал бы порог онсетов высоким еще секунды. `keepOnsetFloor` (тот же известный трек,
+    /// как `reset(keepOnsetFloor:)` на паузе) оставляет типичный пик и уровень акцента: шаги простоя их не
+    /// двигают, и опущенный порог тихой аранжировки не ждет снова около 7 с.
+    public func resetOnsets(keepOnsetFloor: Bool = false) {
         kickFlux.reset()
         broadbandFlux.reset()
-        kickPicker.reset()
-        broadbandPicker.reset()
+        kickPicker.reset(keepTypical: keepOnsetFloor)
+        broadbandPicker.reset(keepTypical: keepOnsetFloor)
     }
 
     /// Спектр окна в `spectrum`. БПФ приходит по ссылке (`inout`), а не чтением свойства: метод
@@ -227,6 +302,14 @@ public final class StreamAnalyzer {
             levelsDB.withUnsafeMutableBufferPointer { mapper.bandLevels(spectrum, into: $0) }
         }
 
+        // Самая громкая полоса до нормализации; по ней же тишина перед потоками онсетов.
+        var maxLevelDB = Self.floorDB
+        for band in 0..<BandMapper.bandCount {
+            let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
+            maxLevelDB = max(maxLevelDB, db)
+        }
+        let soundReturned = trackSilence(maxLevelDB)
+
         // Бочка: поток по бинам до 150 Гц и их мощность.
         var kickPower: Float = 0
         let kickODF = spectrum.withUnsafeBufferPointer { spectrum in
@@ -242,18 +325,25 @@ public final class StreamAnalyzer {
         let kickLevelDB = kickPowerDB.isNaN ? Self.floorDB : max(kickPowerDB, Self.floorDB)
 
         // Широкополосный поток по амплитудам 24 полос (корень мощности полосы).
-        var maxLevelDB = Self.floorDB
         for band in 0..<BandMapper.bandCount {
             let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
-            maxLevelDB = max(maxLevelDB, db)
             bandAmplitudes[band] = Float(pow(10, Double(db) / 20))
         }
         let broadbandODF = bandAmplitudes.withUnsafeBufferPointer { broadbandFlux.process($0) }
 
         let onsetTime = Double(endSample) / rate - Self.onsetLag
-        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB)
-            .map { OnsetEvent(time: onsetTime, strength: $0) }
-        let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB)
+        // Шаг простоя острова (`dt` много больше шага): поток сравнивает окна через десятки мс, его пики
+        // выше обычных и подняли бы порог онсетов (70 файлов GTZAN tune, 12 с звука и 8 с простоя: порог
+        // ниже 10 был у 8, после простоя у всех снова 10). Типичный пик и уровень акцента на таких шагах
+        // стоят, и показ острова в том же треке их сохраняет (`resetOnsets(keepOnsetFloor:)`).
+        let regularStep = dt <= 1.5 * config.hopDuration
+        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB, updatesTypical: regularStep).map { strength in
+            OnsetEvent(
+                time: onsetTime - Double(kickPicker.lastOnsetDelay) * config.hopDuration,
+                strength: strength, sustained: kickPicker.lastOnsetSustained
+            )
+        }
+        let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB, updatesTypical: regularStep)
             .map { OnsetEvent(time: onsetTime, strength: $0) }
 
         // Уровни волн: нормировка, сглаживание, слой это половина пика и половина среднего его полос.
@@ -302,8 +392,30 @@ public final class StreamAnalyzer {
             broadbandOnset: broadbandOnset,
             broadbandODF: broadbandODF,
             kickODF: kickODF,
-            kickLevelDB: kickLevelDB
+            kickLevelDB: kickLevelDB,
+            soundReturned: soundReturned
         )
+    }
+
+    /// Тишина перед потоками онсетов шага: `true` на первом шаге со звуком после `silenceGap` тишины. С
+    /// этого шага потоки онсетов начинаются заново, пока окно не выйдет из тишины.
+    private func trackSilence(_ levelDB: Float) -> Bool {
+        var returned = false
+        if levelDB < Self.silenceLevelDB {
+            silentHops = min(silentHops + 1, Int.max - 1)
+        } else {
+            if Double(silentHops) * config.hopDuration >= Self.silenceGap {
+                returned = true
+                refillHops = config.fftSize / config.hopSize
+            }
+            silentHops = 0
+        }
+        if refillHops > 0 {
+            refillHops -= 1
+            kickFlux.reset()
+            broadbandFlux.reset()
+        }
+        return returned
     }
 
     /// Рабочие буферы шага (БПФ, спектр, уровни, нормировка, амплитуды полос) для теста: шаги

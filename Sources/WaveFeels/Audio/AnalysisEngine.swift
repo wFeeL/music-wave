@@ -134,8 +134,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 self.tracker.reconfigure(framesPerSecond: self.analyzer.config.framesPerSecond)
                 self.window = [Float](repeating: 0, count: self.analyzer.config.fftSize)
             } else {
-                self.analyzer.reset()
-                self.resetTracker()
+                self.resetAnalysis()
             }
             self.restartStream()
             self.lastWake = nil
@@ -204,8 +203,9 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 self.store.publishSchedule(.empty)
             } else {
                 // В простое следящие пики онсетов спадали за пробуждение 15 Гц и могли остаться
-                // завышенными: без сброса бочки терялись бы еще секунды после появления острова.
-                self.analyzer.resetOnsets()
+                // завышенными: без сброса бочки терялись бы еще секунды после появления острова. В том же
+                // треке порог онсетов остается, как после паузы.
+                self.analyzer.resetOnsets(keepOnsetFloor: self.keepsTempoNow())
             }
             self.applyInterval()
         }
@@ -257,8 +257,21 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
     /// Сброс трекера: темп остается, если трек Now Playing известен и тот же, под которым шли шаги
     /// (пауза, короткая тишина, пересборка tap в том же треке).
     private func resetTracker() {
+        tracker.reset(keepTempo: keepsTempoNow())
+    }
+
+    /// Сброс анализа и трекера. В том же известном треке остаются темп и типичный пик онсетов: порог
+    /// онсетов тихой аранжировки не возвращается к исходному после каждой паузы.
+    private func resetAnalysis() {
+        let keep = keepsTempoNow()
+        analyzer.reset(keepOnsetFloor: keep)
+        tracker.reset(keepTempo: keep)
+    }
+
+    /// Трек Now Playing известен и тот же, под которым шли шаги: сброс сохраняет темп и порог онсетов.
+    private func keepsTempoNow() -> Bool {
         let track = shared.withLock { $0.track }
-        tracker.reset(keepTempo: tempoMemory.keepsTempo(current: track))
+        return tempoMemory.keepsTempo(current: track)
     }
 
     /// Поток начинается заново: часы хоста без метки, первый шаг самый новый, в хранилище тихий
@@ -293,8 +306,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         let total = ring.totalWritten
         if let next = nextHopEnd, total < next - config.hopSize {
             // Кольцо обнулено (пересборка tap, новое демо): поток начинается заново.
-            analyzer.reset()
-            resetTracker()
+            resetAnalysis()
             restartStream()
         }
 
@@ -320,8 +332,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         if feed.update(totalWritten: total, now: now) {
             // Новых сэмплов нет: волны гаснут, а не застывают на последнем окне.
             if !feedStalled {
-                analyzer.reset()
-                resetTracker()
+                resetAnalysis()
                 store.publishSchedule(.empty)
                 feedStalled = true
                 endRhythm(.stalled)
@@ -372,14 +383,18 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         } else if Double(total - end) > Self.maxBacklog * config.sampleRate {
             // Анализ отстал (сон, остановленная очередь): старые шаги уже не нужны.
             end += (total - end) / hop * hop
-            analyzer.reset()
-            resetTracker()
+            resetAnalysis()
         }
         if !idle, tempoMemory.feeding(current: track, resuming: tracker.resumingTempo) {
             // Новый трек (посреди звука или выбран на паузе) или трек сменился, пока трекер идет по памяти
-            // темпа: темп и сетка прежнего трека не нужны.
+            // темпа: темп, сетка и порог онсетов прежнего трека не нужны (порог мог остаться от сброса на
+            // паузе прежнего трека перед сменой).
             tracker.reset()
+            analyzer.resetOnsetFloor()
         }
+        // Звук после тишины (пауза плеера, во время которой захват отдает нули): в том же известном треке
+        // трекер перезапускается с памятью темпа, без трека заново целиком.
+        tracker.keepsTempoAfterSilence = tempoMemory.keepsTempo(current: track)
 
         var processed = 0
         var allZero = true

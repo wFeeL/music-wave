@@ -29,6 +29,85 @@ struct EvalArgumentsTests {
         #expect(parsed.listPath == "list.tsv")
     }
 
+    /// Режимы B0: записи владельца с петлей и сбросами, пары, сбросы на GTZAN; несовместимые сочетания
+    /// это ошибка, а не молча другой прогон.
+    @Test func ownerPairsAndResetOptions() throws {
+        let defaults = try EvalArguments.parse(["list.tsv"])
+        #expect(!defaults.owner && defaults.pairs == nil && defaults.resetEvery == nil && defaults.loop == 1)
+        #expect(!defaults.resetTrackerOnly)
+        #expect(defaults.chainConfig(forFile: "a.wav").resetInterval == nil)
+
+        let owner = try EvalArguments.parse(["--owner", "--loop", "4", "--reset-every", "7.3", "--tracker", "lockHits=4", "owner.tsv"])
+        #expect(owner.owner && owner.loop == 4 && owner.resetEvery == 7.3)
+        var meta = RhythmLog.Meta(outputLatency: 0.134, syncOffset: -0.03, sampleRate: 44_100, renderPeriod: 1.0 / 50)
+        meta.endReason = .complete
+        let config = owner.ownerConfig(for: meta)
+        #expect(config.outputLatency == 0.134 && config.syncOffset == -0.03 && config.renderRate == 50)
+        #expect(config.resetInterval == 7.3 && config.resetAnalyzer)
+        #expect(config.trackerParameters.lockHits == 4 && config.seed == 1)
+
+        let only = try EvalArguments.parse(["--reset-every=12", "--reset-tracker-only", "list.tsv"])
+        #expect(only.chainConfig(forFile: "a.wav").resetInterval == 12)
+        #expect(!only.chainConfig(forFile: "a.wav").resetAnalyzer)
+
+        #expect(try EvalArguments.parse(["--pairs", "4", "list.tsv"]).pairs == 4)
+        #expect(throws: EvalArguments.Error.conflictingOptions("--owner", "--pairs")) {
+            try EvalArguments.parse(["--owner", "--pairs", "4", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.conflictingOptions("--pairs", "--reset-every")) {
+            try EvalArguments.parse(["--pairs", "4", "--reset-every", "7", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.conflictingOptions("--loop", "a GTZAN list (use --owner)")) {
+            try EvalArguments.parse(["--loop", "2", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.missingValue("--reset-every")) {
+            try EvalArguments.parse(["--reset-tracker-only", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--pairs", value: "0")) {
+            try EvalArguments.parse(["--pairs", "0", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--reset-every", value: "0.0")) {
+            try EvalArguments.parse(["--reset-every", "0", "list.tsv"])
+        }
+    }
+
+    /// Склейка пар через тишину (`--pair-gap`, смена трека у всего звука системы) и паузы с тишиной вместо
+    /// сбросов (`--pause`, пауза плеера, во время которой захват получает нули): нужные к ним режимы
+    /// обязательны, несовместимые сочетания это ошибка.
+    @Test func pairGapAndPauseOptions() throws {
+        let defaults = try EvalArguments.parse(["list.tsv"])
+        #expect(defaults.pairGap == nil && defaults.pause == nil)
+
+        let gap = try EvalArguments.parse(["--pairs", "28", "--pair-gap", "1", "list.tsv"])
+        #expect(gap.pairs == 28 && gap.pairGap == 1)
+        #expect(throws: EvalArguments.Error.missingValue("--pairs")) {
+            try EvalArguments.parse(["--pair-gap", "1", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--pair-gap", value: "0.0")) {
+            try EvalArguments.parse(["--pairs", "4", "--pair-gap", "0", "list.tsv"])
+        }
+
+        let pause = try EvalArguments.parse(["--reset-every", "7.3", "--pause", "2", "list.tsv"])
+        #expect(pause.resetEvery == 7.3 && pause.pause == 2)
+        // Паузы заменяют сбросы: цепочка не сбрасывается, тишину в звук вставляет `EvalPauses`.
+        #expect(pause.chainConfig(forFile: "a.wav").resetInterval == nil)
+        // Пауза плеера в том же треке: перезапуск после тишины с памятью темпа, как у приложения.
+        #expect(pause.chainConfig(forFile: "a.wav").keepTempoAfterSilence)
+        #expect(!defaults.chainConfig(forFile: "a.wav").keepTempoAfterSilence)
+        #expect(throws: EvalArguments.Error.missingValue("--reset-every")) {
+            try EvalArguments.parse(["--pause", "2", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.conflictingOptions("--pause", "--reset-tracker-only")) {
+            try EvalArguments.parse(["--reset-every", "7", "--pause", "2", "--reset-tracker-only", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.conflictingOptions("--owner", "--pause")) {
+            try EvalArguments.parse(["--owner", "--reset-every", "7", "--pause", "2", "owner.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--pause", value: "-1.0")) {
+            try EvalArguments.parse(["--reset-every", "7", "--pause", "-1", "list.tsv"])
+        }
+    }
+
     @Test func unionGroupsMustExist() throws {
         let parsed = try EvalArguments.parse(["--union", "steady=disco,pop", "x.tsv"])
         try parsed.validateUnions(knownGroups: ["disco", "pop", "jazz"])
@@ -83,11 +162,12 @@ struct EvalArgumentsTests {
         let defaults = BeatTracker.Parameters()
         for name in BeatTracker.Parameters.names {
             var changed = defaults
-            // 3 бывает и значением по умолчанию (`raceVotes`), тогда пробуется 7.
+            // 3 бывает и значением по умолчанию (`raceVotes`), тогда пробуется 7; включатель
+            // (`silenceRestart`) берет только 0 и 1, и по умолчанию он включен, поэтому для него 0.
             var value = 3.0
-            var accepted = changed.set(name, to: value)
-            if changed == defaults {
-                value = 7
+            var accepted = false
+            for candidate in [3.0, 7, 0] where changed == defaults {
+                value = candidate
                 accepted = changed.set(name, to: value)
             }
             #expect(accepted)

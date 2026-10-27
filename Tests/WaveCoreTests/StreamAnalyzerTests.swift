@@ -74,6 +74,40 @@ struct StreamAnalyzerTests {
         #expect(last.frame.beat < 0.01)
     }
 
+    /// Звук после тишины (пауза плеера, во время которой захват отдает нули, или промежуток между треками у
+    /// всего звука системы): первый шаг со звуком после `silenceGap` ниже `silenceLevelDB` отмечен
+    /// `soundReturned`, и потоки онсетов начинаются заново, пока окно не выйдет из тишины. Иначе переход от
+    /// тишины к звуку дает пик потока и онсет на произвольной фазе: в пробе пауз GTZAN 1442 вспышки бочки в
+    /// первые 0.1 с после паузы, 1150 из них мимо доли. Короткая тишина (0.3 с) ничего не меняет.
+    @Test(arguments: [(1.0, true), (0.3, false)])
+    func soundAfterSilenceStartsTheOnsetFunctionsAgain(gap: Double, restarts: Bool) {
+        // Бас и пэд держатся через разрыв: на возобновлении нет удара, только звук.
+        var sound = [Float](repeating: 0, count: Int(4 * Self.rate))
+        Drums.bassNote(into: &sound, at: 0, duration: 4, sampleRate: Self.rate)
+        Drums.pad(into: &sound, from: 0, to: 4, sampleRate: Self.rate)
+        let half = Int(2 * Self.rate)
+        let samples = Array(sound[..<half]) + [Float](repeating: 0, count: Int(gap * Self.rate)) + Array(sound[half...])
+        let analyzer = StreamAnalyzer(sampleRate: Self.rate)
+        let hops = analyzer.processSignal(samples)
+        let returned = hops.indices.filter { hops[$0].soundReturned }
+        guard restarts else {
+            #expect(returned.isEmpty)
+            return
+        }
+        #expect(returned.count == 1)
+        guard let first = returned.first else { return }
+        let back = 2 + gap
+        #expect(hops[first].endTime > back && hops[first].endTime < back + analyzer.config.hopDuration * 2, "at \(hops[first].endTime)")
+        // Пока окно захватывает тишину, потоков нет; потом они снова идут.
+        let fill = analyzer.config.fftSize / analyzer.config.hopSize
+        for hop in hops[first..<(first + fill)] {
+            #expect(hop.broadbandODF == 0 && hop.kickODF == 0, "odf \(hop.broadbandODF) kick \(hop.kickODF) at \(hop.endTime)")
+        }
+        #expect(hops[(first + fill)...].contains { $0.broadbandODF > 0 })
+        let onsets = hops.filter { $0.endTime > back && $0.endTime < back + 0.3 && ($0.kickOnset != nil || $0.broadbandOnset != nil) }
+        #expect(onsets.isEmpty, "onsets at \(onsets.map { $0.endTime })")
+    }
+
     @Test func frameTimeIsWindowCentre() {
         let analyzer = StreamAnalyzer(sampleRate: Self.rate)
         let window = [Float](repeating: 0, count: analyzer.config.fftSize)

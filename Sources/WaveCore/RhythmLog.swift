@@ -13,8 +13,15 @@ import Synchronization
 /// минус ноль. Онсеты (`kicks`, `onsets`) это момент в файле плюс `outputLatency`; доли расписаний
 /// и вспышки содержат еще и `syncOffset`, как на устройстве. Исключение `Schedule.time`: момент
 /// публикации расписания по часам хоста, без задержки вывода (как `OfflineBeatChain.State.time`).
+///
+/// Схемы: 1 (1.1 и 1.2); 2 (1.3) добавляет в расписания яркость предсказанных долей, гонку фаз и
+/// отношение гребенки (`Schedule.amplitudes`, `race`, `combRatio`). Читаются обе; незнакомые поля
+/// пропускаются, новые поля необязательны, поэтому поле, которое добавит более новая сборка без смены
+/// схемы, старую не ломает.
 public struct RhythmLog: Codable, Sendable, Equatable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
+    /// Схемы, которые читает `decode`.
+    public static let readableSchemaVersions = 1...2
     /// Мягкий пульс кадра от этого значения считается видимым (`Meta.ambientFrames`).
     public static let ambientVisible: Float = 0.05
 
@@ -179,10 +186,29 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         public var unlockReason: UnlockReason?
         /// Вес показа (`BeatSchedule.weight`); в журналах до 1.2 поля нет (`nil`).
         public var weight: Float?
+        /// Опубликованная яркость каждой доли из `beats` (`GlowEvent.amplitude`: сила, ворот, вес, гонка,
+        /// четность показа); в журналах схемы 1 поля нет (`nil`).
+        public var amplitudes: [Float]?
+        /// Гонка фаз, пока она идет: доля тени на оси записи (как `beats`) и множитель яркости сетки.
+        /// `nil` без гонки и в журналах схемы 1.
+        public var race: Race?
+        /// Отношение гребенки последней проверки темпа (`BeatSchedule.combRatio`); `nil` до первой проверки
+        /// и в журналах схемы 1.
+        public var combRatio: Double?
+
+        public struct Race: Codable, Sendable, Equatable {
+            public var shadow: Double
+            public var dim: Float
+
+            public init(shadow: Double, dim: Float) {
+                self.shadow = shadow
+                self.dim = dim
+            }
+        }
 
         public init(
             time: Double, bpm: Double?, confidence: Double, locked: Bool, beats: [Double], unlockReason: UnlockReason? = nil,
-            weight: Float? = nil
+            weight: Float? = nil, amplitudes: [Float]? = nil, race: Race? = nil, combRatio: Double? = nil
         ) {
             self.time = time
             self.bpm = bpm
@@ -191,6 +217,9 @@ public struct RhythmLog: Codable, Sendable, Equatable {
             self.beats = beats
             self.unlockReason = unlockReason
             self.weight = weight
+            self.amplitudes = amplitudes
+            self.race = race
+            self.combRatio = combRatio
         }
     }
 
@@ -220,13 +249,13 @@ public struct RhythmLog: Codable, Sendable, Equatable {
         return try encoder.encode(self)
     }
 
-    /// Разбирает JSON записи; другая `schemaVersion` это ошибка.
+    /// Разбирает JSON записи; схема вне `readableSchemaVersions` это ошибка.
     public static func decode(_ data: Data) throws -> RhythmLog {
         struct Version: Decodable {
             var schemaVersion: Int
         }
         let version = try JSONDecoder().decode(Version.self, from: data).schemaVersion
-        guard version == currentSchemaVersion else { throw DecodeError.unsupportedSchema(version) }
+        guard readableSchemaVersions.contains(version) else { throw DecodeError.unsupportedSchema(version) }
         return try JSONDecoder().decode(RhythmLog.self, from: data)
     }
 
@@ -254,8 +283,10 @@ public struct RhythmRecorder: Sendable {
     static let beatTolerance = 0.001
     /// Изменение уверенности, после которого расписание пишется заново.
     static let confidenceStep = 0.01
-    /// Изменение веса показа, после которого расписание пишется заново.
+    /// Изменение веса показа или яркости доли, после которого расписание пишется заново.
     static let weightStep: Float = 0.02
+    /// Изменение отношения гребенки, после которого расписание пишется заново.
+    static let ratioStep = 0.01
 
     public let duration: Double
     public private(set) var samples: [Int16] = []
@@ -352,28 +383,37 @@ public struct RhythmRecorder: Sendable {
     }
 
     /// Расписание, опубликованное в момент хоста `host` (ось хоста, с задержкой и сдвигом). Пишется,
-    /// если сменились захват, причина его потери, темп, предсказанные доли (больше чем на 1 мс),
-    /// уверенность (на 0.01 и больше) или вес показа (на 0.02 и больше).
+    /// если сменились захват, причина его потери, темп, предсказанные доли (больше чем на 1 мс) или их
+    /// яркость (на 0.02 и больше), уверенность (на 0.01 и больше), вес показа (на 0.02 и больше), гонка
+    /// фаз (началась, кончилась, доля тени сдвинулась больше чем на 1 мс) или отношение гребенки (на 0.01
+    /// и больше).
     public mutating func appendSchedule(_ schedule: BeatSchedule, publishedAtHost host: Double) {
         guard hasStarted, endReason == nil, host.isFinite else { return }
         let zero = meta.startHostSeconds
         let bpm = schedule.bpm.flatMap { $0.isFinite ? $0 : nil }
         let confidence = schedule.confidence.isFinite ? schedule.confidence : 0
         let weight = schedule.weight.isFinite ? schedule.weight : 0
+        let ratio = schedule.combRatio.flatMap { $0.isFinite ? $0 : nil }
+        let race = schedule.race.flatMap { race in
+            race.shadow.isFinite ? RhythmLog.Schedule.Race(shadow: Self.rounded(race.shadow - zero), dim: race.dim) : nil
+        }
         if let last = schedules.last, last.locked == schedule.locked, last.unlockReason == schedule.unlockReason, last.bpm == bpm,
            abs(last.confidence - confidence) < Self.confidenceStep,
            let lastWeight = last.weight, abs(lastWeight - weight) < Self.weightStep,
-           Self.sameBeats(last.beats, schedule, zero: zero) {
+           Self.sameRace(last.race, race), Self.sameRatio(last.combRatio, ratio),
+           Self.sameBeats(last, schedule, zero: zero) {
             return
         }
         var beats: [Double] = []
+        var amplitudes: [Float] = []
         for event in schedule.events where event.predicted && event.time.isFinite {
             beats.append(Self.rounded(event.time - zero))
+            amplitudes.append(event.amplitude.isFinite ? event.amplitude : 0)
         }
         schedules.append(
             RhythmLog.Schedule(
                 time: Self.rounded(host - zero), bpm: bpm, confidence: confidence, locked: schedule.locked, beats: beats,
-                unlockReason: schedule.unlockReason, weight: weight
+                unlockReason: schedule.unlockReason, weight: weight, amplitudes: amplitudes, race: race, combRatio: ratio
             )
         )
     }
@@ -444,15 +484,38 @@ public struct RhythmRecorder: Sendable {
         (seconds * 1_000_000).rounded() / 1_000_000
     }
 
-    /// Те же ли предсказанные доли в `schedule` (ось хоста), что `beats` (ось записи), с допуском
-    /// `beatTolerance`. Без выделения памяти.
-    private static func sameBeats(_ beats: [Double], _ schedule: BeatSchedule, zero: Double) -> Bool {
+    /// Те же ли предсказанные доли в `schedule` (ось хоста), что в записанном `last` (ось записи): время с
+    /// допуском `beatTolerance`, яркость с допуском `weightStep` (у строки без яркостей не сравнивается).
+    /// Без выделения памяти.
+    private static func sameBeats(_ last: RhythmLog.Schedule, _ schedule: BeatSchedule, zero: Double) -> Bool {
         var index = 0
         for event in schedule.events where event.predicted && event.time.isFinite {
-            guard index < beats.count, abs(beats[index] - (event.time - zero)) <= beatTolerance else { return false }
+            guard index < last.beats.count, abs(last.beats[index] - (event.time - zero)) <= beatTolerance else { return false }
+            if let amplitudes = last.amplitudes, index < amplitudes.count {
+                let amplitude = event.amplitude.isFinite ? event.amplitude : 0
+                guard abs(amplitudes[index] - amplitude) < weightStep else { return false }
+            }
             index += 1
         }
-        return index == beats.count
+        return index == last.beats.count
+    }
+
+    /// Та же гонка: обеих нет, или доля тени в пределах `beatTolerance` и тот же множитель.
+    private static func sameRace(_ last: RhythmLog.Schedule.Race?, _ race: RhythmLog.Schedule.Race?) -> Bool {
+        switch (last, race) {
+        case (nil, nil): true
+        case let (last?, race?): abs(last.shadow - race.shadow) <= beatTolerance && last.dim == race.dim
+        default: false
+        }
+    }
+
+    /// То же отношение гребенки: обоих нет или разница меньше `ratioStep`.
+    private static func sameRatio(_ last: Double?, _ ratio: Double?) -> Bool {
+        switch (last, ratio) {
+        case (nil, nil): true
+        case let (last?, ratio?): abs(last - ratio) < ratioStep
+        default: false
+        }
     }
 }
 

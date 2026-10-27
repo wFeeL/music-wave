@@ -13,7 +13,7 @@ import Foundation
 /// `renderPhase` или случайная) в момент `tEval` берет последнее расписание, опубликованное до него,
 /// и считает свечение на момент показа `tP = tEval + 2 / renderRate`. Событие свечения это кадр, где
 /// свечение выросло больше чем на `eventRise` против прошлого кадра; его время это `tP` кадра.
-/// Мягкий пульс (`Config.softPulse`) считается отдельно, как у приложения: энергия бочки каждого шага
+/// Мягкий пульс (`Config.softPulse`) считается отдельно, как у приложения: энергия атак каждого шага
 /// (`BeatTracker.ambientEnergy`) публикуется кадром в `FrameStore` на момент центра окна плюс
 /// `outputLatency + syncOffset` (как кадры волн у `AnalysisEngine`), рендер берет кадр на `tP` и
 /// `BeatGlow.ambient(at:info:frame:)`. Во вспышки пульс не входит, только в итог пульса
@@ -52,6 +52,18 @@ public struct OfflineBeatChain: Sendable {
         public var softPulse = false
         /// С `softPulse`: писать пульс каждого кадра в `Result.ambientTrace` (проверки времени энергии).
         public var recordAmbientTrace = false
+        /// Сброс с памятью темпа каждые столько секунд потока, как у приложения после паузы, скрытия острова
+        /// или пересборки tap в том же треке: `StreamAnalyzer.reset(keepOnsetFloor: true)` и
+        /// `BeatTracker.reset(keepTempo: true)` после шага, на котором время потока дошло до срока. Звук идет
+        /// без разрыва. `nil` без сбросов (оценка возобновления, `wave-eval --reset-every`).
+        public var resetInterval: Double?
+        /// Со сбросом по `resetInterval` начинать заново и анализ (`StreamAnalyzer.reset()`: функции онсетов,
+        /// выбор пиков, уровни), как приложение на паузе, после простоя и пересборки tap. `false` сбрасывает
+        /// только трекер, как пробный прогон разбора 1.2.1 (`evalreset.py`).
+        public var resetAnalyzer = true
+        /// Звук после тишины тот же трек (`BeatTracker.keepsTempoAfterSilence`): как пауза плеера в
+        /// известном треке у приложения. По умолчанию false, как у всего звука системы.
+        public var keepTempoAfterSilence = false
         public var seed: UInt64
 
         public init(seed: UInt64 = 1) {
@@ -86,9 +98,14 @@ public struct OfflineBeatChain: Sendable {
         public var unlockReason: UnlockReason?
         /// Вес показа (`BeatSchedule.weight`).
         public var weight: Float
+        /// Шла гонка фаз (`BeatSchedule.race`).
+        public var racing: Bool
+        /// Отношение гребенки (`BeatSchedule.combRatio`).
+        public var combRatio: Double?
 
         public init(
-            time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil, weight: Float = 0
+            time: Double, locked: Bool, bpm: Double?, confidence: Double, unlockReason: UnlockReason? = nil, weight: Float = 0,
+            racing: Bool = false, combRatio: Double? = nil
         ) {
             self.time = time
             self.locked = locked
@@ -96,6 +113,22 @@ public struct OfflineBeatChain: Sendable {
             self.confidence = confidence
             self.unlockReason = unlockReason
             self.weight = weight
+            self.racing = racing
+            self.combRatio = combRatio
+        }
+    }
+
+    /// Принудительный сброс (`Config.resetInterval`).
+    public struct Reset: Sendable, Equatable {
+        /// Конец шага, после которого был сброс, секунды потока от первого сэмпла (ось файла, без задержки
+        /// вывода).
+        public var time: Double
+        /// Трекер держал захват перед сбросом.
+        public var locked: Bool
+
+        public init(time: Double, locked: Bool) {
+            self.time = time
+            self.locked = locked
         }
     }
 
@@ -103,7 +136,7 @@ public struct OfflineBeatChain: Sendable {
     public struct AmbientPoint: Sendable, Equatable {
         /// Момент показа кадра, слышимые секунды от первого сэмпла.
         public var time: Double
-        /// Энергия бочки из кадра на этот момент (`WaveFrame.kickEnergy`).
+        /// Энергия атак из кадра на этот момент (`WaveFrame.kickEnergy`).
         public var energy: Float
         /// Мягкий пульс кадра.
         public var value: Float
@@ -123,6 +156,8 @@ public struct OfflineBeatChain: Sendable {
         /// Онсеты бочки, найденные анализом, слышимые секунды от первого сэмпла (момент в файле плюс
         /// `outputLatency`).
         public var kickOnsets: [Double]
+        /// Широкополосные онсеты анализа, слышимые секунды от первого сэмпла (как `kickOnsets`).
+        public var onsets: [Double] = []
         /// Предсказанные доли, как их видел рендер до начала вспышки (в последнем расписании,
         /// опубликованном раньше `time − BeatGlow.lead`), без квантования кадрами; слышимые секунды
         /// от первого сэмпла, по возрастанию.
@@ -136,8 +171,17 @@ public struct OfflineBeatChain: Sendable {
         public var peakAmbient: Float = 0
         public var ambientFrames = 0
         public var renderedFrames = 0
+        /// С `softPulse`: кадров рендера под расписанием без захвата и сколько из них с пульсом от
+        /// `RhythmLog.ambientVisible`.
+        public var unlockedFrames = 0
+        public var ambientUnlockedFrames = 0
+        /// С `softPulse`: моменты показа кадров, на которых пульс от `RhythmLog.ambientVisible` и выше
+        /// соседних (вершины пульса), слышимые секунды от первого сэмпла.
+        public var ambientPeaks: [Double] = []
         /// Мягкий пульс на каждом кадре рендера (`Config.softPulse` и `recordAmbientTrace`), иначе пусто.
         public var ambientTrace: [AmbientPoint] = []
+        /// Принудительные сбросы по времени (`Config.resetInterval`), иначе пусто.
+        public var resets: [Reset] = []
 
         /// Первая публикация с захватом, секунды от первого сэмпла.
         public var lockTime: Double? {
@@ -183,12 +227,14 @@ public struct OfflineBeatChain: Sendable {
         var publications: [(time: Double, schedule: BeatSchedule)] = []
         var states: [State] = []
         var kickOnsets: [Double] = []
+        var onsets: [Double] = []
         /// Время хоста каждой предсказанной доли в последнем расписании, опубликованном до начала ее
         /// вспышки (`time - BeatGlow.lead`), по id.
         var predicted: [UInt64: Double] = [:]
-        /// `Config.softPulse`: энергия бочки каждого шага, время пробуждения, после которого она видна
+        /// `Config.softPulse`: энергия атак каждого шага, время пробуждения, после которого она видна
         /// рендеру, и момент ее кадра на оси хоста (центр окна плюс задержка вывода и сдвиг).
         var energies: [(wake: Double, time: Double, energy: Float)] = []
+        var resets: [Reset] = []
         var end = 0.0
     }
 
@@ -219,6 +265,7 @@ public struct OfflineBeatChain: Sendable {
         let fftSize = analyzer.config.fftSize
         let hopSize = analyzer.config.hopSize
         var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond, parameters: config.trackerParameters)
+        tracker.keepsTempoAfterSilence = config.keepTempoAfterSilence
         var clock = HostClock(sampleRate: rate)
         let settings = LevelSettings()
         var analysis = Analysis()
@@ -243,6 +290,8 @@ public struct OfflineBeatChain: Sendable {
         let wakePhase = wakePeriod * Double(rng.nextUnit() * 0.5 + 0.5)
         var lastWake = -Double.infinity
         var wakeIndex = 0
+        let resetInterval = config.resetInterval.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        var nextReset = resetInterval ?? .infinity
         while true {
             let jittered = hostStart + wakePhase + Double(wakeIndex) * wakePeriod + config.wakeJitter * Double(rng.nextUnit())
             let wake = max(jittered, lastWake)
@@ -263,7 +312,16 @@ public struct OfflineBeatChain: Sendable {
                     if let kick = hop.kickOnset {
                         analysis.kickOnsets.append(kick.time + config.outputLatency)
                     }
+                    if let onset = hop.broadbandOnset {
+                        analysis.onsets.append(onset.time + config.outputLatency)
+                    }
                     tracker.process(hop)
+                    if let resetInterval, hop.endTime >= nextReset {
+                        analysis.resets.append(Reset(time: hop.endTime, locked: tracker.locked))
+                        if config.resetAnalyzer { analyzer.reset(keepOnsetFloor: true) }
+                        tracker.reset(keepTempo: true)
+                        while nextReset <= hop.endTime { nextReset += resetInterval }
+                    }
                     if config.softPulse, let centre = clock.hostTime(ofSample: nextHopEnd - fftSize / 2) {
                         analysis.energies.append(
                             (wake, centre + config.outputLatency + config.syncOffset, tracker.ambientEnergy)
@@ -280,7 +338,8 @@ public struct OfflineBeatChain: Sendable {
             analysis.states.append(
                 State(
                     time: wake - hostStart, locked: published.locked, bpm: published.bpm, confidence: published.confidence,
-                    unlockReason: published.unlockReason, weight: published.weight
+                    unlockReason: published.unlockReason, weight: published.weight, racing: published.race != nil,
+                    combRatio: published.combRatio
                 )
             )
             for event in published.events where event.predicted && wake <= event.time - BeatGlow.lead {
@@ -302,6 +361,12 @@ public struct OfflineBeatChain: Sendable {
         var flashes: [Flash] = []
         var peakAmbient: Float = 0
         var ambientFrames = 0
+        var unlockedFrames = 0
+        var ambientUnlockedFrames = 0
+        var ambientPeaks: [Double] = []
+        // Пульс двух прошлых кадров для вершин.
+        var ambientBefore: (value: Float, time: Double)?
+        var ambientLast: (value: Float, time: Double)?
         var ambientTrace: [AmbientPoint] = []
         // Кадры энергии, как их видит рендер приложения: опубликованные до `tEval`, на слышимой оси.
         let energyStore = FrameStore()
@@ -337,7 +402,18 @@ public struct OfflineBeatChain: Sendable {
                 let shown = energyStore.frame(at: tP)
                 let ambient = BeatGlow.ambient(at: tP, info: published.ambient, frame: shown)
                 peakAmbient = max(peakAmbient, ambient)
-                if ambient >= RhythmLog.ambientVisible { ambientFrames += 1 }
+                let visible = ambient >= RhythmLog.ambientVisible
+                if visible { ambientFrames += 1 }
+                if !published.locked {
+                    unlockedFrames += 1
+                    if visible { ambientUnlockedFrames += 1 }
+                }
+                if let last = ambientLast, last.value >= RhythmLog.ambientVisible, last.value > (ambientBefore?.value ?? 0),
+                   last.value >= ambient {
+                    ambientPeaks.append(last.time - hostStart)
+                }
+                ambientBefore = ambientLast
+                ambientLast = (ambient, tP)
                 if config.recordAmbientTrace {
                     ambientTrace.append(AmbientPoint(time: tP - hostStart, energy: shown.kickEnergy, value: ambient))
                 }
@@ -349,13 +425,18 @@ public struct OfflineBeatChain: Sendable {
             flashes: flashes,
             states: analysis.states,
             kickOnsets: analysis.kickOnsets,
+            onsets: analysis.onsets,
             predictedTimes: analysis.predicted.values.map { $0 - hostStart }.sorted(),
             peakGlow: peak,
             outputLatency: config.outputLatency,
             peakAmbient: peakAmbient,
             ambientFrames: ambientFrames,
             renderedFrames: frame,
-            ambientTrace: ambientTrace
+            unlockedFrames: unlockedFrames,
+            ambientUnlockedFrames: ambientUnlockedFrames,
+            ambientPeaks: ambientPeaks,
+            ambientTrace: ambientTrace,
+            resets: analysis.resets
         )
     }
 

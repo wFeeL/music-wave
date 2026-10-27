@@ -132,4 +132,31 @@ struct BeatMetricsTests {
         #expect(BeatMetrics.lockedCoverage(states: [], duration: 4) == 0)
         #expect(BeatMetrics.lockedCoverage(states: [state(0, true)], duration: 0) == 0)
     }
+
+    /// Место вспышки как у разбора записей владельца: доля в окне, иначе середина соседних долей в
+    /// окне (вспышка на «и»), иначе мимо. До первой и после последней доли середины нет.
+    @Test func placeOnTheBeatOnTheHalfBeatOrElsewhere() {
+        let beats: [Double] = [1, 1.5, 2, 2.5]
+        #expect(BeatMetrics.place(of: 1.5, beats: beats, window: 0.07) == .on)
+        #expect(BeatMetrics.place(of: 1.43, beats: beats, window: 0.07) == .on)
+        #expect(BeatMetrics.place(of: 1.75, beats: beats, window: 0.07) == .half)
+        #expect(BeatMetrics.place(of: 1.31, beats: beats, window: 0.07) == .half)
+        #expect(BeatMetrics.place(of: 1.6, beats: beats, window: 0.07) == .other)
+        // Перед первой долей и после последней середины нет.
+        #expect(BeatMetrics.place(of: 0.75, beats: beats, window: 0.07) == .other)
+        #expect(BeatMetrics.place(of: 2.75, beats: beats, window: 0.07) == .other)
+        #expect(BeatMetrics.place(of: 1, beats: [], window: 0.07) == .other)
+    }
+
+    /// Темнота: промежутки длиннее порога между началом, вспышками и концом; вспышки вне отрезка не в счет.
+    @Test func darkSpansSumTheLongGaps() {
+        let dark = BeatMetrics.darkSpans(detections: [2, 2.5, 6, 40], from: 0, to: 10, gap: 1.5)
+        // 0-2 (2 с), 2.5-6 (3.5 с), 6-10 (4 с).
+        #expect(abs(dark.total - 9.5) < 1e-12)
+        #expect(dark.longest == 4)
+        let none = BeatMetrics.darkSpans(detections: [], from: 0, to: 30, gap: 1.5)
+        #expect(none.total == 30 && none.longest == 30)
+        let lit = BeatMetrics.darkSpans(detections: [1, 2, 3], from: 0, to: 4, gap: 1.5)
+        #expect(lit.total == 0 && lit.longest == 0)
+    }
 }
