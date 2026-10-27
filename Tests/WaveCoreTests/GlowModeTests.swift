@@ -104,6 +104,76 @@ struct GlowModeTests {
         #expect(hybrid.flashes.filter(\.reactive).allSatisfy { $0.peak <= ReactiveGlow.hybridScale + 1e-6 })
     }
 
+    /// «Ритм и звук» на захваченной бочке 120 BPM (хэты восьмыми), с задержкой Bluetooth и встроенных
+    /// динамиков: у каждой вспышки «По ритму» в пределах 70 мс ровно одна вспышка, вспышка доли в захвате на
+    /// том же кадре, ярких вспышек (пик от `strongPeak`) столько же. Реактивное событие у доли, которая
+    /// вспыхивает, отбрасывается: иначе мягкая вспышка за кадр до доли забирала ее вспышку (211 мс) или шла
+    /// второй сразу после нее (20 мс). Вспышка бочки до захвата может прийти кадром раньше: реактивное
+    /// событие того же удара у бочки не отбрасывается (правило только для долей сетки), но вспышка одна.
+    /// Метка `predicted` до захвата у вспышки бочки тоже бывает (правило 1.3 `startedEvent`: доля с
+    /// яркостью 0 начинается позже бочки), поэтому кадр проверяется только у вспышек в захвате.
+    @Test(arguments: [0.211, 0.020])
+    func lockedKickTrackKeepsItsFlashesInHybrid(latency: Double) async {
+        let sync = latency > 0.1 ? -0.02 : 0
+        let (_, results) = await Self.run({ SharedScenes.steady120 }, modes: [.rhythm, .hybrid], latency: latency, sync: sync)
+        let (rhythm, hybrid) = (results[0], results[1])
+        let strong = { (flash: OfflineBeatChain.Flash) in flash.peak >= BeatEvaluation.strongPeak }
+        #expect(rhythm.flashes.filter(\.locked).count >= 20, "locked rhythm flashes \(rhythm.flashes.filter(\.locked).count)")
+        for flash in rhythm.flashes {
+            let near = hybrid.flashes.filter { abs($0.time - flash.time) <= 0.07 }
+            #expect(near.count == 1, "flash at \(flash.time): \(near.count) hybrid flashes within 70 ms")
+            if flash.predicted, flash.locked {
+                #expect(near.contains { abs($0.time - flash.time) <= 1.0 / 60 + 1e-9 }, "grid flash at \(flash.time) lost")
+            }
+        }
+        #expect(
+            hybrid.flashes.filter(strong).count == rhythm.flashes.filter(strong).count,
+            "strong \(hybrid.flashes.filter(strong).count) vs \(rhythm.flashes.filter(strong).count)"
+        )
+    }
+
+    /// Множитель реактивного события по сетке (вариант d) у захваченного трекера: у вспыхивающей доли и в
+    /// 70 мс от нее 0 (событие отбрасывается), на «и» `1 − 0.6 q`, в других местах `1 − 0.9 q`,
+    /// `q = smoothstep(0.1, 0.5, уверенность)`. На 150 BPM с показом через долю скрытая доля (яркость 0) не
+    /// вспыхивает, событие на ней остается в полную яркость: это доля сетки ФАПЧ.
+    @Test func hybridScalesReactiveEventsByTheGrid() async {
+        let probes = await runOffCooperativePool { () -> [(bpm: Double, tracker: BeatTracker)] in
+            [120.0, 150].map { (bpm: Double) in
+                let scene = Drums.fourOnFloor(bpm: bpm, seconds: 12, hats: .eighths)
+                let analyzer = StreamAnalyzer(sampleRate: scene.sampleRate)
+                analyzer.measuresBassLevel = true
+                var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
+                tracker.glowMode = .hybrid
+                // На 150 BPM последнее состояние с захватом и показом через долю.
+                var probe = tracker
+                for hop in analyzer.processSignal(scene.samples) {
+                    tracker.process(hop)
+                    if tracker.locked, bpm < 140 || tracker.shownParity != nil { probe = tracker }
+                }
+                return (bpm, probe)
+            }
+        }
+        for (bpm, tracker) in probes {
+            let schedule = tracker.schedule
+            let beats = schedule.events.filter(\.predicted)
+            guard let period = tracker.period, tracker.locked, let shown = beats.first(where: { $0.amplitude > OfflineBeatChain.eventRise }) else {
+                Issue.record("\(bpm) BPM: no locked flashing beat, \(beats)")
+                continue
+            }
+            let q = BeatTracker.smoothstep(0.1, 0.5, Float(tracker.gridConfidence))
+            #expect(q > 0.5, "\(bpm) BPM: q \(q)")
+            #expect(tracker.reactiveGridScale(at: shown.time) == 0)
+            #expect(tracker.reactiveGridScale(at: shown.time - 0.06) == 0 && tracker.reactiveGridScale(at: shown.time + 0.06) == 0)
+            #expect(abs(tracker.reactiveGridScale(at: shown.time + period / 2) - (1 - 0.6 * q)) < 1e-6)
+            #expect(abs(tracker.reactiveGridScale(at: shown.time + period / 4) - (1 - 0.9 * q)) < 1e-6)
+            if bpm > 140 {
+                #expect(tracker.shownParity != nil, "every-other display at \(bpm) BPM")
+                let hidden = beats.first { $0.amplitude == 0 }
+                #expect(hidden.map { tracker.reactiveGridScale(at: $0.time + 0.03) } == 1, "\(beats)")
+            }
+        }
+    }
+
     /// 808 без удара (трек T2 владельца, `Drums.glide808`): «Ритм и звук» и «По звуку» не темные (темнота
     /// после прогрева не больше 0.35), вспышки идут на нотах (не дальше 70 мс от начала ноты не меньше 0.8
     /// всех) и в «Ритм и звук» мягкие. Это заслуга нот баса: на одних акцентах потока здесь 3 вспышки за
@@ -193,15 +263,17 @@ struct GlowModeTests {
     }
 
     /// Смена режима посреди трека: в «По ритму» реактивных событий в расписании нет; после возврата в
-    /// «Ритм и звук» слой начинается заново (первое событие не раньше `ReactiveGlow.warmUp` после смены), и
-    /// события до смены не возвращаются.
+    /// «По звуку» слой начинается заново (первое событие не раньше `ReactiveGlow.warmUp` после смены), и
+    /// события до смены не возвращаются. Сброс слоя при смене один для «Ритм и звук» и «По звуку»
+    /// (`BeatTracker.glowMode`); проверка идет в «По звуку», потому что в «Ритм и звук» на захваченной бочке
+    /// события ударов отбрасываются (их показывают доли сетки) и первое видное событие не про прогрев.
     @Test func modeSwitchRestartsTheReactiveLayer() async {
         let checks = await runOffCooperativePool { () -> (rhythmReactive: Int, firstAfter: Double?, switchBack: Double, stale: Int) in
             let scene = SharedScenes.steady120
             let analyzer = StreamAnalyzer(sampleRate: scene.sampleRate)
             analyzer.measuresBassLevel = true
             var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond)
-            tracker.glowMode = .hybrid
+            tracker.glowMode = .sound
             var rhythmReactive = 0
             var firstAfter: Double?
             var before: Set<UInt64> = []
@@ -209,7 +281,7 @@ struct GlowModeTests {
             let switchBack = 12.0
             for hop in analyzer.processSignal(scene.samples) {
                 if hop.endTime >= 8, hop.endTime < switchBack { tracker.glowMode = .rhythm }
-                if hop.endTime >= switchBack { tracker.glowMode = .hybrid }
+                if hop.endTime >= switchBack { tracker.glowMode = .sound }
                 tracker.process(hop)
                 let reactive = tracker.schedule.events.filter(\.reactive)
                 if hop.endTime < 8 {

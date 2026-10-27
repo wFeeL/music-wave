@@ -89,6 +89,20 @@ public struct ReactiveGlow: Sendable {
     public static let mergeWindow = 0.08
     /// Яркость слоя в «Ритм и звук» относительно полной.
     public static let hybridScale: Float = 0.6
+    /// «Ритм и звук» и сетка трекера (вариант d разбора, `BeatTracker` `reactiveGridScale`): событие ближе
+    /// `gridWindow` секунд к предсказанной доле, которая вспыхнет (яркость выше
+    /// `OfflineBeatChain.eventRise`), отбрасывается, этот удар уже показан долей. Остальные: на доле сетки
+    /// (не дальше `gridWindow`) в своей яркости, на «и» с множителем `1 − halfDim × q`, в других местах
+    /// `1 − offGridDim × q`, где `q = smoothstep(dimConfidenceLow, dimConfidenceHigh, уверенность)`. Без
+    /// темпа событие не меняется. «По звуку» сетку не смотрит. Журналы владельца 1.3 (34 записи, 211 мс):
+    /// вспышек в долю 0.683 -> 0.771, темнота 0.253 -> 0.272, яркие вспышки ровно те же, что «По ритму»
+    /// (точность 0.966, раньше лишние 0.960); GTZAN tune ровные жанры при 20 мс: в долю 0.662 -> 0.768.
+    /// Одно отбрасывание без приглушения дает 0.684 и 0.648.
+    public static let gridWindow = 0.07
+    public static let halfDim: Float = 0.6
+    public static let offGridDim: Float = 0.9
+    public static let dimConfidenceLow: Float = 0.1
+    public static let dimConfidenceHigh: Float = 0.5
 
     private let medianHops: Int
     private let warmUpHops: Int

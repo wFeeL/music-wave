@@ -645,11 +645,13 @@ public struct BeatTracker: Sendable {
     private var reactivePast: [ReactiveEvent]
     private var reactiveCounter: UInt64 = 0
 
-    /// Реактивное событие: сила 0.5...1 (полная яркость «По звуку»).
+    /// Реактивное событие: сила 0.5...1 (полная яркость «По звуку») и множитель по сетке для «Ритм и
+    /// звук» (`reactiveGridScale`, 0 это событие у вспыхивающей доли).
     private struct ReactiveEvent: Sendable {
         var id: UInt64
         var time: Double
         var strength: Float
+        var gridScale: Float
     }
 
     public init(framesPerSecond: Double, parameters: Parameters = .init()) {
@@ -677,7 +679,8 @@ public struct BeatTracker: Sendable {
 
     /// Расписание в секундах потока: до 8 прошедших событий и две следующие предсказанные доли. В режиме
     /// `GlowMode.sound` доли идут с яркостью 0 (сетка видна журналу и диагностике, но не светится), а онсетов
-    /// бочки нет.
+    /// бочки нет. В `GlowMode.hybrid` реактивные события идут с яркостью `сила × hybridScale × множитель по
+    /// сетке` (`reactiveGridScale`), события у вспыхивающей доли в расписание не попадают.
     public var schedule: BeatSchedule {
         var events = past
         if let nextBeat, let period {
@@ -693,9 +696,10 @@ public struct BeatTracker: Sendable {
             }
         }
         if glowMode != .rhythm {
-            let scale: Float = glowMode == .sound ? 1 : ReactiveGlow.hybridScale
-            for event in reactivePast {
-                events.append(GlowEvent(id: event.id, time: event.time, amplitude: event.strength * scale, predicted: false, reactive: true))
+            let hybrid = glowMode == .hybrid
+            for event in reactivePast where !hybrid || event.gridScale > 0 {
+                let amplitude = hybrid ? event.strength * ReactiveGlow.hybridScale * event.gridScale : event.strength
+                events.append(GlowEvent(id: event.id, time: event.time, amplitude: amplitude, predicted: false, reactive: true))
             }
         }
         events.sort { $0.time < $1.time }
@@ -1570,11 +1574,45 @@ public struct BeatTracker: Sendable {
             reactivePast[last].strength = max(reactivePast[last].strength, event.strength)
             return
         }
-        reactivePast.append(ReactiveEvent(id: Self.reactiveIDFlag | reactiveCounter, time: event.time, strength: event.strength))
+        reactivePast.append(
+            ReactiveEvent(
+                id: Self.reactiveIDFlag | reactiveCounter, time: event.time, strength: event.strength,
+                gridScale: reactiveGridScale(at: event.time)
+            )
+        )
         reactiveCounter += 1
         if reactivePast.count > Self.reactiveCapacity {
             reactivePast.removeFirst()
         }
+    }
+
+    /// Множитель реактивного события на момент `time` для «Ритм и звук» (`ReactiveGlow.gridWindow` и
+    /// соседние константы), по сетке этого шага: прошедшие доли расписания с их яркостью и две следующие.
+    /// 0, если ближе `gridWindow` есть доля ярче `OfflineBeatChain.eventRise` (удар уже показан долей:
+    /// иначе мягкая вспышка за кадр до доли считалась отдельной вспышкой, а при 20 мс шла второй сразу
+    /// после доли). Иначе по фазе от ближайшей доли: на доле 1, на «и» `1 − halfDim × q`, в других местах
+    /// `1 − offGridDim × q`, `q` по `gridConfidence`. Без темпа 1. Решение принимается один раз, на шаге
+    /// события; слияние с соседним событием его не меняет.
+    func reactiveGridScale(at time: Double) -> Float {
+        guard let nextBeat, let period else { return 1 }
+        let window = ReactiveGlow.gridWindow
+        var nearest = nextBeat
+        var flashing = false
+        for event in past where event.predicted {
+            if abs(event.time - time) < abs(nearest - time) { nearest = event.time }
+            if abs(event.time - time) < window, event.amplitude > OfflineBeatChain.eventRise { flashing = true }
+        }
+        let following = nextBeat + period
+        if abs(following - time) < abs(nearest - time) { nearest = following }
+        if abs(nextBeat - time) < window, nextAmplitude > OfflineBeatChain.eventRise { flashing = true }
+        if abs(following - time) < window, predictedAmplitude(id: beatCounter + 1) > OfflineBeatChain.eventRise { flashing = true }
+        guard !flashing else { return 0 }
+        var phase = (time - nearest) / period
+        phase -= phase.rounded(.down)
+        let q = Self.smoothstep(ReactiveGlow.dimConfidenceLow, ReactiveGlow.dimConfidenceHigh, Float(gridConfidence))
+        if min(phase, 1 - phase) * period <= window { return 1 }
+        if abs(phase - 0.5) * period <= window { return 1 - ReactiveGlow.halfDim * q }
+        return 1 - ReactiveGlow.offGridDim * q
     }
 
     /// Насколько онсет бочки похож на удар, а не на всплеск шума в трех бинах бочки, 0...1.
