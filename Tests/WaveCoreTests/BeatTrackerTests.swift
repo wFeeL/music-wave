@@ -1267,7 +1267,7 @@ struct BeatTrackerTests {
     @Test func weightRisesInAboutOneAndHalfBeats() {
         let parameters = BeatTracker.Parameters()
         #expect(parameters.weightLow == 0.30 && parameters.weightHigh == 0.60)
-        #expect(parameters.weightRiseBeats == 1.5 && parameters.weightFallBeats == 6)
+        #expect(parameters.weightRiseBeats == 1.5 && parameters.weightFallBeats == 12)
         #expect(parameters.weightHits == 3)
         let step = 0.01
         var weight: Float = 0
@@ -1285,24 +1285,27 @@ struct BeatTrackerTests {
         #expect(abs(BeatTracker.nextWeight(1, confidence: 0.45, beats: 10, parameters: parameters) - 0.5) < 1e-5)
     }
 
-    /// Уверенность 0.8 -> 0.1: вес спадает примерно за 6 долей, через 2 доли выше 0.4, через 8 ниже 0.15.
-    @Test func weightFallsOverAboutSixBeats() {
+    /// Уверенность 0.8 -> 0.1: вес спадает примерно за 12 долей (`weightFallBeats`, разбор 1.2.1, исправление
+    /// C): через 2 доли выше 0.8, через 6 половина, через 8 еще выше 0.3, через 14 ниже 0.15.
+    @Test func weightFallsOverAboutTwelveBeats() {
         let parameters = BeatTracker.Parameters()
         let step = 0.01
         var weight = BeatTracker.nextWeight(0, confidence: 0.8, beats: 10, parameters: parameters)
         #expect(weight == 1)
         var trace: [Float] = []
-        for _ in 0..<800 {
+        for _ in 0..<1400 {
             weight = BeatTracker.nextWeight(weight, confidence: 0.1, beats: step, parameters: parameters)
             trace.append(weight)
         }
-        #expect(trace[199] > 0.4, "after 2 beats \(trace[199])")
-        #expect(abs(trace[299] - 0.5) < 0.01, "after 3 beats \(trace[299])")
-        #expect(trace[799] < 0.15, "after 8 beats \(trace[799])")
+        #expect(trace[199] > 0.8, "after 2 beats \(trace[199])")
+        #expect(abs(trace[599] - 0.5) < 0.01, "after 6 beats \(trace[599])")
+        #expect(trace[799] > 0.3, "after 8 beats \(trace[799])")
+        #expect(trace[1399] < 0.15, "after 14 beats \(trace[1399])")
     }
 
     /// Захват, потом доли без атак при открытом вороте: уверенность падает за доли, вес идет за ней
-    /// медленно, и предсказанные доли гаснут постепенно, а не за одну долю.
+    /// медленно, и предсказанные доли гаснут постепенно, а не за одну долю: через 6 долей (3 с на
+    /// 120 BPM) вес еще около половины, через 15 долей 0.
     @Test func weightFadesAfterUnlock() throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
         var hops = SyntheticBeats(bpm: 120)
@@ -1311,7 +1314,9 @@ struct BeatTrackerTests {
         var time = hops.endTime
         var unlockedAt: Double?
         var weightAtUnlock: Float = 0
-        while time < 16 {
+        var weightAfterSixBeats: Float = 0
+        let start = time
+        while time < start + 7.5 {
             time += hops.hop
             var hop = SyntheticBeats.hop(endTime: time, broadband: nil, kick: nil)
             hop.kickLevelDB = -6
@@ -1320,7 +1325,9 @@ struct BeatTrackerTests {
                 unlockedAt = time
                 weightAtUnlock = tracker.displayWeight
             }
+            if time < start + 3 { weightAfterSixBeats = tracker.displayWeight }
         }
+        #expect(weightAfterSixBeats > 0.5, "weight 3 s after the last onset \(weightAfterSixBeats)")
         let unlock = try #require(unlockedAt)
         // Уверенность ниже 0.25 при отпускании, вес еще не догнал свою цель 0.
         #expect(weightAtUnlock > 0.2, "weight at the unlock \(unlock) s: \(weightAtUnlock)")
