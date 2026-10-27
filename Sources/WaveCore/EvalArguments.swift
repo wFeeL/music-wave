@@ -281,6 +281,8 @@ public struct EvalArguments: Sendable, Equatable {
         config.syncOffset = offsetMs / 1000
         config.resetInterval = pause == nil ? resetEvery : nil
         config.resetAnalyzer = !resetTrackerOnly
+        // Пауза плеера в том же треке: приложение перезапускает трекер после тишины с памятью темпа.
+        config.keepTempoAfterSilence = pause != nil
         for override in overrides {
             _ = config.trackerParameters.set(override.name, to: override.value)
         }
@@ -319,7 +321,7 @@ extension BeatTracker.Parameters {
         "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceEvidenceChecks",
         "raceEvidenceShare", "raceEvidenceRatio", "raceEvidenceHits", "raceDropRatio", "raceStartRatio", "raceDim",
         "coastGate", "gateFallPerBeatDB", "gateFallNoTempoDB", "plpShadow", "everyOtherPeriod", "everyOtherHold",
-        "everyOtherLockRatio",
+        "everyOtherLockRatio", "silenceRestart",
     ]
 
     /// Задает поле по имени. `false`, если имени нет или значение не подходит (целые поля берут только
@@ -361,6 +363,9 @@ extension BeatTracker.Parameters {
         case "everyOtherPeriod": everyOtherPeriod = value
         case "everyOtherHold": everyOtherHold = value
         case "everyOtherLockRatio": everyOtherLockRatio = value
+        case "silenceRestart":
+            guard value == 0 || value == 1 else { return false }
+            silenceRestart = value == 1
         case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes", "raceEvidenceChecks", "weightHits":
             guard value == value.rounded(), abs(value) < 1e9 else { return false }
             switch name {

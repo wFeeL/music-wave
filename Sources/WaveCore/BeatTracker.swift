@@ -303,6 +303,9 @@ public struct BeatTracker: Sendable {
         /// быстрее); отношение 1.5 / 1.75 / 2 (вспышек с захватом мимо долей 564 / 562 / 558); 3 как 2.5,
         /// но на 7 вспышек в долю меньше.
         public var everyOtherLockRatio: Double
+        /// Звук вернулся после тишины (`HopResult.soundReturned`): трекер начинается заново, как после
+        /// `reset(keepTempo: keepsTempoAfterSilence)`. false выключает.
+        public var silenceRestart: Bool
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -348,6 +351,7 @@ public struct BeatTracker: Sendable {
             everyOtherPeriod: Double = 0.42,
             everyOtherHold: Double = 0.5,
             everyOtherLockRatio: Double = 2.5,
+            silenceRestart: Bool = true,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -390,6 +394,7 @@ public struct BeatTracker: Sendable {
             self.everyOtherPeriod = everyOtherPeriod
             self.everyOtherHold = everyOtherHold
             self.everyOtherLockRatio = everyOtherLockRatio
+            self.silenceRestart = silenceRestart
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -448,6 +453,10 @@ public struct BeatTracker: Sendable {
 
     public let framesPerSecond: Double
     public let parameters: Parameters
+    /// Звук после тишины тот же трек (пауза плеера в известном треке): перезапуск с памятью темпа
+    /// (`silenceRestart`). Ставит приложение по памяти трека (`TrackTempoMemory.keepsTempo`); у всего звука
+    /// системы и без трека false, и трекер начинается заново целиком.
+    public var keepsTempoAfterSilence = false
 
     private var tempo: TempoEstimator
     /// Второе мнение о фазе (real-time PLP) на той же широкополосной функции онсетов.
@@ -637,6 +646,10 @@ public struct BeatTracker: Sendable {
     public var resumingTempo: Bool { resumePeriod != nil }
 
     public mutating func process(_ hop: HopResult) {
+        if hop.soundReturned, parameters.silenceRestart, processedSinceReset {
+            // Звук после тишины: другой трек или то же место после паузы, фаза прежней сетки ничего не значит.
+            reset(keepTempo: keepsTempoAfterSilence)
+        }
         now = hop.endTime
         processedSinceReset = true
         // Ворот и вес здесь еще от прошлого шага, до звука самой доли.

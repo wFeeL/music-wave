@@ -380,6 +380,9 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
             // темпа: темп и сетка прежнего трека не нужны.
             tracker.reset()
         }
+        // Звук после тишины (пауза плеера, во время которой захват отдает нули): в том же известном треке
+        // трекер перезапускается с памятью темпа, без трека заново целиком.
+        tracker.keepsTempoAfterSilence = tempoMemory.keepsTempo(current: track)
 
         var processed = 0
         var allZero = true

@@ -1130,6 +1130,36 @@ struct BeatTrackerTests {
         #expect(tracker.nextBeat.map { abs(BeatTracker.circularDifference($0 - 0.37, period: 0.5)) < 0.01 } == true)
     }
 
+    /// Звук вернулся после тишины (`HopResult.soundReturned`): трекер начинается заново, как после
+    /// `reset(keepTempo:)`. Темп остается, только когда приложение знает, что трек тот же
+    /// (`keepsTempoAfterSilence`, пауза плеера в известном треке); у всего звука системы и без трека
+    /// заново все. Иначе захват, который держался накатом через тишину, вспыхивал бы на прежней фазе в
+    /// новой музыке. `silenceRestart` выключает перезапуск.
+    @Test(arguments: [(true, false), (true, true), (false, false)])
+    func soundAfterSilenceRestartsTheTracker(restart: Bool, keepTempo: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: BeatTracker.Parameters(silenceRestart: restart))
+        tracker.keepsTempoAfterSilence = keepTempo
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        hops.feedSilence(&tracker, until: 11)
+        var back = SyntheticBeats.hop(endTime: 11.01, broadband: nil, kick: nil)
+        back.soundReturned = true
+        tracker.process(back)
+        guard restart else {
+            #expect(tracker.period != nil && tracker.nextBeat != nil && !tracker.resumingTempo)
+            return
+        }
+        #expect(!tracker.locked && tracker.nextBeat == nil && tracker.lastUnlockReason == .reset)
+        #expect(tracker.schedule.events.allSatisfy { !$0.predicted || $0.time <= 11 })
+        if keepTempo {
+            #expect(tracker.resumingTempo)
+            #expect(tracker.period.map { abs($0 - 0.5) < 0.005 } == true, "period \(String(describing: tracker.period))")
+        } else {
+            #expect(!tracker.resumingTempo && tracker.period == nil && tracker.confidence == 0)
+        }
+    }
+
     /// Память темпа не копится: второй сброс с памятью без шагов между ними уверенность снова не делит,
     /// полный сброс память стирает, и сброс с памятью после него сохранять нечего.
     @Test func keptTempoHalvesOnceAndFullResetForgetsIt() throws {

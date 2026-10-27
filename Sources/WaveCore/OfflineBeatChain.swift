@@ -61,6 +61,9 @@ public struct OfflineBeatChain: Sendable {
         /// выбор пиков, уровни), как приложение на паузе, после простоя и пересборки tap. `false` сбрасывает
         /// только трекер, как пробный прогон разбора 1.2.1 (`evalreset.py`).
         public var resetAnalyzer = true
+        /// Звук после тишины тот же трек (`BeatTracker.keepsTempoAfterSilence`): как пауза плеера в
+        /// известном треке у приложения. По умолчанию false, как у всего звука системы.
+        public var keepTempoAfterSilence = false
         public var seed: UInt64
 
         public init(seed: UInt64 = 1) {
@@ -252,6 +255,7 @@ public struct OfflineBeatChain: Sendable {
         let fftSize = analyzer.config.fftSize
         let hopSize = analyzer.config.hopSize
         var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond, parameters: config.trackerParameters)
+        tracker.keepsTempoAfterSilence = config.keepTempoAfterSilence
         var clock = HostClock(sampleRate: rate)
         let settings = LevelSettings()
         var analysis = Analysis()

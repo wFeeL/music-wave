@@ -54,6 +54,9 @@ public struct HopResult: Sendable {
     /// `10 · log10` суммарной мощности бинов бочки (до 150 Гц, без бина 0), деленной на ENBW окна
     /// Ханна, как у полос `BandMapper`: синус амплитуды A дает A². Пол -120 dBFS.
     public var kickLevelDB: Float
+    /// Первый шаг со звуком после тишины не короче `StreamAnalyzer.silenceGap`: потоки онсетов начались
+    /// заново, трекер начинается заново (`BeatTracker.Parameters.silenceRestart`).
+    public var soundReturned: Bool
 
     public init(
         frame: WaveFrame,
@@ -63,7 +66,8 @@ public struct HopResult: Sendable {
         broadbandOnset: OnsetEvent?,
         broadbandODF: Float,
         kickODF: Float = 0,
-        kickLevelDB: Float
+        kickLevelDB: Float,
+        soundReturned: Bool = false
     ) {
         self.frame = frame
         self.frameTime = frameTime
@@ -73,6 +77,7 @@ public struct HopResult: Sendable {
         self.broadbandODF = broadbandODF
         self.kickODF = kickODF
         self.kickLevelDB = kickLevelDB
+        self.soundReturned = soundReturned
     }
 }
 
@@ -140,6 +145,16 @@ public final class StreamAnalyzer {
     static let broadbandPickerParameters = OnlinePeakPicker.Parameters(
         floor: 10, peakContrast: 3.2, lowFloor: 4, accentFloor: 0.6, minRiseDB: -.infinity
     )
+    /// Тишина, после которой звук начинает новый поток (`HopResult.soundReturned`): самая громкая полоса
+    /// ниже `silenceLevelDB` не меньше `silenceGap` секунд. Порог уровня тот же, что у выбора пиков
+    /// широкополосной функции: ниже него онсетов нет. Так звучат пауза плеера, во время которой захват
+    /// отдает нули, и промежуток между треками у всего звука системы, где ключа трека нет. Потоки онсетов
+    /// начинаются заново, пока окно не выйдет из тишины (`fftSize / hopSize` шагов), как у нового
+    /// анализатора: переход от тишины к звуку иначе дает пик потока на любой фазе (в пробе пауз GTZAN
+    /// 1442 вспышки бочки в первые 0.1 с после паузы, 1150 из них мимо доли). 0.5 с: на GTZAN tune
+    /// тишина такой длины внутри файла есть в двух файлах, а промежутки между треками обычно длиннее.
+    static let silenceGap = 0.5
+    static let silenceLevelDB = broadbandPickerParameters.minLevelDB
     private static let hannENBW: Float = 1.5
     private static let floorDB: Float = -120
 
@@ -160,6 +175,10 @@ public final class StreamAnalyzer {
     private var broadbandFlux: SuperFlux
     private var kickPicker: OnlinePeakPicker
     private var broadbandPicker: OnlinePeakPicker
+    /// Шагов подряд, где самая громкая полоса ниже `silenceLevelDB`.
+    private var silentHops = 0
+    /// Сколько еще шагов после возврата звука потоки онсетов начинаются заново.
+    private var refillHops = 0
 
     private var spectrum: [Float]
     private var levelsDB: [Float]
@@ -220,6 +239,8 @@ public final class StreamAnalyzer {
         broadbandFlux.reset()
         kickPicker.reset()
         broadbandPicker.reset()
+        silentHops = 0
+        refillHops = 0
     }
 
     /// Остров снова виден после простоя: история функций онсетов и выбор пиков вместе со следящими
@@ -261,6 +282,14 @@ public final class StreamAnalyzer {
             levelsDB.withUnsafeMutableBufferPointer { mapper.bandLevels(spectrum, into: $0) }
         }
 
+        // Самая громкая полоса до нормализации; по ней же тишина перед потоками онсетов.
+        var maxLevelDB = Self.floorDB
+        for band in 0..<BandMapper.bandCount {
+            let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
+            maxLevelDB = max(maxLevelDB, db)
+        }
+        let soundReturned = trackSilence(maxLevelDB)
+
         // Бочка: поток по бинам до 150 Гц и их мощность.
         var kickPower: Float = 0
         let kickODF = spectrum.withUnsafeBufferPointer { spectrum in
@@ -276,10 +305,8 @@ public final class StreamAnalyzer {
         let kickLevelDB = kickPowerDB.isNaN ? Self.floorDB : max(kickPowerDB, Self.floorDB)
 
         // Широкополосный поток по амплитудам 24 полос (корень мощности полосы).
-        var maxLevelDB = Self.floorDB
         for band in 0..<BandMapper.bandCount {
             let db = levelsDB[band].isNaN ? Self.floorDB : levelsDB[band]
-            maxLevelDB = max(maxLevelDB, db)
             bandAmplitudes[band] = Float(pow(10, Double(db) / 20))
         }
         let broadbandODF = bandAmplitudes.withUnsafeBufferPointer { broadbandFlux.process($0) }
@@ -340,8 +367,30 @@ public final class StreamAnalyzer {
             broadbandOnset: broadbandOnset,
             broadbandODF: broadbandODF,
             kickODF: kickODF,
-            kickLevelDB: kickLevelDB
+            kickLevelDB: kickLevelDB,
+            soundReturned: soundReturned
         )
+    }
+
+    /// Тишина перед потоками онсетов шага: `true` на первом шаге со звуком после `silenceGap` тишины. С
+    /// этого шага потоки онсетов начинаются заново, пока окно не выйдет из тишины.
+    private func trackSilence(_ levelDB: Float) -> Bool {
+        var returned = false
+        if levelDB < Self.silenceLevelDB {
+            silentHops = min(silentHops + 1, Int.max - 1)
+        } else {
+            if Double(silentHops) * config.hopDuration >= Self.silenceGap {
+                returned = true
+                refillHops = config.fftSize / config.hopSize
+            }
+            silentHops = 0
+        }
+        if refillHops > 0 {
+            refillHops -= 1
+            kickFlux.reset()
+            broadbandFlux.reset()
+        }
+        return returned
     }
 
     /// Рабочие буферы шага (БПФ, спектр, уровни, нормировка, амплитуды полос) для теста: шаги

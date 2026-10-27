@@ -105,6 +105,30 @@ struct OfflineBeatChainTests {
         #expect((resume.medianDelay ?? 9) < 2)
     }
 
+    /// Смена трека через тишину, как у всего звука системы: 120 BPM, секунда нулей, 90 BPM с середины
+    /// доли. После тишины трекер начинается заново, и до конца сцены вспышки только на долях второго трека:
+    /// ни пика на возобновлении, ни прежней сетки 120 BPM, которая держалась накатом через тишину.
+    @Test func trackChangeThroughSilenceStartsCold() async {
+        let (first, second, result) = await runOffCooperativePool {
+            let first = Drums.fourOnFloor(bpm: 120, seconds: 10, hats: .eighths)
+            let second = Drums.fourOnFloor(bpm: 90, seconds: 12, hats: .eighths, seed: 2)
+            let cut = Int(0.25 * second.sampleRate)
+            let samples = first.samples + [Float](repeating: 0, count: Int(second.sampleRate)) + Array(second.samples[cut...])
+            let result = OfflineBeatChain.run(samples: samples, sampleRate: first.sampleRate, config: OfflineBeatChain.Config(seed: 4))
+            return (first, second, result)
+        }
+        #expect(result.lockTime.map { $0 < 10 } == true)
+        let back = 11.0
+        let beats = result.audible(second.beats.filter { $0 > 0.25 }.map { $0 - 0.25 + back })
+        let after = result.flashes.filter { $0.time > back + result.outputLatency }
+        #expect(after.count >= 10)
+        for flash in after {
+            let nearest = beats.map { abs($0 - flash.time) }.min() ?? 1
+            #expect(nearest < 0.07, "flash at \(flash.time), \(flash.predicted ? "grid" : "kick"), nearest beat \(nearest)")
+        }
+        #expect(first.beats.count > 10)
+    }
+
     /// Те же сэмплы и `seed` дают тот же результат, а фазы рендера меняют только вспышки: состояния
     /// и онсеты у них общие.
     @Test func analysisIsDeterministicAndShared() async {

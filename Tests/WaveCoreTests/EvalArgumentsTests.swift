@@ -91,6 +91,9 @@ struct EvalArgumentsTests {
         #expect(pause.resetEvery == 7.3 && pause.pause == 2)
         // Паузы заменяют сбросы: цепочка не сбрасывается, тишину в звук вставляет `EvalPauses`.
         #expect(pause.chainConfig(forFile: "a.wav").resetInterval == nil)
+        // Пауза плеера в том же треке: перезапуск после тишины с памятью темпа, как у приложения.
+        #expect(pause.chainConfig(forFile: "a.wav").keepTempoAfterSilence)
+        #expect(!defaults.chainConfig(forFile: "a.wav").keepTempoAfterSilence)
         #expect(throws: EvalArguments.Error.missingValue("--reset-every")) {
             try EvalArguments.parse(["--pause", "2", "list.tsv"])
         }
@@ -159,11 +162,12 @@ struct EvalArgumentsTests {
         let defaults = BeatTracker.Parameters()
         for name in BeatTracker.Parameters.names {
             var changed = defaults
-            // 3 бывает и значением по умолчанию (`raceVotes`), тогда пробуется 7.
+            // 3 бывает и значением по умолчанию (`raceVotes`), тогда пробуется 7; включатель
+            // (`silenceRestart`) берет только 0 и 1, и по умолчанию он включен, поэтому для него 0.
             var value = 3.0
-            var accepted = changed.set(name, to: value)
-            if changed == defaults {
-                value = 7
+            var accepted = false
+            for candidate in [3.0, 7, 0] where changed == defaults {
+                value = candidate
                 accepted = changed.set(name, to: value)
             }
             #expect(accepted)
