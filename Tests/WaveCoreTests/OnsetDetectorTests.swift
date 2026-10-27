@@ -254,6 +254,41 @@ struct OnsetDetectorTests {
         #expect(result.references > 30)
         #expect(result.f >= 0.9)
     }
+
+    /// Тихая бочка под пэдом (пики на долях 5.4-9, фон до 1.7): порог широкополосной функции
+    /// опускается по типичному пику. Пока разгоняется уровень акцента и спадает типичный пик, онсеты
+    /// есть на трех бочках из четырех (самые слабые, 5.4-5.8, стоят у границы 3.2 T), с 16 с на
+    /// каждой. С постоянным порогом 10 здесь не было ни одного онсета.
+    @Test func softKicksUnderAPadGiveBroadbandOnsets() async {
+        let (settling, settled) = await runOffCooperativePool { () -> (Score, Score) in
+            let scene = Drums.softKicksUnderPad(seconds: 24)
+            let broadband = Self.analyze(scene).broadband.map(\.event.time)
+            func score(from start: Double, to end: Double) -> Score {
+                Self.score(
+                    broadband.filter { $0 >= start - 0.05 && $0 < end - 0.05 },
+                    reference: scene.kicks.filter { $0 >= start && $0 < end - 0.05 }, until: 24
+                )
+            }
+            return (score(from: 8, to: 16), score(from: 16, to: 24))
+        }
+        #expect(settling.references == 16 && settled.references >= 15)
+        #expect(settling.recall >= 0.75, "8-16 s: recall \(settling.recall)")
+        #expect(settled.recall == 1, "16-24 s: recall \(settled.recall)")
+        #expect(settling.falsePositives + settled.falsePositives == 0, "false onsets")
+    }
+
+    /// Порог, опущенный по типичному пику, не открывает шум ни на каком уровне: у розового шума пики
+    /// не выше 2.5 типичного пика (`peakContrast` 3.2), а его уровень от громкости почти не зависит.
+    @Test(arguments: [Float(-10), -35, -50])
+    func pinkNoiseAtAnyLevelGivesNoBroadbandOnsets(levelDB: Float) async {
+        let onsets = await runOffCooperativePool {
+            (UInt64(1)...3).flatMap { seed in
+                Self.analyze(Drums.pinkNoise(levelDB: levelDB, count: Int(Self.rate * 10), seed: seed)).broadband
+                    .map(\.event.time).filter { $0 >= Self.from }
+            }
+        }
+        #expect(onsets.isEmpty, "broadband onsets at \(onsets)")
+    }
 }
 
 /// Отдельные проверки потока SuperFlux и выбора пиков на коротких последовательностях.
@@ -320,6 +355,62 @@ struct OnlinePeakPickerTests {
             }
             #expect(fired == fires, "peak \(peak)")
         }
+    }
+
+    /// Номера шагов с онсетом на последовательности odf (уровень -20 dBFS на каждом шаге).
+    private static func fired(_ odf: [Float], parameters: OnlinePeakPicker.Parameters) -> [Int] {
+        var picker = OnlinePeakPicker(hopDuration: hop, parameters: parameters)
+        return odf.indices.filter { picker.process(odf[$0], levelDB: -20) != nil }
+    }
+
+    /// Пики `beat(k)` каждые `beatHops` шагов (k это номер доли) и бугры фона высотой `bump` через
+    /// каждые 11 шагов между ними.
+    private static func pulses(count: Int, beatHops: Int, bump: Float, beat: (Int) -> Float) -> [Float] {
+        var odf = [Float](repeating: 0, count: count)
+        for n in odf.indices {
+            if n % beatHops == 0 {
+                odf[n] = beat(n / beatHops)
+            } else if n % beatHops % 11 == 0, beatHops - n % beatHops > 6 {
+                odf[n] = bump
+            }
+        }
+        return odf
+    }
+
+    /// Доли 6 на фоне бугров 1 (120 BPM, 16 с): типичный пик около 1.2, порог опускается до 4, и
+    /// после разгона каждая доля дает онсет, а фон ни разу. С постоянным порогом 10 онсетов нет.
+    @Test func quietBeatsAboveTheTypicalPeakFire() {
+        let beatHops = 94
+        let odf = Self.pulses(count: 3_000, beatHops: beatHops, bump: 1) { _ in 6 }
+        let onsets = Self.fired(odf, parameters: StreamAnalyzer.broadbandPickerParameters)
+        let late = onsets.filter { $0 >= 1_500 }
+        #expect(late.allSatisfy { $0 % beatHops == 0 }, "onsets off the beats \(late.filter { $0 % beatHops != 0 })")
+        #expect(late.count == (1_500..<3_000).count(where: { $0 % beatHops == 0 }), "onsets \(late.count)")
+        #expect(onsets.allSatisfy { $0 % beatHops == 0 }, "onsets on bumps \(onsets)")
+    }
+
+    /// Пики 8 среди бугров 3.5 (каждый пятый пик): отрыв от типичного пика около 2, как у шума, и
+    /// порог остается 10.
+    @Test func noiseLikeContrastKeepsTheFloor() {
+        let odf = Self.pulses(count: 3_000, beatHops: 55, bump: 3.5) { _ in 8 }
+        #expect(Self.fired(odf, parameters: StreamAnalyzer.broadbandPickerParameters).isEmpty)
+    }
+
+    /// Уровень акцента держит порог после громких долей: доли 9.5 первые 12 с, затем 4.5. Первые 2 с
+    /// тихих долей порог не ниже 0.6 × 9.5 = 5.7, онсетов нет; за несколько секунд уровень акцента
+    /// спадает, и последние 4 с онсет на каждой доле.
+    @Test func accentLevelHoldsTheFloorAfterLouderBeats() {
+        let beatHops = 94
+        let switchBeat = 24
+        let odf = Self.pulses(count: 4_500, beatHops: beatHops, bump: 1) { $0 < switchBeat ? 9.5 : 4.5 }
+        let onsets = Self.fired(odf, parameters: StreamAnalyzer.broadbandPickerParameters)
+        let switchHop = switchBeat * beatHops
+        let twoSeconds = 375
+        #expect(onsets.filter { $0 >= switchHop - 4 * beatHops && $0 < switchHop }.count == 4, "loud beats \(onsets)")
+        #expect(onsets.filter { $0 >= switchHop && $0 < switchHop + twoSeconds }.isEmpty, "onsets \(onsets)")
+        let tailStart = 4_500 - 2 * twoSeconds
+        let tail = onsets.filter { $0 >= tailStart }
+        #expect(tail.count == (tailStart..<4_500).count(where: { $0 % beatHops == 0 }), "tail onsets \(tail)")
     }
 
     @Test func needsARealLevelRise() {

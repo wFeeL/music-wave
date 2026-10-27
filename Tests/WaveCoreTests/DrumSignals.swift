@@ -266,6 +266,20 @@ enum Drums {
         return render(spec)
     }
 
+    /// Тихая бочка под пэдом: бочка 808 на каждую долю на `kickDB` дБ ниже пэда, пэд звучит всю
+    /// сцену. Движется мало полос, поэтому пики широкополосной функции на долях около 6-9, а фон
+    /// между ними не выше 1.7: доля ясна, но абсолютный порог 10 ее не видит (как вступление трека C
+    /// в журналах владельца 1.2.1).
+    static func softKicksUnderPad(
+        bpm: Double = 120, seconds: Double = 24, kickDB: Float = -26, sampleRate: Double = 48_000, seed: UInt64 = 1
+    ) -> DrumScene {
+        var spec = Spec(seconds: seconds, sampleRate: sampleRate, bpm: { _ in bpm }, seed: seed)
+        spec.gain = gain(kickDB)
+        spec.pads = [(0, seconds, 1 / spec.gain)]
+        spec.pattern = { _ in [.kick(0)] }
+        return render(spec)
+    }
+
     /// Только розовый шум на `levelDB` dBFS, без долей.
     static func noiseOnly(
         levelDB: Float = -20, seconds: Double = 12, sampleRate: Double = 48_000, seed: UInt64 = 1

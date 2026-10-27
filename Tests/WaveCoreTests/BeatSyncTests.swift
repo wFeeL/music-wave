@@ -204,6 +204,17 @@ struct BeatSyncTests {
         #expect(result.peakGlow < 0.2, "peak glow \(result.peakGlow)")
     }
 
+    /// Тихая бочка под пэдом (пики широкополосной функции на долях около 6-9): порог по типичному
+    /// пику дает попадания, трекер захватывает ритм, вспышки на бочках. С постоянным порогом 10
+    /// широкополосных онсетов не было, и захвата тоже.
+    @Test func softKicksUnderAPadLock() async {
+        let (scene, result) = await Self.run { Drums.softKicksUnderPad() }
+        let lock = result.lockTime(after: 0) { abs($0 - 120) < 3 }
+        #expect(lock.map { $0 <= 14 } == true, "lock \(String(describing: lock))")
+        let f = result.fMeasure(reference: result.audible(scene.kicks), tolerance: 0.05, from: 16)
+        #expect(f >= 0.9, "\(Self.describe(result, f: f, offsets: nil))")
+    }
+
     @Test func quietIntroNeverGlows() async {
         let (_, result) = await Self.run { Drums.quietIntro() }
         #expect(result.events(in: 0...8) == 0, "events \(result.events.filter { $0 <= 8 })")
