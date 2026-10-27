@@ -27,6 +27,7 @@ enum WaveEval {
             var pairsPerGroup: Int?
             var pause: Double?
             var pairGap: Double?
+            var glowMode: String
         }
 
         var settings: Settings
@@ -138,9 +139,9 @@ enum WaveEval {
             split: parsed.split.rawValue, offsetMs: parsed.offsetMs, latencyMs: parsed.latencyMs, renderHz: parsed.renderHz,
             seed: parsed.seed, windowMs: parsed.windowMs, skipSeconds: parsed.skipSeconds, tracker: tracker,
             resetEvery: parsed.resetEvery, resetTrackerOnly: parsed.resetTrackerOnly, pairsPerGroup: parsed.pairs,
-            pause: parsed.pause, pairGap: parsed.pairGap
+            pause: parsed.pause, pairGap: parsed.pairGap, glowMode: (parsed.glowMode ?? .rhythm).rawValue
         )
-        var notes = BeatEvaluation.notes
+        var notes = BeatEvaluation.notes + BeatEvaluation.glowNotes
         if parsed.resetEvery != nil { notes += BeatEvaluation.resumeNotes }
         if let pause = parsed.pause {
             notes.append(
@@ -192,6 +193,7 @@ enum WaveEval {
                 if let warm = warmSummaries?[split.rawValue] {
                     out += ["", BeatEvaluation.table(title: "split: \(split.rawValue), B after A", summaries: warm)]
                 }
+                out += ["", BeatEvaluation.glowTable(title: "split: \(split.rawValue), glow", rows: rows.map { ($0.name, $0.glow) })]
             }
             if !failures.isEmpty {
                 out += ["", "failed files (\(failures.count)):"] + failures.map { "  \($0.path): \($0.error)" }
@@ -209,7 +211,7 @@ enum WaveEval {
             + "render=\(s.renderHz) Hz seed=\(s.seed) skip=\(s.skipSeconds) s "
             + (s.resetEvery.map { "reset-every=\($0) s" + (s.resetTrackerOnly ? " (tracker only) " : " ") } ?? "")
             + (s.pause.map { "pause=\($0) s " } ?? "") + (s.pairsPerGroup.map { "pairs=\($0)/group " } ?? "")
-            + (s.pairGap.map { "pair-gap=\($0) s " } ?? "") + tracker
+            + (s.pairGap.map { "pair-gap=\($0) s " } ?? "") + "glow-mode=\(s.glowMode) " + tracker
     }
 
     enum Outcome<Value: Sendable>: Sendable {

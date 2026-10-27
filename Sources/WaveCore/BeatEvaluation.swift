@@ -157,6 +157,8 @@ public enum BeatEvaluation {
         public var unlocks: [UnlockReason: Int] = [:]
         /// Возобновления после принудительных сбросов (`OfflineBeatChain.Config.resetInterval`); `nil` без них.
         public var resume: ResumeScore?
+        /// Счет свечения (`glow(flashes:beats:from:to:window:frames:visibleFrames:)`).
+        public var glow = GlowScore()
     }
 
     // MARK: Возобновление
@@ -326,7 +328,7 @@ public enum BeatEvaluation {
             BeatMetrics.longestDarkRun(detections: times, annotations: audibleBeats.filter { $0 >= lock + latency }, window: window)
         }
 
-        return FileScore(
+        var file = FileScore(
             path: path, group: group, heldout: heldout, duration: duration, annotationCount: beats.count,
             flashCount: flashes.count, matched: all.matched, lockedFlashCount: lockedTimes.count,
             lockedMatched: locked.matched, unlockedFlashCount: unlockedTimes.count, unlockedMatched: unlocked.matched,
@@ -341,6 +343,14 @@ public enum BeatEvaluation {
             lockFlipsPerMinute: span > 0 ? Double(lockChanges.changes) * 60 / span : 0, unlocks: lockChanges.unlocks,
             resume: result.resets.isEmpty ? nil : resume(result: result, annotations: annotations, duration: duration, window: window)
         )
+        if let first = audibleBeats.first, let last = audibleBeats.last {
+            file.glow = glow(
+                flashes: result.flashes, beats: audibleBeats, from: max(skip + latency, first - glowSpanMargin),
+                to: min(duration + latency, last + glowSpanMargin), window: window, frames: result.audibleFrames,
+                visibleFrames: result.visibleFrames
+            )
+        }
+        return file
     }
 
     /// Доля времени от `from` до `duration` с захватом. Состояние, действовавшее в момент `from`,
@@ -406,6 +416,8 @@ public enum BeatEvaluation {
         public var unlocks: [UnlockReason: Int]
         /// Сумма возобновлений по файлам; `nil`, если сбросов не было.
         public var resume: ResumeScore?
+        /// Сумма счета свечения по файлам.
+        public var glow = GlowScore()
     }
 
     public static let wrongLockMinFlashes = 10
@@ -427,7 +439,7 @@ public enum BeatEvaluation {
         func ratio(_ matched: Int, _ total: Int) -> Double? { total == 0 ? nil : Double(matched) / Double(total) }
         func offset(_ total: Double, _ count: Int) -> Double? { count == 0 ? nil : total / Double(count) }
         let afterLock = scores.compactMap(\.longestDarkBeatsAfterLock).map { Double($0) }
-        return Summary(
+        var summary = Summary(
             name: name, files: scores.count, lockedFiles: scores.filter { $0.lockedPrecision != nil }.count,
             lockedPrecision: optionalMean(scores.map(\.lockedPrecision)),
             lockedPrecisionPooled: ratio(sum(\.lockedMatched), sum(\.lockedFlashCount)),
@@ -455,6 +467,8 @@ public enum BeatEvaluation {
                 return sum
             }
         )
+        for score in scores { summary.glow.add(score.glow) }
+        return summary
     }
 
     /// Строки отчета: группы по алфавиту, затем объединения (в порядке заданных), затем итог.

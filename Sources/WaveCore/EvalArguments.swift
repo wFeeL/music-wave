@@ -91,6 +91,9 @@ public struct EvalArguments: Sendable, Equatable {
     public var pairGap: Double?
     /// Вместо сбросов по `resetEvery` пауза с тишиной этой длины, секунды (`EvalPauses`); `nil` без пауз.
     public var pause: Double?
+    /// Режим свечения прогона (`OfflineBeatChain.Config.glowMode`); `nil` берет `rhythm`, у записей владельца
+    /// режим записи (`RhythmLog.Meta.glowMode`, без поля `rhythm`).
+    public var glowMode: GlowMode?
 
     public init() {}
 
@@ -123,6 +126,9 @@ public struct EvalArguments: Sendable, Equatable {
           --owner                    list.tsv holds owner rhythm logs: <rhythm.json>\t<beats>\t<group>, the WAV
                                      next to the JSON; replayed with the log's latency, offset and render rate
           --loop N                   owner logs only: play the recording N times in a row (default 1)
+          --glow-mode rhythm|hybrid|sound
+                                     glow mode of the chain (BeatTracker.glowMode); default rhythm, owner logs
+                                     default to the mode they were recorded with
         """
 
     public static func parse(_ arguments: [String]) throws -> EvalArguments {
@@ -186,6 +192,10 @@ public struct EvalArguments: Sendable, Equatable {
                 let text = try value()
                 guard let count = Int(text), count >= 1 else { throw Error.invalidValue(option: name, value: text) }
                 result.loop = count
+            case "--glow-mode":
+                let text = try value()
+                guard let mode = GlowMode(rawValue: text) else { throw Error.invalidValue(option: name, value: text) }
+                result.glowMode = mode
             case "--split":
                 let text = try value()
                 guard let split = Split(rawValue: text) else { throw Error.invalidValue(option: name, value: text) }
@@ -284,6 +294,7 @@ public struct EvalArguments: Sendable, Equatable {
         config.resetAnalyzer = !resetTrackerOnly
         // Пауза плеера в том же треке: приложение перезапускает трекер после тишины с памятью темпа.
         config.keepTempoAfterSilence = pause != nil
+        config.glowMode = glowMode ?? .rhythm
         for override in overrides {
             _ = config.trackerParameters.set(override.name, to: override.value)
         }
@@ -301,6 +312,7 @@ public struct EvalArguments: Sendable, Equatable {
         var config = RhythmReplay.config(for: meta, options: RhythmReplay.Options(seed: seed, trackerParameters: parameters))
         config.resetInterval = resetEvery
         config.resetAnalyzer = !resetTrackerOnly
+        if let glowMode { config.glowMode = glowMode }
         return config
     }
 

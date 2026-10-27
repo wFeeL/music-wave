@@ -12,6 +12,7 @@ enum Owner {
             var resetEvery: Double?
             var resetTrackerOnly: Bool
             var tracker: [String: Double]
+            var glowMode: String?
         }
 
         var settings: Settings
@@ -56,9 +57,9 @@ enum Owner {
         for override in parsed.overrides { tracker[override.name] = override.value }
         let settings = Report.Settings(
             seed: parsed.seed, windowMs: parsed.windowMs, loop: parsed.loop, resetEvery: parsed.resetEvery,
-            resetTrackerOnly: parsed.resetTrackerOnly, tracker: tracker
+            resetTrackerOnly: parsed.resetTrackerOnly, tracker: tracker, glowMode: parsed.glowMode?.rawValue
         )
-        var notes = OwnerEvaluation.notes
+        var notes = OwnerEvaluation.notes + BeatEvaluation.glowNotes
         if parsed.resetEvery != nil { notes += BeatEvaluation.resumeNotes }
         if parsed.json {
             let report = Report(settings: settings, notes: notes, recordings: scores, totals: totals, failed: failures)
@@ -77,10 +78,12 @@ enum Owner {
                 : "tracker " + tracker.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
             var out = [
                 "wave-eval --owner | \(scores.count) recordings | window=\(parsed.windowMs) ms seed=\(parsed.seed) loop=\(parsed.loop) "
+                    + "glow-mode=\(parsed.glowMode?.rawValue ?? "as recorded") "
                     + (parsed.resetEvery.map { "reset-every=\($0) s" + (parsed.resetTrackerOnly ? " (tracker only) " : " ") } ?? "") + trackerText,
             ]
             out += notes.map { "note: \($0)" }
             out += ["", OwnerEvaluation.table(recordings: scores, totals: totals)]
+            out += ["", BeatEvaluation.glowTable(title: "glow", rows: (scores + totals).map { ($0.name, $0.glow) })]
             let resumeRows = (scores + totals).compactMap { score in score.resume.map { (score.name, $0) } }
             if let resume = BeatEvaluation.resumeTable(title: "resume after forced resets", rows: resumeRows) {
                 out += ["", resume]

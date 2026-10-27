@@ -151,6 +151,8 @@ public enum OwnerEvaluation {
         public var unlockedPulseVisible = 0
         public var pulsePeaks = 0
         public var pulsePeaksNearOnset = 0
+        /// Счет свечения на всей записи (`BeatEvaluation.glow`).
+        public var glow = BeatEvaluation.GlowScore()
 
         public init(name: String, group: String, gridBPM: Double?, end: Double) {
             self.name = name
@@ -228,6 +230,10 @@ public enum OwnerEvaluation {
         let onsets = (result.onsets + result.kickOnsets).sorted()
         score.pulsePeaks = result.ambientPeaks.count
         score.pulsePeaksNearOnset = result.ambientPeaks.filter { BeatMetrics.nearestDistance(to: $0, in: onsets) <= window }.count
+        score.glow = BeatEvaluation.glow(
+            flashes: result.flashes, beats: beats, from: 0, to: end, window: window, frames: result.audibleFrames,
+            visibleFrames: result.visibleFrames
+        )
         return score
     }
 
@@ -251,6 +257,7 @@ public enum OwnerEvaluation {
             sum.unlockedPulseVisible += score.unlockedPulseVisible
             sum.pulsePeaks += score.pulsePeaks
             sum.pulsePeaksNearOnset += score.pulsePeaksNearOnset
+            sum.glow.add(score.glow)
             if let resume = score.resume {
                 var merged = sum.resume ?? BeatEvaluation.ResumeScore()
                 merged.add(resume)

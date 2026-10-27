@@ -505,6 +505,9 @@ public struct BeatTracker: Sendable {
     /// (`silenceRestart`). Ставит приложение по памяти трека (`TrackTempoMemory.keepsTempo`); у всего звука
     /// системы и без трека false, и трекер начинается заново целиком.
     public var keepsTempoAfterSilence = false
+    /// Режим свечения (`GlowMode`): какие события идут в расписание. Анализ, сетка, захват и пульс от него
+    /// не зависят, поэтому режим можно менять на ходу. По умолчанию `rhythm`, расписание как в 1.3.
+    public var glowMode = GlowMode.rhythm
 
     private var tempo: TempoEstimator
     /// Второе мнение о фазе (real-time PLP) на той же широкополосной функции онсетов.
@@ -642,7 +645,9 @@ public struct BeatTracker: Sendable {
         confirmScratch = [Float](repeating: 0, count: confirmHops)
     }
 
-    /// Расписание в секундах потока: до 8 прошедших событий и две следующие предсказанные доли.
+    /// Расписание в секундах потока: до 8 прошедших событий и две следующие предсказанные доли. В режиме
+    /// `GlowMode.sound` доли идут с яркостью 0 (сетка видна журналу и диагностике, но не светится), а онсетов
+    /// бочки нет.
     public var schedule: BeatSchedule {
         var events = past
         if let nextBeat, let period {
@@ -650,6 +655,12 @@ public struct BeatTracker: Sendable {
             events.append(
                 GlowEvent(id: beatCounter + 1, time: nextBeat + period, amplitude: predictedAmplitude(id: beatCounter + 1), predicted: true)
             )
+        }
+        if glowMode == .sound {
+            events.removeAll { !$0.predicted && !$0.reactive }
+            for index in events.indices where events[index].predicted {
+                events[index].amplitude = 0
+            }
         }
         events.sort { $0.time < $1.time }
         return BeatSchedule(

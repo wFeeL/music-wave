@@ -69,6 +69,8 @@ public struct OfflineBeatChain: Sendable {
         /// Звук после тишины тот же трек (`BeatTracker.keepsTempoAfterSilence`): как пауза плеера в
         /// известном треке у приложения. По умолчанию false, как у всего звука системы.
         public var keepTempoAfterSilence = false
+        /// Режим свечения трекера (`BeatTracker.glowMode`).
+        public var glowMode = GlowMode.rhythm
         public var seed: UInt64
 
         public init(seed: UInt64 = 1) {
@@ -80,15 +82,21 @@ public struct OfflineBeatChain: Sendable {
     public struct Flash: Sendable, Equatable {
         /// Момент показа кадра, слышимые секунды от первого сэмпла.
         public var time: Double
-        /// Вспышку дала предсказанная доля (иначе онсет бочки).
+        /// Вспышку дала предсказанная доля (иначе онсет бочки или реактивное событие).
         public var predicted: Bool
         /// Расписание на этом кадре было с захватом.
         public var locked: Bool
+        /// Вспышку дало реактивное событие (`GlowEvent.reactive`); оценка, как `predicted`.
+        public var reactive: Bool
+        /// Наибольшее свечение на кадре вспышки и следующем (яркая или мягкая вспышка).
+        public var peak: Float
 
-        public init(time: Double, predicted: Bool, locked: Bool) {
+        public init(time: Double, predicted: Bool, locked: Bool, reactive: Bool = false, peak: Float = 0) {
             self.time = time
             self.predicted = predicted
             self.locked = locked
+            self.reactive = reactive
+            self.peak = peak
         }
     }
 
@@ -187,6 +195,10 @@ public struct OfflineBeatChain: Sendable {
         public var ambientTrace: [AmbientPoint] = []
         /// Принудительные сбросы по времени (`Config.resetInterval`), иначе пусто.
         public var resets: [Reset] = []
+        /// Кадров рендера, показанных, пока звук слышен (момент показа от `outputLatency` до конца звука
+        /// плюс `outputLatency`), и сколько из них со свечением от `RhythmLog.ambientVisible` (без пульса).
+        public var audibleFrames = 0
+        public var visibleFrames = 0
 
         /// Первая публикация с захватом, секунды от первого сэмпла.
         public var lockTime: Double? {
@@ -241,6 +253,8 @@ public struct OfflineBeatChain: Sendable {
         var energies: [(wake: Double, time: Double, energy: Float)] = []
         var resets: [Reset] = []
         var end = 0.0
+        /// Слышимый отрезок звука на оси хоста: от первого сэмпла плюс задержка вывода до последнего.
+        var audible: ClosedRange<Double> = 0...0
     }
 
     /// Генератор шума цепочки (SplitMix64): одно и то же `seed` дает один и тот же прогон.
@@ -271,10 +285,12 @@ public struct OfflineBeatChain: Sendable {
         let hopSize = analyzer.config.hopSize
         var tracker = BeatTracker(framesPerSecond: analyzer.config.framesPerSecond, parameters: config.trackerParameters)
         tracker.keepsTempoAfterSilence = config.keepTempoAfterSilence
+        tracker.glowMode = config.glowMode
         var clock = HostClock(sampleRate: rate)
         let settings = LevelSettings()
         var analysis = Analysis()
         analysis.end = hostStart + Double(samples.count) / rate + config.outputLatency + renderTail
+        analysis.audible = (hostStart + config.outputLatency)...(hostStart + Double(samples.count) / rate + config.outputLatency)
 
         // Блоки IOProc: момент прихода и метка первого сэмпла.
         let chunkCount = samples.count / config.chunk
@@ -374,6 +390,9 @@ public struct OfflineBeatChain: Sendable {
         var ambientBefore: (value: Float, time: Double)?
         var ambientLast: (value: Float, time: Double)?
         var ambientTrace: [AmbientPoint] = []
+        var audibleFrames = 0
+        var visibleFrames = 0
+        var flashFrame: Int?
         // Кадры энергии, как их видит рендер приложения: опубликованные до `tEval`, на слышимой оси.
         let energyStore = FrameStore()
         var energy = 0
@@ -387,14 +406,23 @@ public struct OfflineBeatChain: Sendable {
             }
             let tP = tEval + lead
             let value = glow.value(at: tP, schedule: published, refreshPeriod: renderPeriod)
+            // Пик вспышки прошлого кадра: свечение этого кадра, если оно выше.
+            if flashFrame == frame - 1, let last = flashes.indices.last {
+                flashes[last].peak = max(flashes[last].peak, value)
+            }
             if value - previous > eventRise {
+                flashFrame = frame
+                let started = startedEvent(in: published, by: tP, refreshPeriod: renderPeriod)
                 flashes.append(
                     Flash(
-                        time: tP - hostStart,
-                        predicted: startedEvent(in: published, by: tP, refreshPeriod: renderPeriod)?.predicted ?? false,
-                        locked: published.locked
+                        time: tP - hostStart, predicted: started?.predicted ?? false, locked: published.locked,
+                        reactive: started?.reactive ?? false, peak: value
                     )
                 )
+            }
+            if analysis.audible.contains(tP) {
+                audibleFrames += 1
+                if value >= RhythmLog.ambientVisible { visibleFrames += 1 }
             }
             peak = max(peak, value)
             previous = value
@@ -442,7 +470,9 @@ public struct OfflineBeatChain: Sendable {
             ambientUnlockedFrames: ambientUnlockedFrames,
             ambientPeaks: ambientPeaks,
             ambientTrace: ambientTrace,
-            resets: analysis.resets
+            resets: analysis.resets,
+            audibleFrames: audibleFrames,
+            visibleFrames: visibleFrames
         )
     }
 

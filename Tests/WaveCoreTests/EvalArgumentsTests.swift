@@ -12,6 +12,23 @@ struct EvalArgumentsTests {
         #expect(!parsed.json && !parsed.perFile && parsed.overrides.isEmpty && parsed.unions.isEmpty)
     }
 
+    /// Режим свечения прогона: по умолчанию `rhythm` (GTZAN как в 1.3), у записей владельца режим записи;
+    /// неизвестное имя это ошибка.
+    @Test func glowModeOption() throws {
+        let defaults = try EvalArguments.parse(["list.tsv"])
+        #expect(defaults.glowMode == nil)
+        #expect(defaults.chainConfig(forFile: "a.wav").glowMode == .rhythm)
+        for mode in GlowMode.allCases {
+            let parsed = try EvalArguments.parse(["--glow-mode", mode.rawValue, "list.tsv"])
+            #expect(parsed.glowMode == mode)
+            #expect(parsed.chainConfig(forFile: "a.wav").glowMode == mode)
+            #expect(parsed.ownerConfig(for: RhythmLog.Meta(sampleRate: 48_000)).glowMode == mode)
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--glow-mode", value: "beat")) {
+            try EvalArguments.parse(["--glow-mode", "beat", "list.tsv"])
+        }
+    }
+
     @Test func allOptions() throws {
         let parsed = try EvalArguments.parse([
             "--json", "--per-file", "--split", "heldout", "--offset-ms", "-20", "--latency-ms=12.5",

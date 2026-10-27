@@ -80,6 +80,26 @@ struct BeatGlowTests {
         #expect(plainStarts == slowStarts)
     }
 
+    /// Реактивное событие (`GlowEvent.reactive`) светится со своей яркостью при любом весе показа: его
+    /// яркость уже посчитана трекером, приглушение онсетов бочки по весу к нему не относится.
+    @Test func reactiveEventsKeepTheirAmplitude() {
+        let start = 10.0 - BeatGlow.lead - Self.refresh / 2
+        for weight in [0, 0.5, 1] as [Float] {
+            let reactive = BeatSchedule(
+                events: [GlowEvent(id: 1 << 62, time: 10, amplitude: 0.4, predicted: false, reactive: true)],
+                bpm: nil, period: nil, confidence: 0, locked: false, weight: weight
+            )
+            #expect(abs(BeatGlow.value(at: start, schedule: reactive, refreshPeriod: Self.refresh) - 0.4) < 1e-6)
+            var glow = BeatGlow()
+            #expect(abs(glow.value(at: start, schedule: reactive, refreshPeriod: Self.refresh) - 0.4) < 1e-6)
+        }
+        let kick = BeatSchedule(
+            events: [GlowEvent(id: 1 << 63, time: 10, amplitude: 0.4, predicted: false)], bpm: nil, period: nil, confidence: 0,
+            locked: false, weight: 0
+        )
+        #expect(abs(BeatGlow.value(at: start, schedule: kick, refreshPeriod: Self.refresh) - 0.4 * BeatGlow.reactiveScale) < 1e-6)
+    }
+
     @Test func peaksAtLeadTime() {
         let schedule = Self.schedule([Self.event(id: 1, time: 10)])
         let peak = BeatGlow.value(at: 10.0 - 0.015 - Self.refresh / 2, schedule: schedule, refreshPeriod: Self.refresh)

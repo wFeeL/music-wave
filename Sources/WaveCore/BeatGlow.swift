@@ -1,11 +1,12 @@
 import Foundation
 
-/// Одна вспышка свечения: предсказанная доля или онсет бочки.
+/// Одна вспышка свечения: предсказанная доля, онсет бочки или реактивное событие (`ReactiveGlow`).
 ///
 /// Правило id (соблюдает трекер): предсказанная доля сохраняет id при подстройке ФАПЧ и при
 /// `BeatSchedule.shifted(by:)`; скачок фазы или смена темпа начинают новые id; онсеты берут id из
-/// отдельного счетчика с установленным старшим битом. Один id не должен означать другое событие
-/// раньше чем через `BeatGlow.memory` секунд, иначе изменяемый `BeatGlow` примет его за старое.
+/// отдельного счетчика с установленным старшим битом, реактивные события из своего со вторым битом.
+/// Один id не должен означать другое событие раньше чем через `BeatGlow.memory` секунд, иначе
+/// изменяемый `BeatGlow` примет его за старое.
 public struct GlowEvent: Sendable, Equatable {
     public var id: UInt64
     /// Слышимое время события в секундах той же оси, что и время рендера.
@@ -13,12 +14,16 @@ public struct GlowEvent: Sendable, Equatable {
     /// Яркость вспышки 0...1.
     public var amplitude: Float
     public var predicted: Bool
+    /// Реактивное событие (атака звука, режимы `GlowMode.hybrid` и `sound`): яркость уже посчитана
+    /// трекером, приглушение онсетов бочки по весу (`BeatGlow.reactiveScale`) к нему не применяется.
+    public var reactive: Bool
 
-    public init(id: UInt64, time: Double, amplitude: Float, predicted: Bool) {
+    public init(id: UInt64, time: Double, amplitude: Float, predicted: Bool, reactive: Bool = false) {
         self.id = id
         self.time = time
         self.amplitude = amplitude
         self.predicted = predicted
+        self.reactive = reactive
     }
 }
 
@@ -124,9 +129,10 @@ public struct BeatSchedule: Sendable, Equatable {
 /// `shape(a) = a < 0 ? 0 : exp(-a / decay)` при `a = t - (event.time - lead) + R / 2`, где `t` это
 /// время показа кадра, а `R` период обновления экрана (`+R/2` центрирует ошибку квантования кадрами).
 /// Свечение равно максимуму `amplitude × shape` по событиям и не бывает больше 1. Онсет бочки
-/// (`predicted == false`) светится с `amplitude × (reactiveScale + (1 − reactiveScale) × weight)` по
-/// весу расписания: без веса вполовину, с полным весом полностью. Изменяемый вариант берет вес один
-/// раз, когда событие впервые видно, чтобы рост веса не зажигал его заново.
+/// (`predicted == false`, `reactive == false`) светится с
+/// `amplitude × (reactiveScale + (1 − reactiveScale) × weight)` по весу расписания: без веса вполовину,
+/// с полным весом полностью. Реактивное событие светится со своей `amplitude`. Изменяемый вариант берет
+/// вес один раз, когда событие впервые видно, чтобы рост веса не зажигал его заново.
 ///
 /// Изменяемый вариант помнит события по id. Событие, которое впервые видно уже после своего начала
 /// (не позже `lateLimit`), вспыхивает в полную яркость на этом кадре: вспышку, которая начинается уже
@@ -304,10 +310,11 @@ public struct BeatGlow: Sendable {
         event.amplitude * scale(of: event, weight: schedule.weight)
     }
 
-    /// Множитель яркости: доля 1, онсет бочки `reactiveScale + (1 − reactiveScale) × weight`; вес вне
-    /// 0...1 или нечисловой считается границей или нулем.
+    /// Множитель яркости: доля и реактивное событие 1, онсет бочки
+    /// `reactiveScale + (1 − reactiveScale) × weight`; вес вне 0...1 или нечисловой считается границей или
+    /// нулем.
     private static func scale(of event: GlowEvent, weight: Float) -> Float {
-        guard !event.predicted else { return 1 }
+        guard !event.predicted, !event.reactive else { return 1 }
         let clamped = weight.isFinite ? min(max(weight, 0), 1) : 0
         return reactiveScale + (1 - reactiveScale) * clamped
     }
