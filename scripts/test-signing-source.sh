@@ -80,6 +80,24 @@ check "неполная пара в Application Support: предупрежде�
     eq "$([[ "$WARN" == *"нет файла password.txt"* ]] && echo yes)" yes
 rm -rf "$HOME/Library"
 
+# --- signing_expected_leaf ---
+
+OWNER_LEAF=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+OWN_LEAF=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+rm -f "$LEGACY_DIR/expected-leaf.txt"
+if signing_expected_leaf > /dev/null 2>&1; then rc=0; else rc=$?; fi
+check "ожидаемого хэша нет нигде: код 1" eq "$rc" 1
+printf '%s\n' "$OWNER_LEAF" > "$LEGACY_DIR/expected-leaf.txt"
+check "ожидаемый хэш из signing/ репозитория" eq "$(signing_expected_leaf)" "$OWNER_LEAF"
+mkdir -p "$APP_DIR"
+# Так файл пишут команды из README: отпечаток openssl с двоеточиями и заглавными.
+printf 'BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB:BB\n' > "$APP_DIR/expected-leaf.txt"
+check "свой хэш в Application Support важнее репозитория" eq "$(signing_expected_leaf)" "$OWN_LEAF"
+check "переменная SIGNING_EXPECTED_LEAF важнее файлов" \
+    eq "$(SIGNING_EXPECTED_LEAF="H\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"" signing_expected_leaf)" \
+    cccccccccccccccccccccccccccccccccccccccc
+rm -rf "$HOME/Library" "$LEGACY_DIR/expected-leaf.txt"
+
 # --- import_signing_dir ---
 
 SRC="$TMP/old copy/signing"

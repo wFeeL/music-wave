@@ -68,19 +68,48 @@ WaveFeels живет в строке меню и рисует волны вок�
    cd music-wave
    ```
    Клонируется ветка main, в ней последняя выпущенная версия. Перед следующей сборкой обновите код командой `git pull`.
-3. **Соберите и установите:**
+3. **Создайте ключ подписи.** Это нужно один раз, если WaveFeels на этом маке еще не собирали. macOS помнит разрешение на звук для конкретной подписи, поэтому все сборки подписываются одним ключом. В репозитории ключа нет, его создает себе каждый. Скопируйте блок целиком и вставьте в Терминал:
+   ```
+   (
+   set -e
+   D="$HOME/Library/Application Support/WaveFeels/signing"
+   if [ -e "$D/wavefeels-signing.p12" ]; then echo "Ключ уже есть: $D"; exit 0; fi
+   mkdir -p "$D" && chmod 700 "$D" && cd "$D"
+   umask 077
+   cat > cert.cnf <<'EOF'
+   [req]
+   distinguished_name = dn
+   x509_extensions = codesign
+   prompt = no
+   [dn]
+   CN = WaveFeels Self-Signed
+   [codesign]
+   basicConstraints = critical,CA:false
+   keyUsage = critical,digitalSignature
+   extendedKeyUsage = critical,codeSigning
+   subjectKeyIdentifier = hash
+   EOF
+   /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 -config cert.cnf -keyout key.pem -out cert.pem
+   /usr/bin/openssl rand -hex 24 > password.txt
+   /usr/bin/openssl pkcs12 -export -inkey key.pem -in cert.pem -name "WaveFeels Self-Signed" -passout file:password.txt -out wavefeels-signing.p12
+   /usr/bin/openssl x509 -in cert.pem -noout -fingerprint -sha1 | cut -d= -f2 > expected-leaf.txt
+   rm cert.cnf key.pem cert.pem
+   echo "Ключ создан: $D"
+   )
+   ```
+   Ключ ляжет в «~/Library/Application Support/WaveFeels/signing», сборка найдет его сама. Сохраните копию этой папки: если ключ потеряется, с новым macOS снова спросит доступ к звуку.
+
+   Если ключ уже лежит в другой папке (например, в старой копии кода), этот шаг не нужен. Укажите папку при первой сборке, дальше скрипт возьмет ключ сам:
+   ```
+   bash scripts/build-local.sh --signing-dir <папка с ключом>/signing --install
+   ```
+4. **Соберите и установите:**
    ```
    bash scripts/build-local.sh --install
    ```
    Скрипт соберет приложение, подпишет его, положит в «Программы» и запустит. Первая сборка идет несколько минут.
-
-   Ключ подписи в репозитории не хранится. При первой сборке на маке укажите папку, где он лежит:
-   ```
-   bash scripts/build-local.sh --signing-dir <папка с ключом>/signing --install
-   ```
-   Дальше скрипт берет ключ из «~/Library/Application Support/WaveFeels/signing» сам.
-4. **Разрешите доступ к звуку.** При первом запуске macOS спросит про «Запись системного аудио», нажмите «Разрешить». Если запрос пропал, включите WaveFeels в Системных настройках: «Конфиденциальность и безопасность», «Запись экрана и системного аудио», раздел «Только запись системного аудио».
-5. **Выберите источник и включите музыку.** В «Настройках» на вкладке «Основные» выберите приложение, из которого идет музыка, или «Весь звук системы». Остров выйдет из выреза, как только заиграет звук.
+5. **Разрешите доступ к звуку.** При первом запуске macOS спросит про «Запись системного аудио», нажмите «Разрешить». Если запрос пропал, включите WaveFeels в Системных настройках: «Конфиденциальность и безопасность», «Запись экрана и системного аудио», раздел «Только запись системного аудио».
+6. **Выберите источник и включите музыку.** В «Настройках» на вкладке «Основные» выберите приложение, из которого идет музыка, или «Весь звук системы». Остров выйдет из выреза, как только заиграет звук.
 
 Если сборка не удалась, в выводе будет строка «ОШИБКА:» с подсказкой, а весь вывод сохранится в `dist/build-local.log`.
 
@@ -154,6 +183,6 @@ bash scripts/cpu-probe.sh --preset max dist/WaveFeels.app
 
 Ключи `--preset user`, `--island expanded`, `--style spectrum`, `--set wf.ключ=значение` и `--sample` описаны в `bash scripts/cpu-probe.sh --help`. Итог пишется в `ci-out/`.
 
-Разрешение на звук привязано к подписи, поэтому все сборки подписываются одним сертификатом. Его нельзя терять и менять: с новым macOS снова спросит доступ к звуку. Храните копию `wavefeels-signing.p12` и пароль вне репозитория. Для CI сертификат кладется в секреты `SIGNING_P12_BASE64` и `SIGNING_P12_PASSWORD`, ожидаемый хэш лежит в `signing/expected-leaf.txt`, `scripts/sign.sh` сверяет его после подписи.
+Разрешение на звук привязано к подписи, поэтому все сборки подписываются одним сертификатом. Его нельзя терять и менять: с новым macOS снова спросит доступ к звуку. Храните копию `wavefeels-signing.p12` и пароль вне репозитория. Для CI сертификат кладется в секреты `SIGNING_P12_BASE64` и `SIGNING_P12_PASSWORD`, ожидаемый хэш лежит в `signing/expected-leaf.txt`, `scripts/sign.sh` сверяет его после подписи. Для своего ключа, созданного по шагу 3, хэш берется из `expected-leaf.txt` рядом с ключом в Application Support.
 
 </details>

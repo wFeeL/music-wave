@@ -314,11 +314,7 @@ fi
 # --- ключ подписи ---
 
 STEP="ключ подписи"
-EXPECTED_LEAF=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")
-if [[ -z "$EXPECTED_LEAF" && -f signing/expected-leaf.txt ]]; then
-    EXPECTED_LEAF=$(normalize_hash "$(cat signing/expected-leaf.txt)")
-fi
-if [[ -z "$EXPECTED_LEAF" ]]; then
+if ! EXPECTED_LEAF=$(signing_expected_leaf); then
     fail "Нет файла signing/expected-leaf.txt, без него подпись не проверить. Скачайте код заново целиком."
 fi
 
@@ -361,7 +357,7 @@ elif OLD_COPY=$(find_downloads_signing_dir "$EXPECTED_LEAF"); then
     say "Нашел старую копию с ключом подписи: «$OLD_COPY»"
     import_checked_key "$OLD_COPY"
 else
-    fail "Не нашел ключ подписи. Запустите: bash scripts/build-local.sh --signing-dir <папка со старой копией>/signing --install"
+    fail "Не нашел ключ подписи. Если WaveFeels на этом маке еще не ставили, создайте ключ командами из README (раздел «Быстрый запуск», шаг 3). Если ключ лежит в старой копии: bash scripts/build-local.sh --signing-dir <папка со старой копией>/signing --install"
 fi
 
 # --- версия ---

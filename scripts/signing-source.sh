@@ -94,6 +94,21 @@ normalize_hash() {
     printf '%s' "$1" | tr -d ' \t\r\n:' | tr '[:upper:]' '[:lower:]' | sed -E 's/^h"(.*)"$/\1/'
 }
 
+# Ожидаемый хэш листа, нормализованный. Порядок: $SIGNING_EXPECTED_LEAF, expected-leaf.txt
+# рядом с ключом в Application Support (свой ключ, созданный по README), expected-leaf.txt
+# в signing/ репозитория (ключ владельца). Код 1, если хэша нет нигде.
+signing_expected_leaf() {
+    local file hash
+    hash=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")
+    for file in "$(signing_app_support_dir)/expected-leaf.txt" "$(signing_repo_dir)/expected-leaf.txt"; do
+        if [[ -z "$hash" && -f "$file" ]]; then
+            hash=$(normalize_hash "$(cat "$file")")
+        fi
+    done
+    [[ -n "$hash" ]] || return 1
+    printf '%s\n' "$hash"
+}
+
 # SHA-1 листового сертификата из p12 в каталоге $1 (40 символов, строчные). Код 1, если
 # openssl не смог прочитать файл: нет openssl, другой формат шифрования, неверный пароль.
 # Сначала без -legacy (LibreSSL в macOS), потом с ним (OpenSSL 3 и старые p12).

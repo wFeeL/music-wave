@@ -12,7 +12,8 @@
 # Шаг доверия (add-trusted-cert) не используется: codesign подписывает по SHA-1,
 # designated requirement задается явно.
 # Хэш листового сертификата в designated requirement сверяется с ожидаемым: значение из
-# переменной SIGNING_EXPECTED_LEAF, если она задана, иначе из signing/expected-leaf.txt.
+# переменной SIGNING_EXPECTED_LEAF, если она задана, иначе из expected-leaf.txt рядом с ключом
+# в Application Support, иначе из signing/expected-leaf.txt (signing_expected_leaf).
 # Не совпал (в секреты попал другой сертификат) или ожидаемого нет: код 1, иначе macOS
 # сочтет сборку другим приложением и снова спросит доступ к звуку.
 # Вывод идет в stdout/stderr; ci-mac.sh сохраняет его в ci-out/sign.txt.
@@ -134,12 +135,8 @@ if [[ -z "$SHA" ]]; then
 fi
 echo "signing identity: $CERT_NAME ($SHA)"
 
-EXPECTED_LEAF=$(normalize_hash "${SIGNING_EXPECTED_LEAF:-}")
-if [[ -z "$EXPECTED_LEAF" && -f signing/expected-leaf.txt ]]; then
-    EXPECTED_LEAF=$(normalize_hash "$(cat signing/expected-leaf.txt)")
-fi
-if [[ -z "$EXPECTED_LEAF" ]]; then
-    echo "error: no expected leaf hash (SIGNING_EXPECTED_LEAF or signing/expected-leaf.txt)" >&2
+if ! EXPECTED_LEAF=$(signing_expected_leaf); then
+    echo "error: no expected leaf hash (SIGNING_EXPECTED_LEAF or expected-leaf.txt)" >&2
     exit 1
 fi
 
@@ -159,6 +156,6 @@ echo "leaf hash: ${LEAF:-none}, expected: $EXPECTED_LEAF"
 if [[ "$LEAF" != "$EXPECTED_LEAF" ]]; then
     echo "error: designated requirement leaf hash ${LEAF:-none} differs from expected $EXPECTED_LEAF" >&2
     echo "error: a different certificate would reset the audio capture permission;" >&2
-    echo "error: if the change is intended, update signing/expected-leaf.txt or SIGNING_EXPECTED_LEAF" >&2
+    echo "error: if the change is intended, update expected-leaf.txt or SIGNING_EXPECTED_LEAF" >&2
     exit 1
 fi
