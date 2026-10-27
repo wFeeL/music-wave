@@ -155,6 +155,91 @@ struct AppModelRenderTests {
         #expect(off.middle.frame.bands.allSatisfy { $0 == 0 })
     }
 
+    /// «Длительность вспышки» меняет только показанное свечение. Запись ритма и «вздох» идут от
+    /// свечения со спадом 1× (второе состояние `steadyGlowState`): две модели с длительностью 1 и 2 на
+    /// одном расписании дают кадр в кадр один и тот же вход записи (`RhythmRecording.previousGlow`) и
+    /// один «вздох», а показанное свечение с длительностью 2 после пика гаснет медленнее. Вес показа
+    /// 0.5: «вздох» смешивает пружину и свечение и зависит от свечения.
+    @Test func flashLengthChangesOnlyTheShownGlow() throws {
+        let (short, shortDefaults, shortSuite) = try Self.makeModel("render-flash-length-1")
+        defer { shortDefaults.removePersistentDomain(forName: shortSuite) }
+        let (long, longDefaults, longSuite) = try Self.makeModel("render-flash-length-2")
+        defer { longDefaults.removePersistentDomain(forName: longSuite) }
+        short.settings.flashLength = 1
+        long.settings.flashLength = 2
+        #expect(long.settings.flashLength == 2)
+        let t = 5_000.0
+        for model in [short, long] {
+            model.lowPower = false
+            model.store.publish(Self.frame(bass: 0.2), at: t)
+            let time = t + 0.1 + model.presentationTiming.lead + BeatGlow.lead
+            let beat = GlowEvent(id: 1, time: time, amplitude: 1, predicted: true)
+            model.store.publishSchedule(
+                BeatSchedule(events: [beat], bpm: 120, period: 0.5, confidence: 0.9, locked: true, weight: 0.5)
+            )
+        }
+        var peak: Float = 0
+        var slowerAfterPeak = false
+        for step in 0..<60 {
+            let now = t + Double(step) / 60
+            let one = short.islandVisuals(now: now, timelineTime: now, reduceMotion: false)
+            let two = long.islandVisuals(now: now, timelineTime: now, reduceMotion: false)
+            #expect(short.rhythmRecording.previousGlow == one.glow, "step \(step)")
+            #expect(long.rhythmRecording.previousGlow == one.glow, "step \(step)")
+            #expect(two.pulse == one.pulse, "step \(step)")
+            #expect(two.glow >= one.glow, "step \(step)")
+            peak = max(peak, one.glow)
+            if peak > 0.9, two.glow > one.glow + 0.05 { slowerAfterPeak = true }
+        }
+        #expect(peak > 0.9)
+        #expect(slowerAfterPeak)
+    }
+
+    /// «Спектр» в тишине: линия и призрак приходят ровно в 0, а детектор простоя доходит до простоя
+    /// не позже чем через 2.5 с после того, как звук стих, с «Следом пиков» и без него, с «Мягкой
+    /// остановкой» и без нее. Расчет той же цепочки в WaveCore (`SoftStop`, `ShownSpectrum`,
+    /// `RenderIdleDetector`, 60 кадров): с мягкой остановкой и следом простой через 1.83 с, без нее
+    /// через 1.18 с; призрак ровно в нуле через 2.12 и 1.45 с.
+    @Test func spectrumReachesRenderIdleInSilence() throws {
+        for softStop in [true, false] {
+            for peaks in [true, false] {
+                let label = "soft stop \(softStop), peaks \(peaks)"
+                let (model, defaults, suite) = try Self.makeModel("render-spectrum-idle-\(softStop)-\(peaks)")
+                defer { defaults.removePersistentDomain(forName: suite) }
+                model.lowPower = false
+                model.settings.look = .spectrum
+                model.settings.spectrumPeaks = peaks
+                model.settings.softStop = softStop
+                let t = 6_000.0
+                let lead = model.presentationTiming.lead
+                model.store.publish(Self.frame(bass: 0.8), at: t)
+                model.store.publish(Self.frame(bass: 0.8), at: t + 0.5 + lead)
+                model.store.publish(.silent, at: t + 0.5 + lead + 1.0 / 60)
+                // Звук на экране стихает около `t + 0.5`.
+                let silence = t + 0.5
+                var idleAt: Double?
+                var last: IslandVisuals?
+                for step in 0...(60 * 4) {
+                    let now = t + Double(step) / 60
+                    let visuals = model.islandVisuals(now: now, timelineTime: now, reduceMotion: false)
+                    if step == 25 {
+                        #expect((visuals.spectrum?.values.max() ?? 0) > 0.5, "\(label)")
+                        #expect(!model.renderIdleDetector.isIdle, "\(label)")
+                    }
+                    if idleAt == nil, model.renderIdleDetector.isIdle { idleAt = now }
+                    last = visuals
+                }
+                let idle = try #require(idleAt, "\(label)")
+                #expect(idle - silence >= RenderIdleDetector.settle, "\(label), idle after \(idle - silence) s")
+                #expect(idle - silence <= 2.5, "\(label), idle after \(idle - silence) s")
+                #expect(model.renderIdleDetector.isIdle, "\(label)")
+                let spectrum = try #require(last?.spectrum, "\(label)")
+                #expect(spectrum.values.allSatisfy { $0 == 0 }, "\(label)")
+                #expect(spectrum.peaks.allSatisfy { $0 == 0 }, "\(label)")
+            }
+        }
+    }
+
     /// Пауза по Now Playing считается для мягкой остановки только у источника-приложения; полоса
     /// панели гаснет по `nowPlayingPaused` у любого источника. Текущая запись Now Playing из
     /// `nowPlayingStub`, последний трек источника из `showPreview`.

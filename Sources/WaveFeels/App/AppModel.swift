@@ -262,8 +262,8 @@ final class AppModel {
     /// Замер отрисовки для раздела «Отрисовка».
     @ObservationIgnored private var renderPacing = RenderPacing()
     /// Простой отрисовки по входам кадров `islandVisuals`; `renderIdle` берет его последний
-    /// результат.
-    @ObservationIgnored private var renderIdleDetector = RenderIdleDetector()
+    /// результат. Читается тестами.
+    @ObservationIgnored private(set) var renderIdleDetector = RenderIdleDetector()
     /// Задача выхода из простоя (`feedRenderIdle`) уже поставлена.
     @ObservationIgnored private var renderIdleExitPending = false
     /// Когда строки «Отрисовки» последний раз ушли в лог; `nil`, пока писать нечего

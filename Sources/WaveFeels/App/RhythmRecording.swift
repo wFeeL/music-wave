@@ -43,8 +43,8 @@ final class RhythmRecording {
     private let pipeline: AudioPipeline
     @ObservationIgnored private var session: RhythmSession?
     /// Свечение прошлого кадра: рост считается и без записи, чтобы первый кадр записи не дал
-    /// ложной вспышки.
-    @ObservationIgnored private var previousGlow: Float = 0
+    /// ложной вспышки. Читается тестами: это вход записи с последнего кадра острова.
+    @ObservationIgnored private(set) var previousGlow: Float = 0
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Запись файлов: `cancel()` ее не прерывает, но после нее ни Finder, ни «Сохранено».
     @ObservationIgnored private var saveTask: Task<Void, Never>?
