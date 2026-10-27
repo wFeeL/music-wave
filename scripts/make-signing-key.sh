@@ -12,6 +12,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/signing-source.sh
 source scripts/signing-source.sh
+# shellcheck source=scripts/term-style.sh
+source scripts/term-style.sh
+ui_init
 
 CN="WaveFeels Self-Signed"
 
@@ -22,26 +25,31 @@ case "${1:-}" in
         ;;
     "") ;;
     *)
-        echo "Неизвестный ключ: $1. Справка: bash scripts/make-signing-key.sh --help" >&2
+        ui_error "Неизвестный ключ: $1. Справка: bash scripts/make-signing-key.sh --help" >&2
         exit 2
         ;;
 esac
 
 DEST=$(signing_app_support_dir)
+ui_header "WaveFeels: ключ подписи"
 
 if EXISTING=$(find_signing_dir 2> /dev/null); then
-    echo "Ключ подписи уже есть: «$EXISTING». Новый не нужен, запускайте сборку:"
-    echo "  bash scripts/build-local.sh --install"
+    ui_ok "Ключ подписи уже есть, новый не нужен."
+    ui_info "$EXISTING"
+    echo
+    ui_sub "Запускайте сборку: ${C_BOLD}bash scripts/build-local.sh --install${C_RESET}"
     exit 0
 fi
 if [[ -e "$DEST/$SIGNING_P12_NAME" || -e "$DEST/$SIGNING_PASSWORD_NAME" ]]; then
-    echo "В «$DEST» лежит только часть ключа. Проверьте папку: если ключ потерян, уберите ее и запустите скрипт снова." >&2
+    ui_error "В «$DEST» лежит только часть ключа. Проверьте папку: если ключ потерян, уберите ее и запустите скрипт снова." >&2
     exit 1
 fi
 for old in "$HOME"/Downloads/music-wave-develop*/signing; do
     if signing_dir_has_pair "$old"; then
-        echo "В «$old» лежит старый ключ подписи. Новый создавать не нужно, укажите эту папку при сборке:" >&2
-        echo "  bash scripts/build-local.sh --signing-dir \"$old\" --install" >&2
+        {
+            ui_warn "В «$old» лежит старый ключ подписи. Новый создавать не нужно, укажите эту папку при сборке:"
+            ui_info "bash scripts/build-local.sh --signing-dir \"$old\" --install"
+        } >&2
         exit 1
     fi
 done
@@ -53,7 +61,7 @@ if [[ -x /usr/bin/openssl ]]; then
     OPENSSL=/usr/bin/openssl
 fi
 if ! command -v "$OPENSSL" > /dev/null 2>&1; then
-    echo "Нет команды openssl, ключ не создать." >&2
+    ui_error "Нет команды openssl, ключ не создать." >&2
     exit 1
 fi
 
@@ -77,20 +85,21 @@ extendedKeyUsage = critical,codeSigning
 subjectKeyIdentifier = hash
 EOF
 
-echo "Создаю ключ подписи…"
+ui_sub "Создаю сертификат «$CN»"
 "$OPENSSL" req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 -config "$WORK/cert.cnf" \
     -keyout "$WORK/key.pem" -out "$WORK/cert.pem" 2> "$WORK/openssl.log" ||
-    { cat "$WORK/openssl.log" >&2; echo "Не удалось создать сертификат." >&2; exit 1; }
+    { cat "$WORK/openssl.log" >&2; ui_error "Не удалось создать сертификат." >&2; exit 1; }
 "$OPENSSL" rand -hex 24 > "$WORK/$SIGNING_PASSWORD_NAME"
 "$OPENSSL" pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -name "$CN" \
     -passout "file:$WORK/$SIGNING_PASSWORD_NAME" -out "$WORK/$SIGNING_P12_NAME" 2> "$WORK/openssl.log" ||
-    { cat "$WORK/openssl.log" >&2; echo "Не удалось упаковать ключ в p12." >&2; exit 1; }
+    { cat "$WORK/openssl.log" >&2; ui_error "Не удалось упаковать ключ в p12." >&2; exit 1; }
 LEAF=$("$OPENSSL" x509 -in "$WORK/cert.pem" -noout -fingerprint -sha1)
 LEAF=$(normalize_hash "${LEAF#*=}")
 
+ui_ok "Сертификат создан"
 # p12 должен читаться тем же путем, что и при сборке, и давать тот же хэш.
 if ! CHECK=$(signing_leaf_hash "$WORK") || [[ "$CHECK" != "$LEAF" ]]; then
-    echo "Созданный ключ не прошел проверку, в «$DEST» ничего не записано." >&2
+    ui_error "Созданный ключ не прошел проверку, в «$DEST» ничего не записано." >&2
     exit 1
 fi
 
@@ -102,6 +111,13 @@ for name in "$SIGNING_PASSWORD_NAME" expected-leaf.txt "$SIGNING_P12_NAME"; do
     chmod 600 "$DEST/$name"
 done
 
-echo "Ключ создан: «$DEST»."
-echo "Сохраните копию этой папки: с новым ключом macOS снова спросит доступ к звуку."
-echo "Дальше: bash scripts/build-local.sh --install"
+ui_ok "Ключ проверен и сохранен"
+
+echo
+ui_rule
+printf '  %s✓ Готово:%s ключ подписи создан\n' "$C_GREEN$C_BOLD" "$C_RESET"
+echo
+ui_sub "Папка: $DEST"
+ui_sub "Сохраните копию этой папки: с новым ключом macOS снова спросит доступ к звуку."
+ui_sub "Дальше: ${C_BOLD}bash scripts/build-local.sh --install${C_RESET}"
+ui_rule
