@@ -572,8 +572,6 @@ struct RhythmLogTests {
         )
     }
 
-    /// Средний вес показа за `[0, end]` по времени, до первого расписания 0; без веса хотя бы у одного
-    /// расписания (журнал до B5) среднего нет.
     /// Гонка фаз в линии времени: секунды гонки до `end` и сколько раз она начиналась, медиана отношения
     /// гребенки. У журнала схемы 1 (нет `amplitudes`) гонка не записана, а не «ноль секунд».
     @Test func timelineRaceFromSchedules() throws {
@@ -603,6 +601,8 @@ struct RhythmLogTests {
         #expect(replay.raceSeconds == 0.5 && replay.raceStarts == 1 && replay.medianCombRatio == 1.3)
     }
 
+    /// Средний вес показа за `[0, end]` по времени, до первого расписания 0; без веса хотя бы у одного
+    /// расписания (журнал до B5) среднего нет.
     @Test func timelineMeanWeight() {
         let schedules = [
             RhythmLog.Schedule(time: 2, bpm: 120, confidence: 0.5, locked: false, beats: [], weight: 0.5),
