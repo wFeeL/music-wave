@@ -1074,9 +1074,9 @@ struct BeatTrackerTests {
     }
 
     /// Пауза в том же треке (`reset(keepTempo: true)`): период, половина уверенности и захват в счете
-    /// попаданий остаются, фазу гребенка находит заново по прежнему периоду, как только в истории две
-    /// доли, и через 1,5 с после возобновления доли снова вспыхивают на новых местах. Полный сброс
-    /// (`false`) до первой оценки темпа (2 с истории) долей не показывает.
+    /// попаданий остаются, фазу гребенка находит заново по прежнему периоду, как только в истории три
+    /// доли (`resumeHistoryBeats`), и через 1,9 с после возобновления доли снова вспыхивают на новых
+    /// местах. Полный сброс (`false`) до первой оценки темпа (2 с истории) долей не показывает.
     @Test(arguments: [true, false])
     func resetKeepingTempoResumesFast(keepTempo: Bool) throws {
         var tracker = BeatTracker(framesPerSecond: Self.fps)
@@ -1098,12 +1098,12 @@ struct BeatTrackerTests {
         // Новый поток с нуля, доли не там, где были до паузы: 0.37 против 0.25 по кругу периода.
         var resumed = SyntheticBeats(bpm: 120)
         resumed.nextBeatTime = 0.37
-        // Меньше двух долей истории: фазы еще нет, и вес показа без сетки не растет (иначе онсеты бочки
+        // Меньше трех долей истории: фазы еще нет, и вес показа без сетки не растет (иначе онсеты бочки
         // приглушались бы как при сетке, которой нет).
-        resumed.feed(&tracker, until: 0.9)
+        resumed.feed(&tracker, until: 1.4)
         #expect(tracker.nextBeat == nil && tracker.displayWeight == 0)
-        resumed.feed(&tracker, until: 1.5)
-        let flashes = tracker.schedule.events.filter { $0.predicted && $0.time > 1.5 && $0.amplitude > OfflineBeatChain.eventRise }
+        resumed.feed(&tracker, until: 1.9)
+        let flashes = tracker.schedule.events.filter { $0.predicted && $0.time > 1.9 && $0.amplitude > OfflineBeatChain.eventRise }
         if keepTempo {
             #expect(!flashes.isEmpty, "events \(tracker.schedule.events)")
             for flash in flashes {
@@ -1160,6 +1160,42 @@ struct BeatTrackerTests {
         }
     }
 
+    /// Возобновление под нарастание громкости (плеер поднимает звук после паузы): две первые доли тише хэта
+    /// на «и», онсеты только на долях. Гребенка на двух долях истории ставила сетку на «и» (тусклое
+    /// свечение 0.16 мимо долей), промахи на «и» роняли уверенность, и первая вспышка на доле приходила
+    /// только на 3.9 с. На трех долях (`resumeHistoryBeats`) гребенка уже за долю: свечения мимо долей нет,
+    /// первая вспышка до 2.5 с.
+    @Test func resumedPhaseWaitsForThreeBeats() throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var hops = SyntheticBeats(bpm: 120)
+        hops.feed(&tracker, until: 10)
+        try #require(tracker.locked)
+        tracker.reset(keepTempo: true)
+
+        var resumed = SyntheticBeats(bpm: 120)
+        resumed.nextBeatTime = 0.37
+        resumed.beatODF = [10, 10] + [Float](repeating: 80, count: 30)
+        resumed.offbeatODF = 40
+        resumed.nextOffbeatTime = 0.62
+        var flashes: [GlowEvent] = []
+        var offBeat: [GlowEvent] = []
+        resumed.feed(&tracker, until: 5) { tracker in
+            for event in tracker.schedule.events where event.predicted && event.time <= tracker.now {
+                let onBeat = abs(BeatTracker.circularDifference(event.time - 0.37, period: 0.5)) < 0.03
+                if !onBeat, event.amplitude > 0.05, !offBeat.contains(where: { $0.id == event.id }) { offBeat.append(event) }
+                if event.amplitude > OfflineBeatChain.eventRise, !flashes.contains(where: { $0.id == event.id }) {
+                    flashes.append(event)
+                }
+            }
+        }
+        #expect(offBeat.isEmpty, "glow off the beat \(offBeat)")
+        #expect(!flashes.isEmpty)
+        #expect(flashes.first.map { $0.time < 2.5 } == true, "first flash \(String(describing: flashes.first))")
+        for flash in flashes {
+            #expect(abs(BeatTracker.circularDifference(flash.time - 0.37, period: 0.5)) < 0.03, "flash at \(flash.time)")
+        }
+    }
+
     /// Память темпа не копится: второй сброс с памятью без шагов между ними уверенность снова не делит,
     /// полный сброс память стирает, и сброс с памятью после него сохранять нечего.
     @Test func keptTempoHalvesOnceAndFullResetForgetsIt() throws {
@@ -1195,9 +1231,9 @@ struct BeatTrackerTests {
         resumed.feed(&tracker, until: 6) { tracker in
             if lockedAt == nil, tracker.locked { lockedAt = tracker.now }
         }
-        // Сетка с 1 с потока, пять попаданий подряд с доли 1.37: захват на закрытии окна пятой доли
-        // (3.37 + 0.075 с, замер 3.445 с), не раньше и не на долю позже.
-        #expect(lockedAt.map { $0 >= 3.3 && $0 < 3.6 } == true, "locked at \(String(describing: lockedAt))")
+        // Сетка с 1.5 с потока (три доли истории, `resumeHistoryBeats`), пять попаданий подряд с доли 1.87:
+        // захват на закрытии окна пятой доли (3.87 + 0.075 с), не раньше и не на долю позже.
+        #expect(lockedAt.map { $0 >= 3.8 && $0 < 4.1 } == true, "locked at \(String(describing: lockedAt))")
     }
 
     /// Вес показа в трекере: 0, пока уверенность не выше `weightLow`, и доходит до 1 не позже чем за
