@@ -142,6 +142,15 @@ public enum OwnerEvaluation {
         /// Первый захват, секунды от начала; `nil` без захвата.
         public var firstLock: Double?
         public var resume: BeatEvaluation.ResumeScore?
+        /// Мягкий пульс прогона (`OfflineBeatChain.Result`): кадров рендера всего и с пульсом от
+        /// `RhythmLog.ambientVisible`, то же под расписанием без захвата, вершин пульса и сколько из них в
+        /// пределах окна от онсета анализа (широкополосного или бочки).
+        public var pulseFrames = 0
+        public var pulseVisible = 0
+        public var unlockedFrames = 0
+        public var unlockedPulseVisible = 0
+        public var pulsePeaks = 0
+        public var pulsePeaksNearOnset = 0
 
         public init(name: String, group: String, gridBPM: Double?, end: Double) {
             self.name = name
@@ -154,6 +163,12 @@ public enum OwnerEvaluation {
         public var precision: Double? { flashes > 0 ? Double(on) / Double(flashes) : nil }
         public var lockedPrecision: Double? { lockedFlashes > 0 ? Double(lockedOn) / Double(lockedFlashes) : nil }
         public var lockedShare: Double { end > 0 ? lockedSeconds / end : 0 }
+        /// Доля кадров с видимым пульсом, всех и без захвата, и доля вершин пульса у онсетов.
+        public var pulseShare: Double? { pulseFrames > 0 ? Double(pulseVisible) / Double(pulseFrames) : nil }
+        public var unlockedPulseShare: Double? {
+            unlockedFrames > 0 ? Double(unlockedPulseVisible) / Double(unlockedFrames) : nil
+        }
+        public var pulsePeaksOnOnsets: Double? { pulsePeaks > 0 ? Double(pulsePeaksNearOnset) / Double(pulsePeaks) : nil }
     }
 
     /// Звук записи `count` раз подряд (петля, `--loop`).
@@ -206,6 +221,13 @@ public enum OwnerEvaluation {
         if !result.resets.isEmpty {
             score.resume = BeatEvaluation.resume(result: result, annotations: grid, duration: audioSeconds, window: window)
         }
+        score.pulseFrames = result.renderedFrames
+        score.pulseVisible = result.ambientFrames
+        score.unlockedFrames = result.unlockedFrames
+        score.unlockedPulseVisible = result.ambientUnlockedFrames
+        let onsets = (result.onsets + result.kickOnsets).sorted()
+        score.pulsePeaks = result.ambientPeaks.count
+        score.pulsePeaksNearOnset = result.ambientPeaks.filter { BeatMetrics.nearestDistance(to: $0, in: onsets) <= window }.count
         return score
     }
 
@@ -223,6 +245,12 @@ public enum OwnerEvaluation {
             sum.darkSeconds += score.darkSeconds
             sum.longestDark = max(sum.longestDark, score.longestDark)
             sum.lockedSeconds += score.lockedSeconds
+            sum.pulseFrames += score.pulseFrames
+            sum.pulseVisible += score.pulseVisible
+            sum.unlockedFrames += score.unlockedFrames
+            sum.unlockedPulseVisible += score.unlockedPulseVisible
+            sum.pulsePeaks += score.pulsePeaks
+            sum.pulsePeaksNearOnset += score.pulsePeaksNearOnset
             if let resume = score.resume {
                 var merged = sum.resume ?? BeatEvaluation.ResumeScore()
                 merged.add(resume)
@@ -250,12 +278,16 @@ public enum OwnerEvaluation {
         "owner: each rhythm log replayed cold with its own output latency, sync offset and render rate (as --replay); flashes up to the audible end of the audio, not merged",
         "on / half / other: flash within the window of a grid beat / of a midpoint between two grid beats (the and-beat) / elsewhere; prec = on / flashes; L = flashes under a locked schedule",
         "dark s = total of gaps longer than 1.5 s without a flash (start and end included), longest = the longest one; locked = share of time with a published lock",
+        "pulse / pulse U = share of render frames (all / under an unlocked schedule) with the soft pulse at or above RhythmLog.ambientVisible; pk@on = share of soft pulse peaks within the window of an analysis onset (broadband or kick)",
     ]
 
     /// Таблица: записи, пустая строка, итоги.
     public static func table(recordings: [Score], totals: [Score]) -> String {
         let width = max(24, (recordings + totals).map(\.name.count).max() ?? 0)
-        let heads = ["group", "BPM", "flashes", "on", "half", "other", "prec", "L fl", "L on", "L half", "L prec", "dark s", "longest", "locked", "lock s"]
+        let heads = [
+            "group", "BPM", "flashes", "on", "half", "other", "prec", "L fl", "L on", "L half", "L prec", "dark s", "longest", "locked", "lock s",
+            "pulse", "pulse U", "pk@on",
+        ]
         func cells(_ score: Score, total: Bool) -> [String] {
             func fraction(_ value: Double?) -> String { value.map { String(format: "%.3f", $0) } ?? "-" }
             return [
@@ -264,6 +296,7 @@ public enum OwnerEvaluation {
                 String(score.lockedOn), String(score.lockedHalf), fraction(score.lockedPrecision),
                 String(format: "%.1f", score.darkSeconds), String(format: "%.1f", score.longestDark), String(format: "%.2f", score.lockedShare),
                 total ? "" : score.firstLock.map { String(format: "%.1f", $0) } ?? "never",
+                fraction(score.pulseShare), fraction(score.unlockedPulseShare), fraction(score.pulsePeaksOnOnsets),
             ]
         }
         func line(_ name: String, _ values: [String]) -> String {

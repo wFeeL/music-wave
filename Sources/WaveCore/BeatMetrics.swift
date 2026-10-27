@@ -198,6 +198,11 @@ public enum BeatMetrics {
         return sorted[min(max(rank, 1), sorted.count) - 1]
     }
 
+    /// Расстояние от `time` до ближайшего момента отсортированного списка; бесконечность для пустого.
+    public static func nearestDistance(to time: Double, in sorted: [Double]) -> Double {
+        nearestIndex(of: time, in: sorted).map { abs(sorted[$0] - time) } ?? .infinity
+    }
+
     // MARK: Внутреннее
 
     /// Наибольшее число пар в окне для отсортированных списков: жадный проход слева направо оптимален,

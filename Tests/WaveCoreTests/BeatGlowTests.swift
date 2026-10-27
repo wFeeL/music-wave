@@ -320,6 +320,16 @@ struct BeatGlowTests {
         #expect(plain.peakAmbient == 0 && plain.ambientFrames == 0)
         #expect(pulsed.peakAmbient > 0.05 && pulsed.peakAmbient <= BeatGlow.ambientCeiling)
         #expect(pulsed.ambientFrames > 0 && pulsed.ambientFrames < pulsed.renderedFrames)
+        // Счет без захвата и вершины пульса: кадры без захвата часть всех, вершины видимы и лежат у онсетов
+        // анализа (онсеты на слышимой оси, как у бочки).
+        #expect(pulsed.unlockedFrames > 0 && pulsed.unlockedFrames < pulsed.renderedFrames)
+        #expect(pulsed.ambientUnlockedFrames <= min(pulsed.ambientFrames, pulsed.unlockedFrames))
+        #expect(plain.unlockedFrames == 0 && plain.ambientPeaks.isEmpty)
+        #expect(pulsed.onsets.count > 20 && pulsed.onsets == plain.onsets)
+        #expect(pulsed.ambientPeaks.count > 10)
+        let onsets = (pulsed.onsets + pulsed.kickOnsets).sorted()
+        let near = pulsed.ambientPeaks.filter { BeatMetrics.nearestDistance(to: $0, in: onsets) <= 0.07 }
+        #expect(Double(near.count) >= 0.8 * Double(pulsed.ambientPeaks.count), "peaks \(pulsed.ambientPeaks.count) near \(near.count)")
         // Расписание с пульсом и то же без него светятся одинаково.
         let schedule = BeatSchedule(
             events: [GlowEvent(id: 1, time: 10, amplitude: 0.7, predicted: true)], bpm: 120, period: 0.5, confidence: 1,

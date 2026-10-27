@@ -441,6 +441,40 @@ struct BeatEvaluationTests {
         #expect(table.contains("half") && table.contains("TOTAL") && table.contains("0.600"))
     }
 
+    /// Мягкий пульс записи: доля кадров с пульсом, всех и без захвата, и доля вершин пульса у онсетов
+    /// анализа (широкополосных и бочки) в пределах окна; итоги складывают счетчики, а не доли.
+    @Test func ownerSoftPulseShares() throws {
+        var result = Self.result(flashes: [], latency: 0.1)
+        result.renderedFrames = 100
+        result.ambientFrames = 30
+        result.unlockedFrames = 40
+        result.ambientUnlockedFrames = 20
+        result.onsets = [1.0, 2.0]
+        result.kickOnsets = [3.0]
+        // У онсета 1.05 и 2.95 (бочка), мимо 2.2 и 4.0.
+        result.ambientPeaks = [1.05, 2.2, 2.95, 4.0]
+        let grid = (2..<20).map { Double($0) * 0.5 }
+        let score = OwnerEvaluation.score(
+            result: result, grid: grid, audioSeconds: 10, syncOffset: 0, window: 0.07, name: "r", group: "a"
+        )
+        #expect(score.pulseShare == 0.3 && score.unlockedPulseShare == 0.5 && score.pulsePeaksOnOnsets == 0.5)
+        var other = score
+        other.pulseFrames = 300
+        other.pulseVisible = 0
+        other.unlockedFrames = 0
+        other.unlockedPulseVisible = 0
+        other.pulsePeaks = 0
+        other.pulsePeaksNearOnset = 0
+        let total = OwnerEvaluation.total(name: "t", scores: [score, other])
+        #expect(total.pulseShare == 0.075 && total.unlockedPulseShare == 0.5 && total.pulsePeaksOnOnsets == 0.5)
+        let empty = OwnerEvaluation.score(
+            result: Self.result(flashes: []), grid: grid, audioSeconds: 10, syncOffset: 0, window: 0.07, name: "e", group: "a"
+        )
+        #expect(empty.pulseShare == nil && empty.unlockedPulseShare == nil && empty.pulsePeaksOnOnsets == nil)
+        let table = OwnerEvaluation.table(recordings: [score], totals: [total])
+        #expect(table.contains("pulse U") && table.contains("pk@on") && table.contains("0.075"))
+    }
+
     /// Петля записи: звук подряд, сетка каждого повтора со сдвигом на длину звука.
     @Test func ownerLoopRepeatsAudioAndGrid() {
         #expect(OwnerEvaluation.looped([1, 2, 3], count: 3) == [1, 2, 3, 1, 2, 3, 1, 2, 3])

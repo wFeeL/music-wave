@@ -156,6 +156,8 @@ public struct OfflineBeatChain: Sendable {
         /// Онсеты бочки, найденные анализом, слышимые секунды от первого сэмпла (момент в файле плюс
         /// `outputLatency`).
         public var kickOnsets: [Double]
+        /// Широкополосные онсеты анализа, слышимые секунды от первого сэмпла (как `kickOnsets`).
+        public var onsets: [Double] = []
         /// Предсказанные доли, как их видел рендер до начала вспышки (в последнем расписании,
         /// опубликованном раньше `time − BeatGlow.lead`), без квантования кадрами; слышимые секунды
         /// от первого сэмпла, по возрастанию.
@@ -169,6 +171,13 @@ public struct OfflineBeatChain: Sendable {
         public var peakAmbient: Float = 0
         public var ambientFrames = 0
         public var renderedFrames = 0
+        /// С `softPulse`: кадров рендера под расписанием без захвата и сколько из них с пульсом от
+        /// `RhythmLog.ambientVisible`.
+        public var unlockedFrames = 0
+        public var ambientUnlockedFrames = 0
+        /// С `softPulse`: моменты показа кадров, на которых пульс от `RhythmLog.ambientVisible` и выше
+        /// соседних (вершины пульса), слышимые секунды от первого сэмпла.
+        public var ambientPeaks: [Double] = []
         /// Мягкий пульс на каждом кадре рендера (`Config.softPulse` и `recordAmbientTrace`), иначе пусто.
         public var ambientTrace: [AmbientPoint] = []
         /// Принудительные сбросы по времени (`Config.resetInterval`), иначе пусто.
@@ -218,6 +227,7 @@ public struct OfflineBeatChain: Sendable {
         var publications: [(time: Double, schedule: BeatSchedule)] = []
         var states: [State] = []
         var kickOnsets: [Double] = []
+        var onsets: [Double] = []
         /// Время хоста каждой предсказанной доли в последнем расписании, опубликованном до начала ее
         /// вспышки (`time - BeatGlow.lead`), по id.
         var predicted: [UInt64: Double] = [:]
@@ -302,6 +312,9 @@ public struct OfflineBeatChain: Sendable {
                     if let kick = hop.kickOnset {
                         analysis.kickOnsets.append(kick.time + config.outputLatency)
                     }
+                    if let onset = hop.broadbandOnset {
+                        analysis.onsets.append(onset.time + config.outputLatency)
+                    }
                     tracker.process(hop)
                     if let resetInterval, hop.endTime >= nextReset {
                         analysis.resets.append(Reset(time: hop.endTime, locked: tracker.locked))
@@ -348,6 +361,12 @@ public struct OfflineBeatChain: Sendable {
         var flashes: [Flash] = []
         var peakAmbient: Float = 0
         var ambientFrames = 0
+        var unlockedFrames = 0
+        var ambientUnlockedFrames = 0
+        var ambientPeaks: [Double] = []
+        // Пульс двух прошлых кадров для вершин.
+        var ambientBefore: (value: Float, time: Double)?
+        var ambientLast: (value: Float, time: Double)?
         var ambientTrace: [AmbientPoint] = []
         // Кадры энергии, как их видит рендер приложения: опубликованные до `tEval`, на слышимой оси.
         let energyStore = FrameStore()
@@ -383,7 +402,18 @@ public struct OfflineBeatChain: Sendable {
                 let shown = energyStore.frame(at: tP)
                 let ambient = BeatGlow.ambient(at: tP, info: published.ambient, frame: shown)
                 peakAmbient = max(peakAmbient, ambient)
-                if ambient >= RhythmLog.ambientVisible { ambientFrames += 1 }
+                let visible = ambient >= RhythmLog.ambientVisible
+                if visible { ambientFrames += 1 }
+                if !published.locked {
+                    unlockedFrames += 1
+                    if visible { ambientUnlockedFrames += 1 }
+                }
+                if let last = ambientLast, last.value >= RhythmLog.ambientVisible, last.value > (ambientBefore?.value ?? 0),
+                   last.value >= ambient {
+                    ambientPeaks.append(last.time - hostStart)
+                }
+                ambientBefore = ambientLast
+                ambientLast = (ambient, tP)
                 if config.recordAmbientTrace {
                     ambientTrace.append(AmbientPoint(time: tP - hostStart, energy: shown.kickEnergy, value: ambient))
                 }
@@ -395,12 +425,16 @@ public struct OfflineBeatChain: Sendable {
             flashes: flashes,
             states: analysis.states,
             kickOnsets: analysis.kickOnsets,
+            onsets: analysis.onsets,
             predictedTimes: analysis.predicted.values.map { $0 - hostStart }.sorted(),
             peakGlow: peak,
             outputLatency: config.outputLatency,
             peakAmbient: peakAmbient,
             ambientFrames: ambientFrames,
             renderedFrames: frame,
+            unlockedFrames: unlockedFrames,
+            ambientUnlockedFrames: ambientUnlockedFrames,
+            ambientPeaks: ambientPeaks,
             ambientTrace: ambientTrace,
             resets: analysis.resets
         )
