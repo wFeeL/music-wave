@@ -45,12 +45,13 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    пока фаза не найдена) не растет. Новая сетка (смена темпа, скачок фазы,
 ///    перехват тенью) сразу получает вес не выше цели по своей уверенности. `locked` для диагностики и
 ///    метрик, на показ влияет только через это правило роста;
-/// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): уровень полосы бочки в амплитуде идет
-///    в короткую огибающую (атака `ambientAttack`, спад `ambientRelease`), а она в длинное среднее
-///    (`ambientAverage`); энергия (`ambientEnergy`) это их отношение, 0, пока среднее ниже порога шума
-///    волн `LevelProcessor.noiseFloorDB`. Она относится к окну шага и идет к рендеру только в кадре
-///    (`WaveFrame.kickEnergy`) по слышимой оси, в расписании энергия 0. Горб пульса стоит на сетке ФАПЧ
-///    с высотой `уверенность × g_E`. На события, уверенность и вес пульс не влияет.
+/// 7. мягкий пульс (`BeatSchedule.ambient`, `BeatGlow.ambient`): энергия (`ambientEnergy`) идет от атак,
+///    а не от сетки: сила онсета шага (широкополосного или бочки, в том числе длинной 808) держится и
+///    спадает с `ambientRelease`, энергия догоняет ее с `ambientAttack`. Она относится к окну шага и идет
+///    к рендеру только в кадре (`WaveFrame.kickEnergy`) по слышимой оси, в расписании энергия 0. Горб
+///    пульса стоит на сетке ФАПЧ с высотой `уверенность × g_E`, пока длинное среднее уровня полосы бочки
+///    (`ambientAverage`) не ниже порога шума волн `LevelProcessor.noiseFloorDB`. На события,
+///    уверенность и вес пульс не влияет.
 ///
 /// События: две следующие предсказанные доли с яркостью `strengthEMA × g_E × вес` (во время гонки фаз
 /// еще `× raceDim`) и id из счетчика долей; на быстрой сетке доли другой четности, чем `shownParity`,
@@ -436,16 +437,25 @@ public struct BeatTracker: Sendable {
     static let confirmHigh: Float = 11
     /// Ворот от этого значения считается открытым для мягкого подтверждения бочки.
     static let confirmGateOpen: Float = 0.5
-    /// Энергия мягкого пульса: атака и спад короткой огибающей уровня полосы бочки и постоянная
-    /// времени длинного среднего, секунды (как отношение мгновенного и среднего уровня баса в
-    /// MilkDrop). Среднее берется от самой огибающей, а не от сырого уровня: огибающая идет по пикам,
-    /// и против среднего сырого уровня ровный шум давал отношение около 1.4 (постоянный слой). Ниже
-    /// порога шума волн (`LevelProcessor.noiseFloorDB`, мощность) среднее считается тишиной: энергии и
-    /// горба нет, как нет и волн.
-    static let ambientAttack = 0.010
-    static let ambientRelease = 0.150
+    /// Слышимость полосы бочки для горба пульса: атака и спад короткой огибающей ее уровня и постоянная
+    /// времени длинного среднего от этой огибающей, секунды. Ниже порога шума волн
+    /// (`LevelProcessor.noiseFloorDB`, мощность) среднее считается тишиной: горба нет, как нет и волн.
+    static let ambientLevelAttack = 0.010
+    static let ambientLevelRelease = 0.150
     static let ambientAverage = 2.0
     static let ambientFloorDB: Float = LevelProcessor.noiseFloorDB
+    /// Энергия мягкого пульса от атак (разбор журналов 1.2.1, исправление 4): сила онсета шага
+    /// (`OnsetEvent.strength`, широкополосного или бочки, в том числе длинной 808, которая не светится
+    /// вспышкой) держится и спадает с `ambientRelease`, энергия догоняет ее с `ambientAttack`. Прежняя
+    /// энергия, отношение короткой огибающей уровня полосы бочки к ее среднему, на ровной 808 почти не
+    /// росла: на журнале 1 владельца пульс от 0.05 был на 0.5 % кадров повтора (на устройстве 2.5 %).
+    /// Теперь 41 % кадров (без захвата 41 %), вершины пульса у онсетов анализа в 97 % (было 75 %); у 15
+    /// записей подряд 27 % кадров (было 19 %), вершины у онсетов 94 % (было 38 %). Вспышки и `wave-eval`
+    /// те же (пульс отдельный канал). Спад 0.10 с: журнал 1 29 % кадров; 0.25 с: 60 %, вершины у онсетов
+    /// 84 %, пульс почти не опускается. Атака 0.02 с: вершины на 14 мс позже (на синтетике с задержкой
+    /// вывода 134 мс +22 мс против +8 мс), 0.005 с почти то же, что 0.01.
+    static let ambientAttack = 0.010
+    static let ambientRelease = 0.150
     /// После сброса с памятью темпа гребенка ищет фазу по прежнему периоду, когда в истории столько
     /// долей: у каждой задержки гребенки тогда столько же зубцов, одна громкая атака на «и» фазу не
     /// ставит. Целое число долей: при 2.5 у задержек ближе к «сейчас» на зубец больше, и выбор
@@ -563,11 +573,15 @@ public struct BeatTracker: Sendable {
     public private(set) var energyGate: Float = 0
     /// Вес показа 0...1: яркость предсказанных долей и приглушение онсетов бочки (`BeatSchedule.weight`).
     private(set) var displayWeight: Float = 0
-    /// Короткая огибающая и длинное среднее уровня полосы бочки (амплитуда) для мягкого пульса;
-    /// первый шаг ставит обе на свой уровень.
-    private var ambientShort = AttackRelease(attack: BeatTracker.ambientAttack, release: BeatTracker.ambientRelease)
+    /// Короткая огибающая и длинное среднее уровня полосы бочки (амплитуда) для слышимости горба
+    /// пульса; первый шаг ставит обе на свой уровень.
+    private var ambientShort = AttackRelease(attack: BeatTracker.ambientLevelAttack, release: BeatTracker.ambientLevelRelease)
     private var ambientLong = AttackRelease(attack: BeatTracker.ambientAverage, release: BeatTracker.ambientAverage)
     private var ambientPrimed = false
+    /// Сила последних атак для энергии пульса: скачком вверх до силы онсета, спад с `ambientRelease`.
+    private var ambientHeld: Float = 0
+    private var ambientRise = AttackRelease(attack: BeatTracker.ambientAttack, release: 0)
+    private let ambientFallPerHop: Float
     /// Энергия мягкого пульса последнего шага (`AmbientInfo.energy`); относится к окну этого шага.
     /// Анализ кладет ее в кадр шага (`WaveFrame.kickEnergy`), рендер берет ее из кадра на момент показа.
     public private(set) var ambientEnergy: Float = 0
@@ -590,6 +604,7 @@ public struct BeatTracker: Sendable {
         odfRing = [Float](repeating: 0, count: Int((Double(Self.phaseTeeth + 1) * longest * framesPerSecond).rounded(.up)) + 4)
         // Спад огибающей exp(−t / 10 с) в децибелах: 20 / ln 10 дБ на постоянную времени.
         longFallPerHopDB = Float(20 / log(10.0) / (Self.longRelease * framesPerSecond))
+        ambientFallPerHop = Float(exp(-1 / (Self.ambientRelease * framesPerSecond)))
         past = []
         past.reserveCapacity(Self.pastCapacity + 1)
         confirmHops = max(Int((Self.confirmWindow * framesPerSecond).rounded()), 1)
@@ -706,7 +721,7 @@ public struct BeatTracker: Sendable {
         closeWindows()
         closeShadowWindows()
         updateGate(hop.kickLevelDB)
-        updateAmbient(hop.kickLevelDB)
+        updateAmbient(hop)
         updateWeight()
         if let onset = hop.kickOnset, !onset.sustained {
             addKickOnset(onset)
@@ -767,6 +782,8 @@ public struct BeatTracker: Sendable {
         ambientShort.reset()
         ambientLong.reset()
         ambientPrimed = false
+        ambientHeld = 0
+        ambientRise.reset()
         ambientEnergy = 0
         past.removeAll(keepingCapacity: true)
         resumePeriod = kept?.period
@@ -1318,9 +1335,13 @@ public struct BeatTracker: Sendable {
         energyGate = Self.smoothstep(Self.gateLowDB, Self.gateHighDB, kickGateDB - longPeakDB)
     }
 
-    /// Энергия мягкого пульса: уровень бочки в амплитуде (нечисловой как пол) в короткую огибающую, она
-    /// в длинное среднее, энергия их отношение, 0 ниже `ambientFloorDB`.
-    private mutating func updateAmbient(_ levelDB: Float) {
+    /// Энергия мягкого пульса от онсетов шага и слышимость полосы бочки: ее уровень в амплитуде
+    /// (нечисловой как пол) в короткую огибающую, она в длинное среднее (`ambientAudible`).
+    private mutating func updateAmbient(_ hop: HopResult) {
+        ambientHeld *= ambientFallPerHop
+        holdAttack(hop.broadbandOnset)
+        holdAttack(hop.kickOnset)
+        let levelDB = hop.kickLevelDB
         let level = levelDB.isFinite ? max(levelDB, Self.floorDB) : Self.floorDB
         let amplitude = Float(pow(10.0, Double(level) / 20))
         if ambientPrimed {
@@ -1331,7 +1352,13 @@ public struct BeatTracker: Sendable {
             ambientLong.reset(to: amplitude)
             ambientPrimed = true
         }
-        ambientEnergy = ambientAudible ? ambientShort.value / ambientLong.value : 0
+        ambientEnergy = ambientRise.step(toward: ambientHeld, dt: hopDuration)
+    }
+
+    /// Сила онсета в удержание энергии пульса (нечисловая не идет, вне 0...1 обрезается).
+    private mutating func holdAttack(_ onset: OnsetEvent?) {
+        guard let strength = onset?.strength, strength.isFinite else { return }
+        ambientHeld = max(ambientHeld, min(max(strength, 0), 1))
     }
 
     private mutating func updateWeight() {

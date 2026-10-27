@@ -23,7 +23,7 @@ public struct GlowEvent: Sendable, Equatable {
 }
 
 /// Вход мягкого пульса (`BeatGlow.ambient`), который трекер публикует в расписании рядом с событиями:
-/// сетка доли для горба и энергия бочки. Время на той же оси, что и события расписания.
+/// сетка доли для горба и энергия атак. Время на той же оси, что и события расписания.
 public struct AmbientInfo: Sendable, Equatable {
     /// Доля сетки: горб пульса на `anchor + k × period` для любого целого k.
     public var anchor: Double
@@ -32,9 +32,9 @@ public struct AmbientInfo: Sendable, Equatable {
     /// Высота горба 0...1: уверенность сетки, умноженная на энергетический ворот трекера (в брейке
     /// без бочки горб гаснет вместе с воротом).
     public var confidence: Float
-    /// Отношение короткой огибающей уровня полосы бочки (атака 10 мс, спад 150 мс) к ее длинному
-    /// среднему (2 с): около 1 при ровном уровне, выше на ударах бочки, 0 в тишине. Трекер в расписании
-    /// пишет 0: энергия идет к рендеру в кадре анализа на слышимой оси (`WaveFrame.kickEnergy`,
+    /// Энергия атак 0...1 (`BeatTracker.ambientEnergy`): сила последнего онсета, широкополосного или
+    /// бочки, со спадом 150 мс; 0 без атак и в тишине. Трекер в расписании пишет 0: энергия идет к
+    /// рендеру в кадре анализа на слышимой оси (`WaveFrame.kickEnergy`,
     /// `BeatGlow.ambient(at:info:frame:)`). Поле нужно формуле `BeatGlow.ambient(at:info:)`.
     public var energy: Float
 
@@ -151,17 +151,19 @@ public struct BeatGlow: Sendable {
     /// захваченной (0.58 против 0.91), поэтому светится вполовину: заметно, но не как доля. С ростом веса
     /// показа (`BeatSchedule.weight`) приглушение плавно уходит, при весе 1 онсет светится полностью.
     public static let reactiveScale: Float = 0.5
-    /// Мягкий пульс (`ambient(at:info:)`): слой энергии бочки до `ambientEnergyScale`, горб на доле до
+    /// Мягкий пульс (`ambient(at:info:)`): слой энергии атак до `ambientEnergyScale`, горб на доле до
     /// `ambientBeatScale`, сумма не выше `ambientCeiling`, ниже порога вспышки
     /// `OfflineBeatChain.eventRise` (0.2), поэтому метрики вспышек от пульса не зависят.
     public static let ambientEnergyScale: Float = 0.12
     public static let ambientBeatScale: Float = 0.08
     public static let ambientCeiling: Float = 0.18
-    /// Энергия бочки от `ambientEnergyLow` (слоя нет) до `ambientEnergyHigh` (полный слой). Нижний край
-    /// 1.2, а не 1.0: на ровном шуме без ударов отношение колеблется около 1 (95-й процентиль 1.24), и
-    /// от 1.0 случайные всплески давали мерцание мимо долей на каждом пятом шаге.
-    public static let ambientEnergyLow: Float = 1.2
-    public static let ambientEnergyHigh: Float = 1.6
+    /// Энергия атак от `ambientEnergyLow` (слоя нет) до `ambientEnergyHigh` (полный слой). Слабые атаки
+    /// (сила онсета ниже 0.1 от следящего пика) слоя не дают, от 0.6 слой полный. На записях владельца
+    /// (15 подряд) пульс от 0.05 на 27 % кадров. При атаке энергии 0.02 с: с краями 0 и 0.5 на 36 %,
+    /// вершины у онсетов 89 % вместо 93 % (пульс почти ровный); с краями 0.2 и 0.8 на 15 %, журнал 1
+    /// владельца 25 %.
+    public static let ambientEnergyLow: Float = 0.1
+    public static let ambientEnergyHigh: Float = 0.6
     /// Допуск округления на границе атаки.
     private static let edgeTolerance = 1e-9
 
@@ -233,7 +235,7 @@ public struct BeatGlow: Sendable {
 
     /// Формула мягкого пульса на момент `time` с энергией из `info` (проверки формулы; рендер и
     /// офлайн-цепочка зовут `ambient(at:info:frame:)`, энергия расписания трекера всегда 0):
-    /// `0.12 × smoothstep(1.2, 1.6, energy) + 0.08 × confidence ×
+    /// `0.12 × smoothstep(0.1, 0.6, energy) + 0.08 × confidence ×
     /// ((1 + cos 2πφ) / 2)^6`, `φ = (time − anchor) / period`, не выше `ambientCeiling` (0.18).
     /// Отдельный канал: в `value` не входит, рендер рисует `max(свечение, пульс)`. Горб узкий (вдвое
     /// ниже пика примерно через 0.1 периода от доли), без опережения: момент показа уже учтен. Без

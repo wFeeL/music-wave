@@ -94,13 +94,13 @@ struct BeatTrackerTests {
         return (part.max() ?? 0, part.min() ?? 0, lit)
     }
 
-    /// Мягкий пульс трекера (`BeatSchedule.ambient` и энергия кадра): энергия бочки (короткая
-    /// огибающая уровня полосы бочки против ее длинного среднего) и горб на сетке (уверенность × ворот)
-    /// дают пульс в такт, который в брейке без бочки (`Drums.breakdown`, 10-18 с) гаснет вместе с
-    /// энергией и воротом, а после возврата бочки возвращается. То же, когда под всей сценой лежит
-    /// ровная подложка в полосе бочки (коричневый шум -24 dBFS и бас 55 Гц): бочка над ней дает
-    /// ясный горб (замер: пик у бочек 6-10 с в медиане 0.13, не ниже 0.08), а в брейке пульс почти
-    /// гаснет (пик 0.025, от 0.01 4 % шагов). После `reset()` пульса нет, энергия в расписании всегда 0.
+    /// Мягкий пульс трекера (`BeatSchedule.ambient` и энергия кадра): энергия атак (сила онсетов бочки и
+    /// хэтов) и горб на сетке (уверенность × ворот) дают пульс в такт, который в брейке без барабанов
+    /// (`Drums.breakdown`, 10-18 с, звучит только пэд) гаснет вместе с атаками и воротом, а после возврата
+    /// бочки возвращается. То же, когда под всей сценой лежит ровная подложка в полосе бочки (коричневый
+    /// шум -24 dBFS и бас 55 Гц): бочка над ней дает ясный горб (замер: пик у бочек 6-10 с 0.18, потолок
+    /// пульса), а в брейке пульс почти гаснет (пик 0.025, от 0.01 4 % шагов). После `reset()` пульса нет,
+    /// энергия в расписании всегда 0.
     @Test func ambientFollowsKicksAndFadesInBreakdown() async {
         let (bare, bed) = await runOffCooperativePool {
             let scene = SharedScenes.breakdown
@@ -134,10 +134,44 @@ struct BeatTrackerTests {
         #expect(Self.ambientStats(values, 20..<24).peak > 0.1, "peak over the bed after the break")
     }
 
-    /// Ровный неровный звук без ударов (коричневый шум -20 dBFS, основная энергия в полосе бочки): в
-    /// среднем энергия около 1 (95-й процентиль 1.24), и с нижним краем 1.2 пульс от 0.01 только на
-    /// редких всплесках шума (замер: 4.0 % шагов, при крае 1.0 было 18 %), а не постоянным слоем.
-    /// Против среднего сырого уровня было около 1.4 и слой 0.086.
+    /// Длинная 808 легато, как в журнале 1 владельца (1.2.1): полоса бочки звучит ровно, и энергия от
+    /// отношения уровней пульса почти не давала (на журнале 2.5 % кадров). Энергия от атак (онсеты длинной
+    /// бочки и широкополосные) дает пульс на нотах: от `RhythmLog.ambientVisible` на четверти шагов и
+    /// больше, вершина слоя энергии (без горба на сетке) есть на 80 % нот и больше (замер: 29 на 29), и
+    /// каждая не дальше 70 мс от начала ноты.
+    @Test func ambientFollowsSustained808Attacks() async {
+        let scene = Drums.sustained808()
+        let hops = await runOffCooperativePool { StreamAnalyzer(sampleRate: scene.sampleRate).processSignal(scene.samples) }
+        var tracker = BeatTracker(framesPerSecond: Self.fps)
+        var pulse: [Float] = []
+        var layer: [(time: Double, value: Float)] = []
+        for hop in hops {
+            tracker.process(hop)
+            guard (3..<19).contains(hop.endTime) else { continue }
+            var frame = hop.frame
+            frame.kickEnergy = tracker.ambientEnergy
+            pulse.append(BeatGlow.ambient(at: hop.endTime, info: tracker.schedule.ambient, frame: frame))
+            let energyOnly = AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: tracker.ambientEnergy)
+            layer.append((hop.endTime, BeatGlow.ambient(at: hop.endTime, info: energyOnly)))
+        }
+        let visible = Double(pulse.filter { $0 >= RhythmLog.ambientVisible }.count) / Double(pulse.count)
+        #expect(visible >= 0.25, "visible share \(visible)")
+        var peaks: [Double] = []
+        for index in layer.indices.dropFirst().dropLast() {
+            let value = layer[index].value
+            if value >= RhythmLog.ambientVisible, value > layer[index - 1].value, value >= layer[index + 1].value {
+                peaks.append(layer[index].time)
+            }
+        }
+        let notes = scene.kicks.filter { (3..<19).contains($0) }.count
+        #expect(Double(peaks.count) >= 0.8 * Double(notes), "peaks \(peaks.count) for \(notes) notes")
+        let far = peaks.filter { BeatMetrics.nearestDistance(to: $0, in: scene.kicks) > 0.07 }
+        #expect(far.isEmpty, "peaks away from the notes: \(far)")
+    }
+
+    /// Ровный неровный звук без ударов (коричневый шум -20 dBFS, основная энергия в полосе бочки): атак
+    /// почти нет, и пульс от 0.01 только на редких ложных онсетах бочки (замер: 2.8 % шагов, пик 0.12;
+    /// с энергией от отношения уровней было 4.0 %), а не постоянным слоем.
     @Test func steadyNoiseKeepsThePulseLow() async {
         let hops = await runOffCooperativePool {
             StreamAnalyzer(sampleRate: 48_000).processSignal(Drums.brownNoise(levelDB: -20, count: 48_000 * 12, seed: 5))

@@ -273,7 +273,7 @@ struct BeatGlowTests {
     }
 
     /// Без энергии и без уверенности пульса нет; энергия одна дает ровный слой по
-    /// `0.12 × smoothstep(1.2, 1.6, energy)` на любой фазе.
+    /// `0.12 × smoothstep(0.1, 0.6, energy)` на любой фазе (энергия это сила атак 0...1).
     @Test func ambientFadesWithEnergyAndConfidence() {
         let quiet = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0)
         var t = 0.0
@@ -282,22 +282,24 @@ struct BeatGlowTests {
             t += 0.01
         }
         #expect(BeatGlow.ambient(at: 1.5, info: nil) == 0)
-        let level = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
+        let level = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0.6)
         #expect(abs(BeatGlow.ambient(at: 1.5, info: level) - 0.12) < 1e-6)
         #expect(abs(BeatGlow.ambient(at: 1.75, info: level) - 0.12) < 1e-6)
-        let half = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.4)
+        let half = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0.35)
         #expect(abs(BeatGlow.ambient(at: 1.6, info: half) - 0.06) < 1e-6)
-        let flat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.0)
+        let flat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0.05)
         #expect(BeatGlow.ambient(at: 1.5, info: flat) == 0)
-        // Нижний край 1.2: ровный шум с отношением до 1.2 слоя не дает.
-        #expect(BeatGlow.ambientEnergyLow == 1.2)
-        let swell = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.2)
+        // Нижний край 0.1: слабые атаки слоя не дают, от 0.6 слой полный.
+        #expect(BeatGlow.ambientEnergyLow == 0.1 && BeatGlow.ambientEnergyHigh == 0.6)
+        let swell = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0.1)
         #expect(BeatGlow.ambient(at: 1.5, info: swell) == 0)
+        let strong = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1)
+        #expect(abs(BeatGlow.ambient(at: 1.5, info: strong) - 0.12) < 1e-6)
         // Уверенность вдвое меньше: горб вдвое ниже.
         let unsure = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0.5, energy: 0)
         #expect(abs(BeatGlow.ambient(at: 1.5, info: unsure) - 0.04) < 1e-6)
         // Без темпа (период 0) горба нет, энергия остается.
-        let noTempo = AmbientInfo(anchor: 0, period: 0, confidence: 1, energy: 1.6)
+        let noTempo = AmbientInfo(anchor: 0, period: 0, confidence: 1, energy: 0.6)
         #expect(abs(BeatGlow.ambient(at: 1.5, info: noTempo) - 0.12) < 1e-6)
     }
 
@@ -347,10 +349,10 @@ struct BeatGlowTests {
     /// Рендер берет энергию из кадра на момент показа (`WaveFrame.kickEnergy`), а сетку и высоту горба
     /// из расписания; энергия расписания не используется. Без расписания пульса нет.
     @Test func ambientTakesEnergyFromTheFrame() {
-        let info = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 1.6)
+        let info = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 0, energy: 0.6)
         var frame = WaveFrame.silent
         #expect(BeatGlow.ambient(at: 1.75, info: info, frame: frame) == 0)
-        frame.kickEnergy = 1.4
+        frame.kickEnergy = 0.35
         #expect(abs(BeatGlow.ambient(at: 1.75, info: info, frame: frame) - 0.06) < 1e-6)
         #expect(BeatGlow.ambient(at: 1.75, info: nil, frame: frame) == 0)
         let beat = AmbientInfo(anchor: 1.0, period: 0.5, confidence: 1, energy: 0)

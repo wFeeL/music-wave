@@ -13,7 +13,7 @@ import Foundation
 /// `renderPhase` или случайная) в момент `tEval` берет последнее расписание, опубликованное до него,
 /// и считает свечение на момент показа `tP = tEval + 2 / renderRate`. Событие свечения это кадр, где
 /// свечение выросло больше чем на `eventRise` против прошлого кадра; его время это `tP` кадра.
-/// Мягкий пульс (`Config.softPulse`) считается отдельно, как у приложения: энергия бочки каждого шага
+/// Мягкий пульс (`Config.softPulse`) считается отдельно, как у приложения: энергия атак каждого шага
 /// (`BeatTracker.ambientEnergy`) публикуется кадром в `FrameStore` на момент центра окна плюс
 /// `outputLatency + syncOffset` (как кадры волн у `AnalysisEngine`), рендер берет кадр на `tP` и
 /// `BeatGlow.ambient(at:info:frame:)`. Во вспышки пульс не входит, только в итог пульса
@@ -136,7 +136,7 @@ public struct OfflineBeatChain: Sendable {
     public struct AmbientPoint: Sendable, Equatable {
         /// Момент показа кадра, слышимые секунды от первого сэмпла.
         public var time: Double
-        /// Энергия бочки из кадра на этот момент (`WaveFrame.kickEnergy`).
+        /// Энергия атак из кадра на этот момент (`WaveFrame.kickEnergy`).
         public var energy: Float
         /// Мягкий пульс кадра.
         public var value: Float
@@ -231,7 +231,7 @@ public struct OfflineBeatChain: Sendable {
         /// Время хоста каждой предсказанной доли в последнем расписании, опубликованном до начала ее
         /// вспышки (`time - BeatGlow.lead`), по id.
         var predicted: [UInt64: Double] = [:]
-        /// `Config.softPulse`: энергия бочки каждого шага, время пробуждения, после которого она видна
+        /// `Config.softPulse`: энергия атак каждого шага, время пробуждения, после которого она видна
         /// рендеру, и момент ее кадра на оси хоста (центр окна плюс задержка вывода и сдвиг).
         var energies: [(wake: Double, time: Double, energy: Float)] = []
         var resets: [Reset] = []

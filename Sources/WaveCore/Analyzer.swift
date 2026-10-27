@@ -13,7 +13,7 @@ public struct WaveFrame: Sendable, Equatable {
     public var level: Float
     /// Максимальный уровень полосы в dBFS до нормализации.
     public var rawLevelDB: Float
-    /// Энергия бочки для мягкого пульса (`BeatTracker.ambientEnergy`, `AmbientInfo.energy`) на момент
+    /// Энергия атак для мягкого пульса (`BeatTracker.ambientEnergy`, `AmbientInfo.energy`) на момент
     /// кадра: анализ кладет ее в кадр, чтобы она шла по слышимой оси вместе с уровнями
     /// (`BeatGlow.ambient(at:info:frame:)`). 0 без трекера.
     public var kickEnergy: Float
