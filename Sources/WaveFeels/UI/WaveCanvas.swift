@@ -61,9 +61,6 @@ nonisolated struct WaveSet: Sendable {
         /// линии. Один на набор точек градиента: основная линия и ее эхо (у спектра и призрак
         /// пика) рисуются одним и тем же, эхо с меньшей `opacity`.
         let gradient: Gradient
-        /// Тот же градиент со смешением цветов в перцептивном пространстве
-        /// (`Gradient.colorSpace(.perceptual)`), только у линий «Спектра»; холст тогда рисует его.
-        let perceptualGradient: AnyGradient?
 
         /// Точки градиента самой линии: `baseStops` с прозрачностью × `opacity`.
         var stops: [WavePaint.Stop] {
@@ -155,9 +152,6 @@ nonisolated struct WaveSet: Sendable {
     /// прозрачностью `fillTopOpacity × fill`, без прозрачности линии, поэтому у основной линии и
     /// ее эха один. Пустой без заливки.
     let fillGradients: [Gradient]
-    /// Те же градиенты заливки со смешением в перцептивном пространстве: у наборов «Спектра»
-    /// градиент, у остальных `nil`. Пустой без заливки.
-    let perceptualFillGradients: [AnyGradient?]
     /// Сглаженные пути линий по размеру холста, общие для всех холстов кадра (`WavePathCache`):
     /// оба крыла и оба прохода берут один путь на линию. У пустого набора `nil`.
     let pathCache: WavePathCache?
@@ -170,7 +164,6 @@ nonisolated struct WaveSet: Sendable {
         fill = 0
         geometry = .standard
         fillGradients = []
-        perceptualFillGradients = []
         pathCache = nil
     }
 
@@ -179,13 +172,6 @@ nonisolated struct WaveSet: Sendable {
         Gradient(stops: stops.map { stop in
             Gradient.Stop(color: Color(palette: stop.color, opacity: opacity(stop.opacity)), location: CGFloat(stop.location))
         })
-    }
-
-    /// Градиент набора с источником `source` со смешением цветов в перцептивном пространстве: у
-    /// «Спектра» соседние точки далеких оттенков (кольцо палитры) смешиваются без серой середины.
-    /// У «Волн» `nil`, их вид не меняется.
-    static func perceptual(_ gradient: Gradient, source: WaveLine.Source) -> AnyGradient? {
-        stopSource(source) == .spectrum ? gradient.colorSpace(.perceptual) : nil
     }
 
     /// По линии на каждую `appearance.lines(for: style.profile)`: размах от уровня источника
@@ -199,8 +185,9 @@ nonisolated struct WaveSet: Sendable {
     /// пика через `spectrum.peaks`; без `spectrum` обе через полосы кадра `frame.bands`. σ
     /// сглаживания по ширине (`spectrumHalfWidth`, в панели по `panelWidth`), бегущая рябь с фазой
     /// середины `motion.phase(.mid, profile:)` и «дыхание» от ее медленной громкости. Цвет из
-    /// `WavePaint.spectrumStops` с высотой самой линии в каждой точке, призрак берет тот же набор,
-    /// градиенты смешивают цвета в перцептивном пространстве (`perceptualGradient`).
+    /// `WavePaint.spectrumStops` с высотой самой линии в каждой точке (17 точек, смешанных в OKLab,
+    /// поэтому между соседними точками обычного градиента серой середины нет), призрак берет тот же
+    /// набор.
     ///
     /// Раскладка `style` здесь совпадает с той, что нужна `lines(for:)`: у «Волн» и «Спектра»
     /// линии от раскладки не зависят.
@@ -331,7 +318,6 @@ nonisolated struct WaveSet: Sendable {
         let lineGradients = stopRanges.map { range in
             Self.gradient(stops[range]) { Double($0) }
         }
-        let perceptualLineGradients = keys.indices.map { Self.perceptual(lineGradients[$0], source: keys[$0].source) }
         layers = lines.indices.map { index in
             let line = lines[index]
             let set = stopSets[index]
@@ -345,20 +331,16 @@ nonisolated struct WaveSet: Sendable {
                 baseStops: stops[stopRanges[set]],
                 stopSet: set,
                 opacity: line.opacity,
-                gradient: lineGradients[set],
-                perceptualGradient: perceptualLineGradients[set]
+                gradient: lineGradients[set]
             )
         }
         if fillAmount > 0 {
             let top = min(Double(WavePaint.fillTopOpacity) * fillAmount, 1)
-            let gradients = stopRanges.map { range in
+            fillGradients = stopRanges.map { range in
                 Self.gradient(stops[range]) { _ in top }
             }
-            fillGradients = gradients
-            perceptualFillGradients = keys.indices.map { Self.perceptual(gradients[$0], source: keys[$0].source) }
         } else {
             fillGradients = []
-            perceptualFillGradients = []
         }
         pathCache = WavePathCache()
     }
@@ -414,8 +396,7 @@ nonisolated final class WavePathCache: Sendable {
 /// самой линии (`WaveSet.Layer.widthScale`, у призрака пика «Спектра» 0.7). Базовая линия
 /// по `WaveSet.geometry.baseline`: от середины размах `(высота / 2 - поле) * y` вверх и вниз, от
 /// нижней (спектр) размах `(высота - 2 × поле) * y` вверх от `высота - поле`; поле 6 pt в крыле
-/// и 3 pt в панели. Цвет из `WavePaint`, у «Спектра» градиент в перцептивном пространстве
-/// (`WaveSet.Layer.perceptualGradient`). Волны складываются в режиме `.plusLighter`, заливка под
+/// и 3 pt в панели. Цвет из `WavePaint`. Волны складываются в режиме `.plusLighter`, заливка под
 /// ними (кроме призрака пика, `WaveSet.Layer.fills`) до базовой линии.
 struct WaveCanvas: View {
     let waves: WaveSet
@@ -517,11 +498,7 @@ nonisolated struct WaveDrawing: Sendable {
             // Цвет заливки не зависит от прозрачности линии: у основной линии и ее эха один
             // градиент набора точек градиента.
             let fillGradients = waves.fillGradients
-            let perceptualFills = waves.perceptualFillGradients
             drawFill(filled, in: context, size: size, start: start, end: end, middle: baseline, swing: swing) { layer in
-                if layer.stopSet < perceptualFills.count, let perceptual = perceptualFills[layer.stopSet] {
-                    return .linearGradient(perceptual, startPoint: startPoint, endPoint: endPoint)
-                }
                 let gradient = layer.stopSet < fillGradients.count ? fillGradients[layer.stopSet] : Gradient(stops: [])
                 return .linearGradient(gradient, startPoint: startPoint, endPoint: endPoint)
             }
@@ -530,11 +507,9 @@ nonisolated struct WaveDrawing: Sendable {
         for line in lines {
             let scale: CGFloat = waves.thickness * widthScale * line.layer.widthScale
             let width = widths[line.layer.shape.rawValue] * scale * (pass == .glow ? Self.glowLineScale : 1)
-            let shading: GraphicsContext.Shading = if let perceptual = line.layer.perceptualGradient {
-                .linearGradient(perceptual, startPoint: startPoint, endPoint: endPoint)
-            } else {
-                .linearGradient(line.layer.gradient, startPoint: startPoint, endPoint: endPoint)
-            }
+            let shading = GraphicsContext.Shading.linearGradient(
+                line.layer.gradient, startPoint: startPoint, endPoint: endPoint
+            )
             // Градиент общий с основной линией, эхо и призрак пика тише на свою прозрачность. У
             // основных линий 1: обводка та же, что с прозрачностью в самих точках.
             context.opacity = Double(line.layer.opacity)

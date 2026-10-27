@@ -179,8 +179,8 @@ struct WaveSetTests {
             #expect(waves.thickness == 1)
             #expect(waves.fillGradients.isEmpty)
             #expect(waves.layers.map(\.shape) == [.bass, .mid, .high])
-            // «Волны» без перцептивного смешения, толщина и заливка как раньше.
-            #expect(waves.layers.allSatisfy { $0.perceptualGradient == nil && $0.fills && $0.widthScale == 1 })
+            // «Волны»: толщина и заливка как раньше.
+            #expect(waves.layers.allSatisfy { $0.fills && $0.widthScale == 1 })
             let locations = style == .wing ? WaveSet.wingLocations : WaveSet.panelLocations
             for layer in waves.layers {
                 let level = Self.frame.layers[layer.shape.rawValue]
@@ -201,7 +201,7 @@ struct WaveSetTests {
     /// «Спектр»: линия формы середины через полосы после пружин (`SpectrumShape` с σ по ширине,
     /// рябью и «дыханием» по фазе середины) и призрак пика через пики: прозрачность 0.35, толщина
     /// × 0.7, без свечения и заливки, в крыле на 32 точках. Цвет из `spectrumStops` с высотой
-    /// самой линии, призрак в том же наборе, градиенты в перцептивном пространстве.
+    /// самой линии, призрак в том же наборе.
     @Test func spectrumSetHasLineAndPeak() {
         var motion = WaveMotion()
         motion.advance(layers: [0.5, 0.6, 0.4], dt: 0.5)
@@ -224,7 +224,6 @@ struct WaveSetTests {
             #expect(line.stopSet == peak.stopSet)
             #expect(line.baseStops == peak.baseStops)
             #expect(line.gradient == peak.gradient)
-            #expect(line.perceptualGradient != nil && peak.perceptualGradient != nil)
             let count = style == .wing ? WaveSet.wingPoints : WaveSet.panelPoints
             let peakCount = style == .wing ? WaveSet.wingEchoPoints : WaveSet.panelPoints
             #expect(line.samples.count == count && peak.samples.count == peakCount)
@@ -300,10 +299,8 @@ struct WaveSetTests {
             #expect(waves.geometry.baseline == .bottom)
             #expect(waves.geometry.widthScale == 1)
             #expect(waves.fill == 0.5)
-            // Один набор на линию и призрак пика, заливка в перцептивном пространстве.
+            // Один набор на линию и призрак пика.
             #expect(waves.fillGradients.count == 1)
-            #expect(waves.perceptualFillGradients.count == 1)
-            #expect(waves.perceptualFillGradients.allSatisfy { $0 != nil })
         }
     }
 
