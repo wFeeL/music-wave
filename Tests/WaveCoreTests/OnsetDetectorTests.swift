@@ -277,6 +277,30 @@ struct OnsetDetectorTests {
         #expect(settling.falsePositives + settled.falsePositives == 0, "false onsets")
     }
 
+    /// Пауза в том же треке (`StreamAnalyzer.reset(keepOnsetFloor: true)`): типичный пик и уровень акцента
+    /// остаются, и тихие доли снова дают онсеты сразу после сброса. Обычный сброс возвращает порог к 10, и
+    /// онсетов нет, пока средние снова не опустят его (около 7 с на каждой паузе).
+    @Test(arguments: [true, false])
+    func softKicksAfterAResetInTheSameTrack(keepFloor: Bool) async {
+        let (score, references) = await runOffCooperativePool { () -> (Score, Int) in
+            let scene = Drums.softKicksUnderPad(seconds: 24)
+            let cut = Int(16 * Self.rate)
+            let analyzer = StreamAnalyzer(sampleRate: Self.rate)
+            _ = analyzer.processSignal(Array(scene.samples[..<cut]))
+            analyzer.reset(keepOnsetFloor: keepFloor)
+            let hops = analyzer.processSignal(Array(scene.samples[cut...]), firstSample: cut)
+            let onsets = hops.compactMap(\.broadbandOnset?.time).filter { $0 < 20 - 0.05 }
+            let kicks = scene.kicks.filter { $0 >= 16.1 && $0 < 20 - 0.05 }
+            return (Self.score(onsets, reference: kicks, until: 24), kicks.count)
+        }
+        #expect(references == 7)
+        if keepFloor {
+            #expect(score.recall >= 0.85 && score.falsePositives == 0, "recall \(score.recall), false \(score.falsePositives)")
+        } else {
+            #expect(score.recall <= 0.25, "recall \(score.recall)")
+        }
+    }
+
     /// Звук под воротом уровня (-80 dBFS, хвост затухания, шипение между треками) не опускает
     /// порог: после него шум -45 dBFS не дает широкополосных онсетов, кроме самого скачка уровня
     /// на 10 с (он был и с постоянным порогом). Пока типичный пик шел и по звуку под воротом, здесь

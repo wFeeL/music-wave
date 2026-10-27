@@ -134,8 +134,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 self.tracker.reconfigure(framesPerSecond: self.analyzer.config.framesPerSecond)
                 self.window = [Float](repeating: 0, count: self.analyzer.config.fftSize)
             } else {
-                self.analyzer.reset()
-                self.resetTracker()
+                self.resetAnalysis()
             }
             self.restartStream()
             self.lastWake = nil
@@ -261,6 +260,15 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         tracker.reset(keepTempo: tempoMemory.keepsTempo(current: track))
     }
 
+    /// Сброс анализа и трекера. В том же известном треке остаются темп и типичный пик онсетов: порог
+    /// онсетов тихой аранжировки не возвращается к исходному после каждой паузы.
+    private func resetAnalysis() {
+        let track = shared.withLock { $0.track }
+        let keep = tempoMemory.keepsTempo(current: track)
+        analyzer.reset(keepOnsetFloor: keep)
+        tracker.reset(keepTempo: keep)
+    }
+
     /// Поток начинается заново: часы хоста без метки, первый шаг самый новый, в хранилище тихий
     /// кадр и пустое расписание.
     private func restartStream() {
@@ -293,8 +301,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         let total = ring.totalWritten
         if let next = nextHopEnd, total < next - config.hopSize {
             // Кольцо обнулено (пересборка tap, новое демо): поток начинается заново.
-            analyzer.reset()
-            resetTracker()
+            resetAnalysis()
             restartStream()
         }
 
@@ -320,8 +327,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         if feed.update(totalWritten: total, now: now) {
             // Новых сэмплов нет: волны гаснут, а не застывают на последнем окне.
             if !feedStalled {
-                analyzer.reset()
-                resetTracker()
+                resetAnalysis()
                 store.publishSchedule(.empty)
                 feedStalled = true
                 endRhythm(.stalled)
@@ -372,8 +378,7 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
         } else if Double(total - end) > Self.maxBacklog * config.sampleRate {
             // Анализ отстал (сон, остановленная очередь): старые шаги уже не нужны.
             end += (total - end) / hop * hop
-            analyzer.reset()
-            resetTracker()
+            resetAnalysis()
         }
         if !idle, tempoMemory.feeding(current: track, resuming: tracker.resumingTempo) {
             // Новый трек (посреди звука или выбран на паузе) или трек сменился, пока трекер идет по памяти

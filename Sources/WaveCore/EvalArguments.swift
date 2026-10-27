@@ -114,7 +114,8 @@ public struct EvalArguments: Sendable, Equatable {
           --pairs N                  warm pairs: in every group the first 2N files of the split, track B
                                      right after track A (29.5 s each, no reset) against B alone; scores B only
           --reset-every S            forced reset with tempo memory every S seconds of stream (resume metric):
-                                     StreamAnalyzer.reset() and BeatTracker.reset(keepTempo: true), as the app
+                                     StreamAnalyzer.reset(keepOnsetFloor: true) and BeatTracker.reset(keepTempo:
+                                     true), as the app after a pause in the same track
           --reset-tracker-only       with --reset-every: reset the tracker only (the 1.2.1 evalreset.py probe)
           --pause S                  with --reset-every: instead of a reset insert S seconds of silence (zeros) and
                                      continue the audio where it stopped, as a player pause the capture keeps feeding

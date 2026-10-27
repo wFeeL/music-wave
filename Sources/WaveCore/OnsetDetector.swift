@@ -384,7 +384,10 @@ public struct OnlinePeakPicker: Sendable {
         return nil
     }
 
-    public mutating func reset() {
+    /// Прошлые odf, уровни и следящие пики начинаются заново. `keepTypical` оставляет типичный пик T и
+    /// уровень акцента A (пауза в том же треке: высота пиков та же, и порог не ждет, пока средние снова
+    /// опустят его).
+    public mutating func reset(keepTypical: Bool = false) {
         for index in odfRing.indices {
             odfRing[index] = 0
             levelRing[index] = Self.floorDB
@@ -397,6 +400,6 @@ public struct OnlinePeakPicker: Sendable {
         lastOnsetSustained = false
         lastOnsetDelay = 0
         pendingAge = nil
-        resetTypical()
+        if !keepTypical { resetTypical() }
     }
 }

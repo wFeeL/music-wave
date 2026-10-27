@@ -226,7 +226,11 @@ public final class StreamAnalyzer {
 
     /// Пауза, перемотка или смена источника: уровни, пики автоуровня, сглаживание, огибающая,
     /// история функций онсетов и выбор пиков начинаются заново.
-    public func reset() {
+    ///
+    /// `keepOnsetFloor` (пауза в том же треке, как `BeatTracker.reset(keepTempo:)`): типичный пик и уровень
+    /// акцента выбора пиков остаются (`OnlinePeakPicker.reset(keepTypical:)`), и порог широкополосной
+    /// функции, опущенный на тихой аранжировке, не возвращается к 10 на 7 с после каждой паузы.
+    public func reset(keepOnsetFloor: Bool = false) {
         levelProcessor = Self.makeLevelProcessor(for: mapper)
         for index in smoothers.indices {
             smoothers[index].reset()
@@ -237,8 +241,8 @@ public final class StreamAnalyzer {
         envelope = BeatEnvelope(decay: Self.envelopeDecay)
         kickFlux.reset()
         broadbandFlux.reset()
-        kickPicker.reset()
-        broadbandPicker.reset()
+        kickPicker.reset(keepTypical: keepOnsetFloor)
+        broadbandPicker.reset(keepTypical: keepOnsetFloor)
         silentHops = 0
         refillHops = 0
     }

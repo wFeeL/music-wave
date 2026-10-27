@@ -543,7 +543,7 @@ public enum BeatEvaluation {
     }
 
     public static let resumeNotes = [
-        "resume: forced StreamAnalyzer.reset() + BeatTracker.reset(keepTempo: true) every --reset-every seconds of stream, audio continues; resets with 2 s of file left are scored",
+        "resume: forced StreamAnalyzer.reset(keepOnsetFloor: true) + BeatTracker.reset(keepTempo: true) every --reset-every seconds of stream (a pause in the same track), audio continues; resets with 2 s of file left are scored",
         "resume columns: lockedAt = tracker locked before the reset; flashed = a flash before the next reset; firstOn = first flash on a beat; offBeat = all of the first 4 flashes on the half-beat (fewer if the next reset comes first); partly = some of them on the half-beat",
         "delay50 = median seconds from the reset to the first flash; prec2s = precision of all flashes in the 2 s after every reset; lockedRst = the same after resets that were locked; relockLP = locked flashes in those 2 s after locked resets",
     ]

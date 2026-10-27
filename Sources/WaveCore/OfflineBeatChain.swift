@@ -53,9 +53,9 @@ public struct OfflineBeatChain: Sendable {
         /// С `softPulse`: писать пульс каждого кадра в `Result.ambientTrace` (проверки времени энергии).
         public var recordAmbientTrace = false
         /// Сброс с памятью темпа каждые столько секунд потока, как у приложения после паузы, скрытия острова
-        /// или пересборки tap в том же треке: `StreamAnalyzer.reset()` и `BeatTracker.reset(keepTempo: true)`
-        /// после шага, на котором время потока дошло до срока. Звук идет без разрыва. `nil` без сбросов
-        /// (оценка возобновления, `wave-eval --reset-every`).
+        /// или пересборки tap в том же треке: `StreamAnalyzer.reset(keepOnsetFloor: true)` и
+        /// `BeatTracker.reset(keepTempo: true)` после шага, на котором время потока дошло до срока. Звук идет
+        /// без разрыва. `nil` без сбросов (оценка возобновления, `wave-eval --reset-every`).
         public var resetInterval: Double?
         /// Со сбросом по `resetInterval` начинать заново и анализ (`StreamAnalyzer.reset()`: функции онсетов,
         /// выбор пиков, уровни), как приложение на паузе, после простоя и пересборки tap. `false` сбрасывает
@@ -305,7 +305,7 @@ public struct OfflineBeatChain: Sendable {
                     tracker.process(hop)
                     if let resetInterval, hop.endTime >= nextReset {
                         analysis.resets.append(Reset(time: hop.endTime, locked: tracker.locked))
-                        if config.resetAnalyzer { analyzer.reset() }
+                        if config.resetAnalyzer { analyzer.reset(keepOnsetFloor: true) }
                         tracker.reset(keepTempo: true)
                         while nextReset <= hop.endTime { nextReset += resetInterval }
                     }
