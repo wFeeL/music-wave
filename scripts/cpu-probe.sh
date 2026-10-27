@@ -54,8 +54,9 @@
 # суффиксом режима: cpu-expanded.txt, cpu-user-banner.txt, cpu-max-expanded-sample.txt.
 #
 # Частота кадров острова: --set wf.frameRate=30 (или 60, по умолчанию 60) ограничивает кадры
-# в секунду; в шапке отчета строка «frame rate:», приложение подтверждает значение в «настройках
-# из набора» («частота кадров 30,»), без подтверждения прогон провален.
+# в секунду, другое значение отклоняется (код 2); в шапке отчета строка «frame rate:»,
+# приложение подтверждает значение в «настройках из набора» («частота кадров 30,»), без
+# подтверждения прогон провален.
 #
 # Частота кадров в замере. С --settings-suite приложение раз в 10 с пишет в лог строки «отрисовка,
 # свернутый: ...» и «отрисовка, раскрытый: ...» (замер раздела «Отрисовка» и кадров в секунду).
@@ -127,7 +128,8 @@ Quit WaveFeels first. Writes \$OUT/<prefix>.txt (default ci-out/cpu.txt) and pri
                     Every key is listed in the report header ("set:") and added to the report
                     and sample file names (wf.colorFlow=0 adds -colorFlow0:
                     cpu-max-colorFlow0-softPulse0.txt). wf.frameRate=30 (or 60, the default)
-                    caps the island's frames per second; the report header shows it
+                    caps the island's frames per second, any other value is a usage error;
+                    the report header shows it
                     ("frame rate:") and the app confirms it ("частота кадров 30,")
   --island MODE     play run only, the island's state machine still drives it:
                       collapsed  the pointer never expands the island
@@ -302,7 +304,12 @@ while [[ $i -lt $SET_COUNT ]]; do
         value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
         SET_VALUES[i]=$value
     fi
-    if [[ $key == wf.frameRate && $value =~ ^(30|60)$ ]]; then
+    if [[ $key == wf.frameRate ]]; then
+        # Приложение заменило бы другое значение на 60 молча, и замер шел бы не на той частоте.
+        if [[ ! $value =~ ^(30|60)$ ]]; then
+            echo "cpu-probe: --set wf.frameRate=$value: expected 30 or 60" >&2
+            usage
+        fi
         FRAME_RATE=$value
     fi
     PREFIX="$PREFIX-${key#wf.}$(printf '%s' "$value" | tr -cd 'A-Za-z0-9.-')"
