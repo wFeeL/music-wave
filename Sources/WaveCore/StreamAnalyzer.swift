@@ -153,6 +153,9 @@ public final class StreamAnalyzer {
     /// анализатора: переход от тишины к звуку иначе дает пик потока на любой фазе (в пробе пауз GTZAN
     /// 1442 вспышки бочки в первые 0.1 с после паузы, 1150 из них мимо доли). 0.5 с: на GTZAN tune
     /// тишина такой длины внутри файла есть в двух файлах, а промежутки между треками обычно длиннее.
+    /// Уровень это уровень захвата: при тихой громкости самого плеера (она действует до захвата) ниже
+    /// порога может уйти и тихое место трека. Тишина считается в шагах анализа (`silenceGap / hopDuration`),
+    /// поэтому в простое острова (шаг на пробуждение) она набирается дольше; трекер там все равно стоит.
     static let silenceGap = 0.5
     static let silenceLevelDB = broadbandPickerParameters.minLevelDB
     private static let hannENBW: Float = 1.5
@@ -245,6 +248,14 @@ public final class StreamAnalyzer {
         broadbandPicker.reset(keepTypical: keepOnsetFloor)
         silentHops = 0
         refillHops = 0
+    }
+
+    /// Смена трека: типичный пик и уровень акцента выбора пиков начинаются заново (порог широкополосной
+    /// функции снова 10), остальное остается. Новый трек не наследует порог прежнего, в том числе
+    /// сохраненный сбросом `reset(keepOnsetFloor: true)` на паузе прежнего трека перед сменой.
+    public func resetOnsetFloor() {
+        kickPicker.resetTypicalPeak()
+        broadbandPicker.resetTypicalPeak()
     }
 
     /// Остров снова виден после простоя: история функций онсетов и выбор пиков вместе со следящими

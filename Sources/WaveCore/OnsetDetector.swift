@@ -285,6 +285,12 @@ public struct OnlinePeakPicker: Sendable {
         parameters.peakContrast > 0 || parameters.sustainedContrast > 0
     }
 
+    /// Только типичный пик T и уровень акцента A начинаются заново (порог снова `floor`), прошлые odf и
+    /// следящие пики остаются: смена трека посреди звука.
+    public mutating func resetTypicalPeak() {
+        resetTypical()
+    }
+
     /// T и A с начала такие, что опущенный порог (или порог длинной бочки) равен `floor`.
     private mutating func resetTypical() {
         let p = parameters
