@@ -198,7 +198,10 @@ private struct RhythmRecordButton: View {
     }
 
     /// Длина из набранных полей (`RhythmRecordingLength.combine`, обрезается до 10 с...10 мин).
+    /// «Своя» остается выбранной, даже если набранная длина совпала с быстрым значением: иначе
+    /// поля исчезли бы посреди ввода.
     private func applyFields() {
+        customChosen = true
         model.settings.rhythmRecordingDuration = RhythmRecordingLength.combine(
             minutes: RhythmRecordingLength.parse(minutesText), seconds: RhythmRecordingLength.parse(secondsText)
         )
