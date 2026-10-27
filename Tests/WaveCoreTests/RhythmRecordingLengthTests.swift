@@ -37,6 +37,16 @@ struct RhythmRecordingLengthTests {
         #expect(RhythmRecordingLength.combine(minutes: 0, seconds: Int.max) == 600)
     }
 
+    @Test func parseFieldText() {
+        #expect(RhythmRecordingLength.parse("45") == 45)
+        #expect(RhythmRecordingLength.parse(" 3 ") == 3)
+        #expect(RhythmRecordingLength.parse("") == 0)
+        #expect(RhythmRecordingLength.parse("-5") == 5)
+        #expect(RhythmRecordingLength.parse("abc") == 0)
+        #expect(RhythmRecordingLength.parse("99999999999999999999999") == Int.max)
+        #expect(RhythmRecordingLength.combine(minutes: RhythmRecordingLength.parse("99999999999999999999"), seconds: 0) == 600)
+    }
+
     @Test func texts() {
         #expect(RhythmRecordingLength.text(seconds: 30) == "30 с")
         #expect(RhythmRecordingLength.text(seconds: 60) == "1 мин")

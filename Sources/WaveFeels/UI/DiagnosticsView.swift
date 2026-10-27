@@ -92,8 +92,10 @@ private struct RhythmRecordButton: View {
     let model: AppModel
     /// Выбрана «Своя» при длине, совпадающей с быстрым значением.
     @State private var customChosen = false
-    /// Растет, когда введенное число обрезано или пересчитано (90 с стали 1 мин 30 с): поля берут показанное значение заново.
-    @State private var fieldsRevision = 0
+    /// Текст полей «мин» и «с» как набран. Длина обновляется на каждую правку (кнопка не отнимает
+    /// фокус у поля, поэтому ждать Return нельзя); поля выравниваются по длине при показе.
+    @State private var minutesText = ""
+    @State private var secondsText = ""
 
     var body: some View {
         let recording = model.rhythmRecording
@@ -135,12 +137,12 @@ private struct RhythmRecordButton: View {
             }
             if lengthChoice.wrappedValue == Self.customTag {
                 HStack(spacing: 6) {
-                    TextField("мин", value: minutesField, format: .number)
+                    TextField("мин", text: minutesField)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 48)
                     Text("мин")
-                    TextField("с", value: secondsField, format: .number)
+                    TextField("с", text: secondsField)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 48)
@@ -148,7 +150,7 @@ private struct RhythmRecordButton: View {
                     Text("от 10 с до 10 мин")
                         .foregroundStyle(.secondary)
                 }
-                .id(fieldsRevision)
+                .onAppear { syncFields() }
                 .disabled(recording.isBusy)
             }
         }
@@ -175,30 +177,38 @@ private struct RhythmRecordButton: View {
         )
     }
 
-    private var minutesField: Binding<Int> {
-        let settings = model.settings
-        return Binding(
-            get: { settings.rhythmRecordingDuration / 60 },
-            set: { minutes in
-                settings.rhythmRecordingDuration = RhythmRecordingLength.combine(
-                    minutes: minutes, seconds: settings.rhythmRecordingDuration % 60
-                )
-                if minutes != settings.rhythmRecordingDuration / 60 { fieldsRevision += 1 }
+    private var minutesField: Binding<String> {
+        Binding(
+            get: { minutesText },
+            set: { text in
+                minutesText = text
+                applyFields()
             }
         )
     }
 
-    private var secondsField: Binding<Int> {
-        let settings = model.settings
-        return Binding(
-            get: { settings.rhythmRecordingDuration % 60 },
-            set: { seconds in
-                settings.rhythmRecordingDuration = RhythmRecordingLength.combine(
-                    minutes: settings.rhythmRecordingDuration / 60, seconds: seconds
-                )
-                if seconds != settings.rhythmRecordingDuration % 60 { fieldsRevision += 1 }
+    private var secondsField: Binding<String> {
+        Binding(
+            get: { secondsText },
+            set: { text in
+                secondsText = text
+                applyFields()
             }
         )
+    }
+
+    /// Длина из набранных полей (`RhythmRecordingLength.combine`, обрезается до 10 с...10 мин).
+    private func applyFields() {
+        model.settings.rhythmRecordingDuration = RhythmRecordingLength.combine(
+            minutes: RhythmRecordingLength.parse(minutesText), seconds: RhythmRecordingLength.parse(secondsText)
+        )
+    }
+
+    /// Поля показывают сохраненную длину: 90 с это «1» и «30», 3 с это «0» и «10».
+    private func syncFields() {
+        let seconds = model.settings.rhythmRecordingDuration
+        minutesText = String(seconds / 60)
+        secondsText = String(seconds % 60)
     }
 }
 

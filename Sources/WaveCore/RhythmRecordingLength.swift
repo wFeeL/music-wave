@@ -31,6 +31,14 @@ public enum RhythmRecordingLength {
         return sum.overflow ? range.upperBound : normalized(sum.partialValue)
     }
 
+    /// Число из текста поля: цифры без пробелов и знаков, пустой или нецифровой текст это 0,
+    /// слишком длинное число это `Int.max` (дальше его обрежет `combine`).
+    public static func parse(_ text: String) -> Int {
+        let digits = text.filter { $0.isASCII && $0.isNumber }
+        guard !digits.isEmpty else { return 0 }
+        return Int(digits) ?? Int.max
+    }
+
     /// «45 с», «1 мин», «2 мин», «1 мин 30 с»; секунды берутся как есть, меньше 0 это 0.
     public static func text(seconds: Int) -> String {
         let value = max(seconds, 0)

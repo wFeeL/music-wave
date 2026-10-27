@@ -62,6 +62,8 @@ public enum WAVWriter {
                 try? handle.close()
                 throw error
             }
+            // Не `replaceItemAt`: на Linux он теряет файл назначения (проверено тестом). Имена записей
+            // содержат время, поэтому существующий файл здесь бывает только в тестах.
             if manager.fileExists(atPath: url.path) { try manager.removeItem(at: url) }
             try manager.moveItem(at: temporary, to: url)
         } catch {
