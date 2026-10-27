@@ -25,6 +25,8 @@ enum WaveEval {
             var resetEvery: Double?
             var resetTrackerOnly: Bool
             var pairsPerGroup: Int?
+            var pause: Double?
+            var pairGap: Double?
         }
 
         var settings: Settings
@@ -135,10 +137,18 @@ enum WaveEval {
         let settings = Report.Settings(
             split: parsed.split.rawValue, offsetMs: parsed.offsetMs, latencyMs: parsed.latencyMs, renderHz: parsed.renderHz,
             seed: parsed.seed, windowMs: parsed.windowMs, skipSeconds: parsed.skipSeconds, tracker: tracker,
-            resetEvery: parsed.resetEvery, resetTrackerOnly: parsed.resetTrackerOnly, pairsPerGroup: parsed.pairs
+            resetEvery: parsed.resetEvery, resetTrackerOnly: parsed.resetTrackerOnly, pairsPerGroup: parsed.pairs,
+            pause: parsed.pause, pairGap: parsed.pairGap
         )
         var notes = BeatEvaluation.notes
         if parsed.resetEvery != nil { notes += BeatEvaluation.resumeNotes }
+        if let pause = parsed.pause {
+            notes.append(
+                "pause: instead of the forced reset \(pause) s of silence (zeros) after every --reset-every seconds of audio, the "
+                    + "audio continues where it stopped; annotations shifted by the pauses, 'resets' are the ends of the pauses"
+            )
+        }
+        if let gap = parsed.pairGap { notes.append("pair gap: \(gap) s of silence (zeros) between A and B") }
         if parsed.pairs != nil {
             notes.append(
                 "pairs: in every group the first 2N files of the split in list order, pairs (0,1), (2,3)...; each track clipped to "
@@ -175,7 +185,8 @@ enum WaveEval {
                 guard let rows = summaries[split.rawValue] else { continue }
                 let title = parsed.pairs == nil ? "split: \(split.rawValue)" : "split: \(split.rawValue), B cold"
                 out += ["", BeatEvaluation.table(title: title, summaries: rows)]
-                if let resume = BeatEvaluation.resumeTable(title: "split: \(split.rawValue), resume after forced resets", summaries: rows) {
+                let resumeTitle = parsed.pause == nil ? "resume after forced resets" : "resume after silent pauses"
+                if let resume = BeatEvaluation.resumeTable(title: "split: \(split.rawValue), \(resumeTitle)", summaries: rows) {
                     out += ["", resume]
                 }
                 if let warm = warmSummaries?[split.rawValue] {
@@ -196,7 +207,9 @@ enum WaveEval {
             : "tracker " + s.tracker.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
         return "split=\(s.split) window=\(s.windowMs) ms latency=\(s.latencyMs) ms offset=\(s.offsetMs) ms "
             + "render=\(s.renderHz) Hz seed=\(s.seed) skip=\(s.skipSeconds) s "
-            + (s.resetEvery.map { "reset-every=\($0) s" + (s.resetTrackerOnly ? " (tracker only) " : " ") } ?? "") + (s.pairsPerGroup.map { "pairs=\($0)/group " } ?? "") + tracker
+            + (s.resetEvery.map { "reset-every=\($0) s" + (s.resetTrackerOnly ? " (tracker only) " : " ") } ?? "")
+            + (s.pause.map { "pause=\($0) s " } ?? "") + (s.pairsPerGroup.map { "pairs=\($0)/group " } ?? "")
+            + (s.pairGap.map { "pair-gap=\($0) s " } ?? "") + tracker
     }
 
     enum Outcome<Value: Sendable>: Sendable {
@@ -241,7 +254,10 @@ enum WaveEval {
             guard first.sampleRate == second.sampleRate else { return .failure("sample rates differ") }
             let rate = second.sampleRate
             let beats = BeatAnnotations.parse(try String(contentsOfFile: pair.second.annotationPath, encoding: .utf8))
-            let a = EvalPairs.clip(first.samples, sampleRate: rate)
+            var a = EvalPairs.clip(first.samples, sampleRate: rate)
+            if let gap = arguments.pairGap {
+                a += [Float](repeating: 0, count: Int((gap * rate).rounded()))
+            }
             let b = EvalPairs.clip(second.samples, sampleRate: rate)
             let firstDuration = Double(a.count) / rate
             let secondDuration = Double(b.count) / rate
@@ -272,15 +288,25 @@ enum WaveEval {
             let text = try String(contentsOfFile: entry.annotationPath, encoding: .utf8)
             let beats = BeatAnnotations.parse(text)
             guard beats.count >= 2 else { return .failure("fewer than two annotated beats") }
-            let duration = Double(audio.samples.count) / audio.sampleRate
             let name = (entry.wavPath as NSString).lastPathComponent
-            let result = OfflineBeatChain.run(
-                samples: audio.samples, sampleRate: audio.sampleRate, config: arguments.chainConfig(forFile: name)
-            )
             let options = BeatEvaluation.Options(window: arguments.windowMs / 1000, skipSeconds: arguments.skipSeconds)
+            var samples = audio.samples
+            var annotations = beats
+            var cuts: [Double] = []
+            if let pause = arguments.pause, let every = arguments.resetEvery {
+                let paused = EvalPauses.insert(audio.samples, sampleRate: audio.sampleRate, every: every, length: pause)
+                samples = paused.samples
+                cuts = paused.cuts
+                annotations = EvalPauses.shift(beats, cuts: cuts, length: pause)
+            }
+            var result = OfflineBeatChain.run(samples: samples, sampleRate: audio.sampleRate, config: arguments.chainConfig(forFile: name))
+            if let pause = arguments.pause {
+                result.resets = EvalPauses.resets(cuts: cuts, length: pause, states: result.states)
+            }
+            let duration = Double(samples.count) / audio.sampleRate
             return .success(
                 BeatEvaluation.score(
-                    result: result, annotations: beats, duration: duration, options: options,
+                    result: result, annotations: annotations, duration: duration, options: options,
                     path: entry.wavPath, group: entry.group, heldout: entry.heldout
                 )
             )

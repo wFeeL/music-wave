@@ -71,6 +71,40 @@ struct EvalArgumentsTests {
         }
     }
 
+    /// Склейка пар через тишину (`--pair-gap`, смена трека у всего звука системы) и паузы с тишиной вместо
+    /// сбросов (`--pause`, пауза плеера, во время которой захват получает нули): нужные к ним режимы
+    /// обязательны, несовместимые сочетания это ошибка.
+    @Test func pairGapAndPauseOptions() throws {
+        let defaults = try EvalArguments.parse(["list.tsv"])
+        #expect(defaults.pairGap == nil && defaults.pause == nil)
+
+        let gap = try EvalArguments.parse(["--pairs", "28", "--pair-gap", "1", "list.tsv"])
+        #expect(gap.pairs == 28 && gap.pairGap == 1)
+        #expect(throws: EvalArguments.Error.missingValue("--pairs")) {
+            try EvalArguments.parse(["--pair-gap", "1", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--pair-gap", value: "0.0")) {
+            try EvalArguments.parse(["--pairs", "4", "--pair-gap", "0", "list.tsv"])
+        }
+
+        let pause = try EvalArguments.parse(["--reset-every", "7.3", "--pause", "2", "list.tsv"])
+        #expect(pause.resetEvery == 7.3 && pause.pause == 2)
+        // Паузы заменяют сбросы: цепочка не сбрасывается, тишину в звук вставляет `EvalPauses`.
+        #expect(pause.chainConfig(forFile: "a.wav").resetInterval == nil)
+        #expect(throws: EvalArguments.Error.missingValue("--reset-every")) {
+            try EvalArguments.parse(["--pause", "2", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.conflictingOptions("--pause", "--reset-tracker-only")) {
+            try EvalArguments.parse(["--reset-every", "7", "--pause", "2", "--reset-tracker-only", "list.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.conflictingOptions("--owner", "--pause")) {
+            try EvalArguments.parse(["--owner", "--reset-every", "7", "--pause", "2", "owner.tsv"])
+        }
+        #expect(throws: EvalArguments.Error.invalidValue(option: "--pause", value: "-1.0")) {
+            try EvalArguments.parse(["--reset-every", "7", "--pause", "-1", "list.tsv"])
+        }
+    }
+
     @Test func unionGroupsMustExist() throws {
         let parsed = try EvalArguments.parse(["--union", "steady=disco,pop", "x.tsv"])
         try parsed.validateUnions(knownGroups: ["disco", "pop", "jazz"])

@@ -87,6 +87,10 @@ public struct EvalArguments: Sendable, Equatable {
     public var loop = 1
     /// Сброс по `resetEvery` только у трекера, анализ продолжается (`OfflineBeatChain.Config.resetAnalyzer`).
     public var resetTrackerOnly = false
+    /// Пары: секунды тишины между A и B (смена трека у всего звука системы); `nil` без тишины.
+    public var pairGap: Double?
+    /// Вместо сбросов по `resetEvery` пауза с тишиной этой длины, секунды (`EvalPauses`); `nil` без пауз.
+    public var pause: Double?
 
     public init() {}
 
@@ -112,6 +116,9 @@ public struct EvalArguments: Sendable, Equatable {
           --reset-every S            forced reset with tempo memory every S seconds of stream (resume metric):
                                      StreamAnalyzer.reset() and BeatTracker.reset(keepTempo: true), as the app
           --reset-tracker-only       with --reset-every: reset the tracker only (the 1.2.1 evalreset.py probe)
+          --pause S                  with --reset-every: instead of a reset insert S seconds of silence (zeros) and
+                                     continue the audio where it stopped, as a player pause the capture keeps feeding
+          --pair-gap S               with --pairs: S seconds of silence between A and B (track change, all system audio)
           --owner                    list.tsv holds owner rhythm logs: <rhythm.json>\t<beats>\t<group>, the WAV
                                      next to the JSON; replayed with the log's latency, offset and render rate
           --loop N                   owner logs only: play the recording N times in a row (default 1)
@@ -166,6 +173,14 @@ public struct EvalArguments: Sendable, Equatable {
                 let seconds = try number()
                 guard seconds > 0 else { throw Error.invalidValue(option: name, value: String(seconds)) }
                 result.resetEvery = seconds
+            case "--pause":
+                let seconds = try number()
+                guard seconds > 0 else { throw Error.invalidValue(option: name, value: String(seconds)) }
+                result.pause = seconds
+            case "--pair-gap":
+                let seconds = try number()
+                guard seconds > 0 else { throw Error.invalidValue(option: name, value: String(seconds)) }
+                result.pairGap = seconds
             case "--loop":
                 let text = try value()
                 guard let count = Int(text), count >= 1 else { throw Error.invalidValue(option: name, value: text) }
@@ -235,6 +250,12 @@ public struct EvalArguments: Sendable, Equatable {
         if result.pairs != nil, result.resetEvery != nil { throw Error.conflictingOptions("--pairs", "--reset-every") }
         if result.loop > 1, !result.owner { throw Error.conflictingOptions("--loop", "a GTZAN list (use --owner)") }
         if result.resetTrackerOnly, result.resetEvery == nil { throw Error.missingValue("--reset-every") }
+        if result.pause != nil {
+            if result.owner { throw Error.conflictingOptions("--owner", "--pause") }
+            if result.resetEvery == nil { throw Error.missingValue("--reset-every") }
+            if result.resetTrackerOnly { throw Error.conflictingOptions("--pause", "--reset-tracker-only") }
+        }
+        if result.pairGap != nil, result.pairs == nil { throw Error.missingValue("--pairs") }
         guard let path = positional.first else { throw Error.missingList }
         if positional.count > 1 { throw Error.extraArgument(positional[1]) }
         result.listPath = path
@@ -258,7 +279,7 @@ public struct EvalArguments: Sendable, Equatable {
         config.renderRate = renderHz
         config.outputLatency = latencyMs / 1000
         config.syncOffset = offsetMs / 1000
-        config.resetInterval = resetEvery
+        config.resetInterval = pause == nil ? resetEvery : nil
         config.resetAnalyzer = !resetTrackerOnly
         for override in overrides {
             _ = config.trackerParameters.set(override.name, to: override.value)

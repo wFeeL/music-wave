@@ -375,6 +375,33 @@ struct BeatEvaluationTests {
         #expect(warm.annotationCount == 20)
     }
 
+    /// Паузы с тишиной (`wave-eval --pause`): нули после каждых `every` секунд звука, кроме конца;
+    /// моменты звука сдвигаются на все паузы до них, возобновления стоят в конце каждой паузы с захватом,
+    /// который был перед ее началом.
+    @Test func pausesInsertSilenceAndShiftBeats() {
+        let samples = [Float](repeating: 1, count: 1_000)
+        let paused = EvalPauses.insert(samples, sampleRate: 100, every: 3, length: 0.5)
+        #expect(paused.cuts == [3, 6, 9])
+        #expect(paused.samples.count == 1_150)
+        #expect(paused.samples[299] == 1 && paused.samples[300] == 0 && paused.samples[349] == 0 && paused.samples[350] == 1)
+        #expect(paused.samples[699] == 0 && paused.samples[700] == 1)
+        #expect(EvalPauses.insert(samples, sampleRate: 100, every: 10, length: 0.5).cuts.isEmpty)
+
+        #expect(EvalPauses.shift([1, 3, 5, 9.5], cuts: paused.cuts, length: 0.5) == [1, 3.5, 5.5, 11])
+
+        let states = [
+            OfflineBeatChain.State(time: 0, locked: false, bpm: nil, confidence: 0),
+            OfflineBeatChain.State(time: 2.9, locked: true, bpm: 120, confidence: 0.9),
+            OfflineBeatChain.State(time: 3.6, locked: false, bpm: 120, confidence: 0.4),
+        ]
+        let resets = EvalPauses.resets(cuts: paused.cuts, length: 0.5, states: states)
+        #expect(resets == [
+            OfflineBeatChain.Reset(time: 3.5, locked: true),
+            OfflineBeatChain.Reset(time: 7, locked: false),
+            OfflineBeatChain.Reset(time: 10.5, locked: false),
+        ])
+    }
+
     /// Записи владельца: вспышки на доле, на «и» и мимо, темнота с краями, без слияния и до слышимого
     /// конца звука; итоги по группам, объединениям и всем.
     @Test func ownerRecordingsCountOnHalfAndOther() throws {

@@ -69,6 +69,48 @@ public enum EvalPairs {
     }
 }
 
+/// Паузы с тишиной для `wave-eval --reset-every S --pause P`: после каждых `every` секунд звука (кроме
+/// конца) вставляются `length` секунд нулей, и звук продолжается с того же места, как после паузы плеера,
+/// во время которой захват получает нули (поток не встает и анализ не сбрасывается). Доли файла
+/// сдвигаются на паузы до них, возобновления в конце каждой паузы считаются как сбросы
+/// (`BeatEvaluation.resume`).
+public enum EvalPauses {
+    /// Звук с паузами и моменты пауз на оси исходного звука, секунды.
+    public static func insert(_ samples: [Float], sampleRate: Double, every: Double, length: Double) -> (samples: [Float], cuts: [Double]) {
+        let step = max(Int((every * sampleRate).rounded()), 1)
+        let gap = [Float](repeating: 0, count: max(Int((length * sampleRate).rounded()), 0))
+        var out: [Float] = []
+        out.reserveCapacity(samples.count + samples.count / step * gap.count)
+        var cuts: [Double] = []
+        var position = 0
+        while position < samples.count {
+            let end = min(position + step, samples.count)
+            out += samples[position..<end]
+            if end < samples.count {
+                out += gap
+                cuts.append(Double(end) / sampleRate)
+            }
+            position = end
+        }
+        return (out, cuts)
+    }
+
+    /// Моменты исходного звука на оси звука с паузами: плюс длина всех пауз, вставленных не позже них.
+    public static func shift(_ times: [Double], cuts: [Double], length: Double) -> [Double] {
+        times.map { time in time + Double(cuts.filter { $0 <= time }.count) * length }
+    }
+
+    /// Возобновление в конце каждой паузы (ось звука с паузами) с захватом последней публикации до ее
+    /// начала.
+    public static func resets(cuts: [Double], length: Double, states: [OfflineBeatChain.State]) -> [OfflineBeatChain.Reset] {
+        cuts.enumerated().map { index, cut in
+            let start = cut + Double(index) * length
+            let locked = states.last { $0.time < start }?.locked ?? false
+            return OfflineBeatChain.Reset(time: start + length, locked: locked)
+        }
+    }
+}
+
 /// Записи владельца для `wave-eval --owner`: запись ритма с устройства (`RhythmLog` и WAV рядом) и сетка
 /// долей, снятая один раз скриптами разбора (`grid15.py`, `refbeats.py`, `dpcls.py`) и лежащая файлом
 /// долей на оси файла. Запись прогоняется как `wave-eval --replay` (задержка, сдвиг и частота кадров из
