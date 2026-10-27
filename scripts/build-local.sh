@@ -320,6 +320,23 @@ update_tools_hint() {
     fi
 }
 
+# Инструменты, собранные из файлов разных версий (прерванное или частичное обновление):
+# swift-package падает в dyld с «Symbol not found» еще до сборки.
+broken_tools_fail() {
+    if [[ $IS_CLT -eq 1 ]]; then
+        fail "Command Line Tools повреждены: swift-package не запускается (dyld: Symbol not found), так бывает после прерванного обновления. Переустановите их: sudo rm -rf /Library/Developer/CommandLineTools, затем xcode-select --install, и запустите скрипт снова."
+    fi
+    fail "Xcode поврежден: swift-package не запускается (dyld: Symbol not found). Переустановите Xcode из App Store и запустите скрипт снова."
+}
+
+if ! SPM_INFO=$(swift package --version 2>&1); then
+    if [[ "$SPM_INFO" == *"Symbol not found"* || "$SPM_INFO" == *"Library not loaded"* ]]; then
+        printf '%s\n' "$SPM_INFO" | head -n 3 | sed 's/^/    /'
+        broken_tools_fail
+    fi
+    warn "swift package --version не сработал, продолжаю. Если сборка упадет, пришлите файл $LOG."
+fi
+
 SDK_VERSION=$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || true)
 if [[ "${SDK_VERSION%%.*}" =~ ^[0-9]+$ ]]; then
     ui_info "SDK macOS $SDK_VERSION"
@@ -494,6 +511,9 @@ ui_step "Приложение"
 say "Первая сборка займет несколько минут, следующие быстрее"
 STEP_START=$SECONDS
 if ! run_progress "$WORK/build.log" swift build -c release; then
+    if grep -Eq 'Symbol not found|Library not loaded' "$WORK/build.log"; then
+        broken_tools_fail
+    fi
     if [[ $IS_CLT -eq 1 ]] && grep -q 'external macro implementation' "$WORK/build.log"; then
         fail "Command Line Tools не хватает для макросов Swift. Поставьте Xcode из App Store, выполните sudo xcode-select -s /Applications/Xcode.app/Contents/Developer и запустите скрипт снова."
     fi
