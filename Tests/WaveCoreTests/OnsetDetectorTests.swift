@@ -303,6 +303,46 @@ struct OnsetDetectorTests {
         }
     }
 
+    /// Остров снова виден в том же треке (`StreamAnalyzer.resetOnsets(keepOnsetFloor: true)`): как после паузы,
+    /// типичный пик и уровень акцента остаются, и тихие доли снова дают онсеты сразу. Пока остров скрыт,
+    /// анализ идет по одному шагу на пробуждение 15 Гц (`dt` шага 1/15 с): поток между такими шагами
+    /// сравнивает окна через 67 мс, и эти пики средние не двигают. Без сохранения порог снова 10 (как у
+    /// сброса на паузе до 1.3).
+    @Test(arguments: [true, false])
+    func softKicksAfterTheIslandShowsAgain(keepFloor: Bool) async {
+        let (score, references) = await runOffCooperativePool { () -> (Score, Int) in
+            let scene = Drums.softKicksUnderPad(seconds: 28)
+            let analyzer = StreamAnalyzer(sampleRate: Self.rate)
+            let size = analyzer.config.fftSize
+            let hidden = Int(16 * Self.rate)
+            _ = analyzer.processSignal(Array(scene.samples[..<hidden]))
+            let floorBefore = analyzer.broadbandFloor
+            #expect(floorBefore < 10)
+            // Остров скрыт 4 с: шаг на пробуждение, окно кончается на сэмпле пробуждения.
+            let shown = Int(20 * Self.rate)
+            var wake = hidden
+            scene.samples.withUnsafeBufferPointer { all in
+                while wake + Int(Self.rate / 15) <= shown {
+                    wake += Int(Self.rate / 15)
+                    let window = UnsafeBufferPointer(rebasing: all[(wake - size)..<wake])
+                    _ = analyzer.processHop(window: window, endSample: wake, settings: LevelSettings(), dt: 1.0 / 15)
+                }
+            }
+            #expect(analyzer.broadbandFloor == floorBefore, "floor \(floorBefore) before hiding, \(analyzer.broadbandFloor) after")
+            analyzer.resetOnsets(keepOnsetFloor: keepFloor)
+            let hops = analyzer.processSignal(Array(scene.samples[shown...]), firstSample: shown)
+            let onsets = hops.compactMap(\.broadbandOnset?.time).filter { $0 < 24 - 0.05 }
+            let kicks = scene.kicks.filter { $0 >= 20.1 && $0 < 24 - 0.05 }
+            return (Self.score(onsets, reference: kicks, until: 28), kicks.count)
+        }
+        #expect(references == 7)
+        if keepFloor {
+            #expect(score.recall >= 0.85 && score.falsePositives == 0, "recall \(score.recall), false \(score.falsePositives)")
+        } else {
+            #expect(score.recall <= 0.25, "recall \(score.recall)")
+        }
+    }
+
     /// Звук под воротом уровня (-80 dBFS, хвост затухания, шипение между треками) не опускает
     /// порог: после него шум -45 dBFS не дает широкополосных онсетов, кроме самого скачка уровня
     /// на 10 с (он был и с постоянным порогом). Пока типичный пик шел и по звуку под воротом, здесь

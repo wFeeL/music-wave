@@ -274,7 +274,7 @@ public struct OnlinePeakPicker: Sendable {
     }
 
     /// Порог odf сейчас: `floor` или ниже, по типичному пику и уровню акцента.
-    private var effectiveFloor: Float {
+    var effectiveFloor: Float {
         let p = parameters
         guard p.peakContrast > 0 else { return p.floor }
         return min(p.floor, max(p.lowFloor, p.peakContrast * typical, p.accentFloor * accent))
@@ -302,8 +302,9 @@ public struct OnlinePeakPicker: Sendable {
     }
 
     /// Обрабатывает шаг. Возвращает силу онсета `clamp(odf / P, 0, 1)`, если онсет сработал.
-    /// Без выделения памяти.
-    public mutating func process(_ odf: Float, levelDB: Float) -> Float? {
+    /// Без выделения памяти. `updatesTypical` false: типичный пик T и уровень акцента A на этом шаге стоят
+    /// (шаги простоя острова идут реже обычных, и их пики не похожи на пики обычных шагов).
+    public mutating func process(_ odf: Float, levelDB: Float, updatesTypical: Bool = true) -> Float? {
         let odf = odf.isFinite ? max(odf, 0) : 0
         let level = levelDB.isNaN ? Self.floorDB : max(levelDB, Self.floorDB)
         follower = max(odf, follower * followerDecay)
@@ -335,7 +336,7 @@ public struct OnlinePeakPicker: Sendable {
         // между треками) иначе опускал бы порог до прихода слышимого звука.
         let candidateIndex = (ringIndex - preMaxHops + capacity) % capacity
         let candidate = odfRing[candidateIndex]
-        if tracksTypical, candidate > 0, levelRing[candidateIndex] > p.minLevelDB,
+        if updatesTypical, tracksTypical, candidate > 0, levelRing[candidateIndex] > p.minLevelDB,
            candidate > recentMax, candidate > odf, candidate >= olderMax {
             if p.accentFloor > 0, candidate > p.peakContrast * typical {
                 logAccent += p.typicalGain * (log(candidate) - logAccent)

@@ -258,15 +258,20 @@ public final class StreamAnalyzer {
         broadbandPicker.resetTypicalPeak()
     }
 
+    /// Порог широкополосной функции онсетов сейчас (`OnlinePeakPicker`, опущенный по типичному пику).
+    var broadbandFloor: Float { broadbandPicker.effectiveFloor }
+
     /// Остров снова виден после простоя: история функций онсетов и выбор пиков вместе со следящими
     /// пиками начинаются заново, уровни, автоуровень, сглаживание и огибающая удара остаются. В
     /// простое шаги идут по одному на пробуждение, следящий пик спадает за шаг, а не за 5.3 мс, и
-    /// без сброса держал бы порог онсетов высоким еще секунды.
-    public func resetOnsets() {
+    /// без сброса держал бы порог онсетов высоким еще секунды. `keepOnsetFloor` (тот же известный трек,
+    /// как `reset(keepOnsetFloor:)` на паузе) оставляет типичный пик и уровень акцента: шаги простоя их не
+    /// двигают, и опущенный порог тихой аранжировки не ждет снова около 7 с.
+    public func resetOnsets(keepOnsetFloor: Bool = false) {
         kickFlux.reset()
         broadbandFlux.reset()
-        kickPicker.reset()
-        broadbandPicker.reset()
+        kickPicker.reset(keepTypical: keepOnsetFloor)
+        broadbandPicker.reset(keepTypical: keepOnsetFloor)
     }
 
     /// Спектр окна в `spectrum`. БПФ приходит по ссылке (`inout`), а не чтением свойства: метод
@@ -327,13 +332,18 @@ public final class StreamAnalyzer {
         let broadbandODF = bandAmplitudes.withUnsafeBufferPointer { broadbandFlux.process($0) }
 
         let onsetTime = Double(endSample) / rate - Self.onsetLag
-        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB).map { strength in
+        // Шаг простоя острова (`dt` много больше шага): поток сравнивает окна через десятки мс, его пики
+        // выше обычных и подняли бы порог онсетов (70 файлов GTZAN tune, 12 с звука и 8 с простоя: порог
+        // ниже 10 был у 8, после простоя у всех снова 10). Типичный пик и уровень акцента на таких шагах
+        // стоят, и показ острова в том же треке их сохраняет (`resetOnsets(keepOnsetFloor:)`).
+        let regularStep = dt <= 1.5 * config.hopDuration
+        let kickOnset = kickPicker.process(kickODF, levelDB: kickLevelDB, updatesTypical: regularStep).map { strength in
             OnsetEvent(
                 time: onsetTime - Double(kickPicker.lastOnsetDelay) * config.hopDuration,
                 strength: strength, sustained: kickPicker.lastOnsetSustained
             )
         }
-        let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB)
+        let broadbandOnset = broadbandPicker.process(broadbandODF, levelDB: maxLevelDB, updatesTypical: regularStep)
             .map { OnsetEvent(time: onsetTime, strength: $0) }
 
         // Уровни волн: нормировка, сглаживание, слой это половина пика и половина среднего его полос.

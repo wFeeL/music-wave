@@ -203,8 +203,9 @@ nonisolated final class AnalysisEngine: @unchecked Sendable {
                 self.store.publishSchedule(.empty)
             } else {
                 // В простое следящие пики онсетов спадали за пробуждение 15 Гц и могли остаться
-                // завышенными: без сброса бочки терялись бы еще секунды после появления острова.
-                self.analyzer.resetOnsets()
+                // завышенными: без сброса бочки терялись бы еще секунды после появления острова. В том же
+                // треке порог онсетов остается, как после паузы.
+                self.analyzer.resetOnsets(keepOnsetFloor: self.keepsTempoNow())
             }
             self.applyInterval()
         }
