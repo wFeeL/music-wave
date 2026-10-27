@@ -73,11 +73,6 @@ WaveFeels живет в строке меню и рисует волны вок�
    bash scripts/make-signing-key.sh
    ```
    Ключ ляжет в «~/Library/Application Support/WaveFeels/signing», сборка найдет его сама. Сохраните копию этой папки: если ключ потеряется, с новым macOS снова спросит доступ к звуку.
-
-   Если ключ уже лежит в другой папке (например, в старой копии кода), этот шаг не нужен. Укажите папку при первой сборке, дальше скрипт возьмет ключ сам:
-   ```
-   bash scripts/build-local.sh --signing-dir <папка с ключом>/signing --install
-   ```
 4. **Соберите и установите:**
    ```
    bash scripts/build-local.sh --install
