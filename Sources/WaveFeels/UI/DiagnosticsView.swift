@@ -82,38 +82,123 @@ struct DiagnosticsView: View {
     }
 }
 
-/// «Записать 30 с», во время записи «Запись… N с», после нее «Сохранено» и снова кнопка.
+/// «Записать 2 мин» (длина из выбора рядом), во время записи «Запись… N с», после нее
+/// «Сохранено» и снова кнопка. Длина: «30 с», «1 мин», «2 мин», «5 мин» или «Своя» с полями минут и
+/// секунд (10 с...10 мин, лишнее обрезается); выбор хранит `AppSettings.rhythmRecordingDuration`.
 private struct RhythmRecordButton: View {
+    /// Метка пункта «Своя» в выборе длины; быстрые значения помечены своими секундами.
+    private static let customTag = -1
+
     let model: AppModel
+    /// Выбрана «Своя» при длине, совпадающей с быстрым значением.
+    @State private var customChosen = false
+    /// Растет, когда введенное число обрезано или пересчитано (90 с стали 1 мин 30 с): поля берут показанное значение заново.
+    @State private var fieldsRevision = 0
 
     var body: some View {
         let recording = model.rhythmRecording
-        HStack(spacing: 8) {
-            switch recording.phase {
-            case .idle, .saved, .failed:
-                Button("Записать 30 с") {
-                    model.startRhythmRecording()
+        let settings = model.settings
+        let seconds = settings.rhythmRecordingDuration
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                switch recording.phase {
+                case .idle, .saved, .failed:
+                    Button(RhythmRecordingLength.buttonTitle(seconds: seconds)) {
+                        model.startRhythmRecording()
+                    }
+                case .recording(let recorded):
+                    Button(RhythmRecordingLength.progressTitle(seconds: recorded)) {}
+                        .disabled(true)
+                case .saving:
+                    Button("Сохраняю…") {}
+                        .disabled(true)
                 }
-            case .recording(let seconds):
-                Button("Запись… \(seconds) с") {}
-                    .disabled(true)
-            case .saving:
-                Button("Сохраняю…") {}
-                    .disabled(true)
+                Picker("Длина записи", selection: lengthChoice) {
+                    ForEach(RhythmRecordingLength.presets, id: \.self) { preset in
+                        Text(RhythmRecordingLength.text(seconds: preset)).tag(preset)
+                    }
+                    Text("Своя").tag(Self.customTag)
+                }
+                .labelsHidden()
+                .fixedSize()
+                .disabled(recording.isBusy)
+                switch recording.phase {
+                case .saved:
+                    Text("Сохранено")
+                        .foregroundStyle(.secondary)
+                case .failed(let message):
+                    Text(message)
+                        .foregroundStyle(.orange)
+                case .idle, .recording, .saving:
+                    EmptyView()
+                }
             }
-            switch recording.phase {
-            case .saved:
-                Text("Сохранено")
-                    .foregroundStyle(.secondary)
-            case .failed(let message):
-                Text(message)
-                    .foregroundStyle(.orange)
-            case .idle, .recording, .saving:
-                EmptyView()
+            if lengthChoice.wrappedValue == Self.customTag {
+                HStack(spacing: 6) {
+                    TextField("мин", value: minutesField, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 48)
+                    Text("мин")
+                    TextField("с", value: secondsField, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 48)
+                    Text("с")
+                    Text("от 10 с до 10 мин")
+                        .foregroundStyle(.secondary)
+                }
+                .id(fieldsRevision)
+                .disabled(recording.isBusy)
             }
         }
         .font(.system(size: 12))
-        .help("Звук и вспышки за 30 с в ~/Library/Logs/WaveFeels, остров должен оставаться на экране")
+        .help("Звук и вспышки за выбранное время (от 10 с до 10 мин) в ~/Library/Logs/WaveFeels, остров должен оставаться на экране")
+    }
+
+    /// Выбранный пункт: быстрое значение, если длина равна ему и «Своя» не выбрана, иначе «Своя».
+    private var lengthChoice: Binding<Int> {
+        let settings = model.settings
+        return Binding(
+            get: {
+                let seconds = settings.rhythmRecordingDuration
+                return !customChosen && RhythmRecordingLength.presets.contains(seconds) ? seconds : Self.customTag
+            },
+            set: { choice in
+                if choice == Self.customTag {
+                    customChosen = true
+                } else {
+                    customChosen = false
+                    settings.rhythmRecordingDuration = choice
+                }
+            }
+        )
+    }
+
+    private var minutesField: Binding<Int> {
+        let settings = model.settings
+        return Binding(
+            get: { settings.rhythmRecordingDuration / 60 },
+            set: { minutes in
+                settings.rhythmRecordingDuration = RhythmRecordingLength.combine(
+                    minutes: minutes, seconds: settings.rhythmRecordingDuration % 60
+                )
+                if minutes != settings.rhythmRecordingDuration / 60 { fieldsRevision += 1 }
+            }
+        )
+    }
+
+    private var secondsField: Binding<Int> {
+        let settings = model.settings
+        return Binding(
+            get: { settings.rhythmRecordingDuration % 60 },
+            set: { seconds in
+                settings.rhythmRecordingDuration = RhythmRecordingLength.combine(
+                    minutes: settings.rhythmRecordingDuration / 60, seconds: seconds
+                )
+                if seconds != settings.rhythmRecordingDuration % 60 { fieldsRevision += 1 }
+            }
+        )
     }
 }
 

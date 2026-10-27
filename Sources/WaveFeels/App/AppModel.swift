@@ -69,7 +69,7 @@ final class AppModel {
     /// Те же объекты, что внутри `pipeline`; нужны настройкам и диагностике.
     let processList: AudioProcessList
     let output: OutputDeviceMonitor
-    /// «Записать 30 с» в разделе «Ритм» диагностики.
+    /// «Записать …» в разделе «Ритм» диагностики.
     let rhythmRecording: RhythmRecording
 
     private(set) var islandState: IslandState = .hidden
@@ -1940,7 +1940,7 @@ extension AppModel {
 
     static let rhythmSectionTitle = "Ритм"
 
-    /// «Записать 30 с»: запись ритма с версией, сборкой, устройством вывода, режимом задержки,
+    /// «Записать …»: запись ритма длиной `settings.rhythmRecordingDuration` с версией, сборкой, устройством вывода, режимом задержки,
     /// периодом отрисовки, упреждением показа и настройками, от которых зависит видимое свечение
     /// («Уменьшение движения» системы, яркость свечения, «вздох», мягкий пульс, энергосбережение).
     /// Задержку, сдвиг и частоту берет сама запись у анализа, «Уменьшение движения» и пульс на
@@ -1969,7 +1969,7 @@ extension AppModel {
             softPulse: settings.softPulse,
             lowPower: lowPower
         )
-        rhythmRecording.start(meta: meta)
+        rhythmRecording.start(meta: meta, duration: settings.rhythmRecordingDuration)
     }
 
     /// Текст для буфера обмена: те же разделы, что в окне диагностики.

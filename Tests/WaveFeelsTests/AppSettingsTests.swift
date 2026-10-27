@@ -75,6 +75,7 @@ struct AppSettingsTests {
             #expect(settings.expandDelay == 0.15)
             #expect(settings.followDisplayOptions == true)
             #expect(settings.frameRate == 60)
+            #expect(settings.rhythmRecordingDuration == 120)
         }
     }
 
@@ -111,6 +112,7 @@ struct AppSettingsTests {
             written.expandDelay = 0.5
             written.followDisplayOptions = false
             written.frameRate = 30
+            written.rhythmRecordingDuration = 45
 
             let read = AppSettings(defaults: defaults)
             #expect(read.source == source)
@@ -138,6 +140,7 @@ struct AppSettingsTests {
             #expect(read.expandDelay == 0.5)
             #expect(read.followDisplayOptions == false)
             #expect(read.frameRate == 30)
+            #expect(read.rhythmRecordingDuration == 45)
 
             read.source = .systemWide
             read.source = .systemWide
@@ -175,6 +178,7 @@ struct AppSettingsTests {
             settings.expandDelay = 0.3
             settings.followDisplayOptions = false
             settings.frameRate = 30
+            settings.rhythmRecordingDuration = 300
 
             for key in [
                 "wf.source", "wf.sensitivity", "wf.levelMode", "wf.followSystemVolume",
@@ -182,7 +186,7 @@ struct AppSettingsTests {
                 "wf.hideDelay", "wf.hideInFullscreen", "wf.showTrackBanner", "wf.paused",
                 "wf.waveStyle", "wf.colorFlow", "wf.colorByBand", "wf.spectrumPeaks", "wf.softStop", "wf.artworkGlow",
                 "wf.progressLine", "wf.autoSource", "wf.trackSwipe", "wf.expandDelay",
-                "wf.followDisplayOptions", "wf.frameRate",
+                "wf.followDisplayOptions", "wf.frameRate", "wf.rhythmRecordingDuration",
             ] {
                 #expect(defaults.object(forKey: key) != nil, "нет ключа \(key)")
             }
@@ -398,6 +402,23 @@ struct AppSettingsTests {
             #expect(defaults.integer(forKey: "wf.frameRate") == 60)
             defaults.set(30.0, forKey: "wf.frameRate")
             #expect(AppSettings(defaults: defaults).frameRate == 30)
+        }
+    }
+
+    /// Длина записи ритма 10...600 с: чужое сохраненное значение обрезается, присвоенное тоже.
+    @Test func rhythmRecordingDurationIsClamped() {
+        Self.withDefaults { defaults in
+            defaults.set(5, forKey: "wf.rhythmRecordingDuration")
+            let settings = AppSettings(defaults: defaults)
+            #expect(settings.rhythmRecordingDuration == 10)
+            settings.rhythmRecordingDuration = 90
+            #expect(settings.rhythmRecordingDuration == 90)
+            #expect(defaults.integer(forKey: "wf.rhythmRecordingDuration") == 90)
+            settings.rhythmRecordingDuration = 5_000
+            #expect(settings.rhythmRecordingDuration == 600)
+            #expect(defaults.integer(forKey: "wf.rhythmRecordingDuration") == 600)
+            defaults.set(240.0, forKey: "wf.rhythmRecordingDuration")
+            #expect(AppSettings(defaults: defaults).rhythmRecordingDuration == 240)
         }
     }
 }

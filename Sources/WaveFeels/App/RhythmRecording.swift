@@ -3,7 +3,8 @@ import Observation
 import QuartzCore
 import WaveCore
 
-/// Кнопка «Записать 30 с» в разделе «Ритм» диагностики: 30 с анализа, расписаний свечения и
+/// Кнопка «Записать …» (длина из `AppSettings.rhythmRecordingDuration`, по умолчанию 2 мин, от 10 с
+/// до 10 мин) в разделе «Ритм» диагностики: столько секунд анализа, расписаний свечения и
 /// вспышек рендера (`RhythmSession`) и звук, как его слышал анализ, в
 /// `~/Library/Logs/WaveFeels/rhythm-<yyyyMMdd-HHmmss>.json` и `.wav`.
 ///
@@ -14,7 +15,8 @@ import WaveCore
 /// набран и показан последний кадр, который мог по нему вспыхнуть, или пока запись не кончится
 /// раньше (остров скрылся, захват остановлен или начат заново, пропуск в потоке, поток встал).
 /// Тогда запись снимается с анализа, JSON и WAV пишутся вне главного потока, Finder показывает
-/// файлы, кнопка 3 с пишет «Сохранено». Без звука за 3 с запись бросается без файлов.
+/// файлы, кнопка 3 с пишет «Сохранено». Без звука за 3 с запись бросается без файлов. Память на 10 мин
+/// около 58 МБ (звук Int16 моно, 48 кГц); WAV пишется кусками (`WAVWriter.write`).
 @MainActor
 @Observable
 final class RhythmRecording {
@@ -27,13 +29,12 @@ final class RhythmRecording {
         case failed(String)
     }
 
-    static let duration = 30.0
     static let pollInterval: Duration = .milliseconds(250)
     /// Сколько ждать первого шага анализа, с.
     static let startTimeout = 3.0
     /// Запас после слышимого конца звука, с: кадры до него уже показаны.
     static let tail = 0.1
-    /// Предел всей записи сверх `duration`, с (например, рендер стоит).
+    /// Предел всей записи сверх длины записи, с (например, рендер стоит).
     static let overrun = 10.0
     /// Сколько показывать «Сохранено» или ошибку.
     static let messageDuration: Duration = .seconds(3)
@@ -51,6 +52,8 @@ final class RhythmRecording {
     /// «Уменьшение движения» уже отмечено в этой записи.
     @ObservationIgnored private var notedReduceMotion = false
     @ObservationIgnored private var startedAt = 0.0
+    /// Длина текущей записи, с.
+    @ObservationIgnored private var duration = 0.0
     @ObservationIgnored private var stamp = ""
 
     init(pipeline: AudioPipeline) {
@@ -65,11 +68,13 @@ final class RhythmRecording {
         }
     }
 
-    /// Начинает запись; `meta`: версия, сборка, устройство, режим задержки и период отрисовки.
-    func start(meta: RhythmLog.Meta) {
+    /// Начинает запись на `duration` секунд (обрезается до `RhythmRecordingLength.range`); `meta`:
+    /// версия, сборка, устройство, режим задержки и период отрисовки.
+    func start(meta: RhythmLog.Meta, duration: Int) {
         guard !isBusy else { return }
         task?.cancel()
-        let session = RhythmSession(RhythmRecorder(duration: Self.duration, meta: meta))
+        self.duration = Double(RhythmRecordingLength.normalized(duration))
+        let session = RhythmSession(RhythmRecorder(duration: self.duration, meta: meta))
         self.session = session
         notedReduceMotion = meta.reduceMotion
         startedAt = CACurrentMediaTime()
@@ -125,7 +130,7 @@ final class RhythmRecording {
         guard let session else { return true }
         let status = session.status
         let elapsed = now - startedAt
-        var done = elapsed > Self.duration + Self.overrun
+        var done = elapsed > duration + Self.overrun
         if !status.started {
             done = done || status.endReason != nil || elapsed > Self.startTimeout
         } else if let reason = status.endReason {
@@ -199,7 +204,7 @@ final class RhythmRecording {
         let jsonURL = directory.appendingPathComponent(json)
         let wavURL = directory.appendingPathComponent(wav)
         let rate = Int(log.meta.sampleRate.rounded())
-        try WAVWriter.pcm16Mono(samples, sampleRate: rate).write(to: wavURL, options: .atomic)
+        try WAVWriter.write(samples, sampleRate: rate, to: wavURL)
         try log.encoded().write(to: jsonURL, options: .atomic)
         return [jsonURL, wavURL]
     }

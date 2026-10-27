@@ -52,6 +52,8 @@ final class AppSettings {
         static let expandDelay = "wf.expandDelay"
         static let followDisplayOptions = "wf.followDisplayOptions"
         static let frameRate = "wf.frameRate"
+        /// Длина записи ритма, секунды (`RhythmRecordingLength`).
+        static let rhythmRecordingDuration = "wf.rhythmRecordingDuration"
     }
 
     enum Limits {
@@ -99,6 +101,7 @@ final class AppSettings {
         static let expandDelay = IslandStateMachine.defaultExpandDelay
         static let followDisplayOptions = true
         static let frameRate = RenderPacing.defaultFrameRate
+        static let rhythmRecordingDuration = RhythmRecordingLength.defaultSeconds
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -137,6 +140,7 @@ final class AppSettings {
     @ObservationIgnored private var storedExpandDelay: Double
     @ObservationIgnored private var storedFollowDisplayOptions: Bool
     @ObservationIgnored private var storedFrameRate: Int
+    @ObservationIgnored private var storedRhythmRecordingDuration: Int
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -227,6 +231,9 @@ final class AppSettings {
         storedFollowDisplayOptions = Self.readBool(defaults, Key.followDisplayOptions)
             ?? Default.followDisplayOptions
         storedFrameRate = RenderPacing.normalizedFrameRate(Self.readInt(defaults, Key.frameRate) ?? Default.frameRate)
+        storedRhythmRecordingDuration = RhythmRecordingLength.normalized(
+            Self.readInt(defaults, Key.rhythmRecordingDuration) ?? Default.rhythmRecordingDuration
+        )
     }
 
     // MARK: - Свойства
@@ -535,6 +542,21 @@ final class AppSettings {
             guard value != storedFrameRate else { return }
             withMutation(keyPath: \.frameRate) { storedFrameRate = value }
             defaults.set(value, forKey: Key.frameRate)
+        }
+    }
+
+    /// Длина записи ритма в секундах, 10...600 (`RhythmRecordingLength.range`); по умолчанию 120.
+    /// Вне диапазона значение обрезается. Читается кнопкой «Записать …» в диагностике.
+    var rhythmRecordingDuration: Int {
+        get {
+            access(keyPath: \.rhythmRecordingDuration)
+            return storedRhythmRecordingDuration
+        }
+        set {
+            let value = RhythmRecordingLength.normalized(newValue)
+            guard value != storedRhythmRecordingDuration else { return }
+            withMutation(keyPath: \.rhythmRecordingDuration) { storedRhythmRecordingDuration = value }
+            defaults.set(value, forKey: Key.rhythmRecordingDuration)
         }
     }
 
