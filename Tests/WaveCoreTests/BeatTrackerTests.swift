@@ -1539,6 +1539,40 @@ struct BeatTrackerTests {
         #expect(kickEvents.isEmpty, "\(kickEvents.count) kick onsets glow on their own")
     }
 
+    /// Сетка двойного темпа с онсетами только на каждой второй доле (160 BPM, функция онсетов на всех
+    /// долях с акцентом на одной четности): по всем долям уверенность колеблется около 0.5, серия
+    /// попаданий не длиннее одного, и без `everyOtherLockRatio` захвата нет никогда. С ним показанная
+    /// четность, у которой онсеты, захватывается по своим долям, и они вспыхивают, а скрытые нет.
+    /// Когда показ стоит на четности без онсетов (акцент на другой), захвата нет: правило не
+    /// захватывает доли, которые сами не попадают. Скрытая четность с онсетом через раз (три доли из
+    /// четырех) попадает вдвое реже показанной: это ниже 2.5, и захват ждет правила всех долей (серия
+    /// из трех его не дает); при отношении 1.5 сетка захватывается по показанным долям.
+    @Test(arguments: [
+        (true, [true, false], 2.5, true), (false, [true, false], 2.5, false), (true, [true, false], 0.0, false),
+        (true, [true, true, true, false], 2.5, false), (true, [true, true, true, false], 1.5, true),
+    ])
+    func everyOtherLocksOnTheShownBeats(accentOnOnsets: Bool, onsets: [Bool], ratio: Double, locks: Bool) throws {
+        var tracker = BeatTracker(framesPerSecond: Self.fps, parameters: .init(everyOtherLockRatio: ratio))
+        var hops = SyntheticBeats(bpm: 160)
+        hops.onsets = onsets
+        hops.beatODF = accentOnOnsets ? [60, 50] : [50, 60]
+        var everLocked = false
+        hops.feed(&tracker, until: 12) { tracker in
+            if tracker.locked { everLocked = true }
+        }
+        let period = try #require(tracker.period)
+        try #require(abs(period * 160 / 60 - 1) < 0.02, "tracker at \(60 / period) BPM")
+        try #require(tracker.shownParity != nil, "every-other display off")
+        #expect(everLocked == locks, "locked \(everLocked), confidence \(tracker.confidence)")
+        guard locks else { return }
+        let amplitudes = Self.predictedAmplitudes(&tracker, &hops, from: 12.5, until: 16, scenePeriod: 60.0 / 160)
+        try #require(amplitudes.count >= 8, "\(amplitudes.count) beats checked")
+        for (beat, amplitude) in amplitudes.sorted(by: { $0.key < $1.key }) {
+            let flashes = amplitude > OfflineBeatChain.eventRise
+            #expect(flashes == (beat % 2 == 0), "beat \(beat): amplitude \(amplitude)")
+        }
+    }
+
     /// Темп у порога показа через долю (период 0.42 с, около 143 BPM) с колебанием периода ±1 % за
     /// 4 с: показ через долю, раз включившись, не выключается и не включается снова (у порога
     /// гистерезис, выключение выше `everyOtherPeriod × everyOtherRelease`).
@@ -1941,6 +1975,9 @@ struct SyntheticBeats {
     var kickEvery = 1
     /// Широкополосная функция на долях по кругу (доля k берет `beatODF[k % count]`).
     var beatODF: [Float] = [50]
+    /// Широкополосный онсет на доле k, только когда `onsets[k % count]`; функция онсетов и бочка на
+    /// всех долях.
+    var onsets: [Bool] = [true]
     /// Уровень бочки громкий только на шагах с онсетом бочки (иначе на любой доле).
     var quietBetweenKicks = false
     private var beatIndex = 0
@@ -1962,8 +1999,10 @@ struct SyntheticBeats {
                 beatIndex += 1
                 nextBeatTime += 60 / bpm
             }
+            let beat = onset != nil
+            if beat, !onsets.isEmpty, !onsets[(beatIndex - 1) % onsets.count] { onset = nil }
             var hop = Self.hop(endTime: endTime, broadband: onset, kick: kick)
-            if onset != nil { hop.broadbandODF = odf }
+            if beat { hop.broadbandODF = odf }
             if quietBetweenKicks, kick == nil { hop.kickLevelDB = -40 }
             if offbeatODF > 0, nextOffbeatTime <= endTime {
                 hop.broadbandODF = max(hop.broadbandODF, offbeatODF)

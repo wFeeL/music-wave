@@ -31,7 +31,8 @@ public enum UnlockReason: String, Sendable, Codable, CodingKeyRepresentable {
 ///    события свечения;
 /// 4. когда окно доли закрылось, уверенность сдвигается к попаданию или промаху на `confidenceGain`.
 ///    Захват при уверенности от `lockConfidence` и `lockHits` попаданиях подряд, отпускание ниже
-///    `unlockConfidence`. Смена темпа на другую сетку и скачок фазы делят уверенность пополам, обнуляют
+///    `unlockConfidence`; при показе через долю считаются и одни показанные доли, когда они попадают
+///    заметно чаще скрытых (`everyOtherLockRatio`). Смена темпа на другую сетку и скачок фазы делят уверенность пополам, обнуляют
 ///    счет попаданий и отпускают захват (`beat-sync.md` 2.6). Причина последней потери захвата в
 ///    `lastUnlockReason`;
 /// 5. энергетический ворот: пик уровня бочки держится и спадает на `gateFallPerBeatDB` за долю (при
@@ -283,6 +284,25 @@ public struct BeatTracker: Sendable {
         /// Запас перехвата показа через долю: гребенка другой четности должна быть выше гребенки
         /// показанной больше чем в `1 + everyOtherHold` раза (0.5 это в 1.5 раза).
         public var everyOtherHold: Double
+        /// Захват на показанных долях: при показе через долю каждая четность id копит свою уверенность
+        /// и серию попаданий, и когда уверенность показанной четности не ниже уверенности скрытой,
+        /// умноженной на это число, захват, его отпускание и вес показа идут от большей из уверенностей
+        /// (всех долей или показанных) и от большей серии. Сетка двойного темпа, у которой онсеты есть
+        /// только на каждой второй доле (журнал владельца, трек D, 157 BPM: шесть попаданий подряд на
+        /// показанных долях и промахи между ними), иначе держит уверенность около 0.5 и не захватывается
+        /// никогда, хотя по показанным долям она уверена как сетка половинного темпа. 0 выключает.
+        ///
+        /// На GTZAN tune (steady) 2.5: вспышек мимо долей всего и с захватом столько же (2088 и 555),
+        /// wrongLock 12 / 215 тот же, вспышек в долю на 43 больше (покрытие долей 0.4244 -> 0.4258,
+        /// точность всех вспышек 0.8677 -> 0.8681), доля времени с захватом 0.3507 -> 0.3510; трек D
+        /// владельца: доля времени с захватом 0.03 -> 0.05, все вспышки с захватом в долю. Отклоненные
+        /// варианты: считать только показанные доли (захват на быстрых треках, где попадают обе
+        /// четности, вдвое медленнее: доля времени с захватом 0.3464, wrongLock 13 / 226); правило
+        /// показанных долей без условия на скрытую четность (0.3544, но вспышек с захватом мимо долей
+        /// 575 и wrongLock 13 / 235: сетка на «и», у которой попадают обе четности, захватывается
+        /// быстрее); отношение 1.5 / 1.75 / 2 (вспышек с захватом мимо долей 564 / 562 / 558); 3 как 2.5,
+        /// но на 7 вспышек в долю меньше.
+        public var everyOtherLockRatio: Double
         /// Спад удержания уровня бочки за долю, дБ.
         public var gateFallPerBeatDB: Float
         /// Спад удержания без темпа за 0.25 с, дБ.
@@ -327,6 +347,7 @@ public struct BeatTracker: Sendable {
             plpShadow: Double = 0.8,
             everyOtherPeriod: Double = 0.42,
             everyOtherHold: Double = 0.5,
+            everyOtherLockRatio: Double = 2.5,
             gateFallPerBeatDB: Float = 14,
             gateFallNoTempoDB: Float = 6
         ) {
@@ -368,6 +389,7 @@ public struct BeatTracker: Sendable {
             self.plpShadow = plpShadow
             self.everyOtherPeriod = everyOtherPeriod
             self.everyOtherHold = everyOtherHold
+            self.everyOtherLockRatio = everyOtherLockRatio
             self.gateFallPerBeatDB = gateFallPerBeatDB
             self.gateFallNoTempoDB = gateFallNoTempoDB
         }
@@ -452,6 +474,10 @@ public struct BeatTracker: Sendable {
     private var committedAmplitude: Float?
     private(set) var confidence = 0.0
     private(set) var hits = 0
+    /// Уверенность и серия попаданий по четности id доли (`everyOtherLockRatio`): при показе через
+    /// долю каждая четность считает только свои доли, без показа обе повторяют `confidence` и `hits`.
+    private(set) var parityConfidence = SIMD2<Double>(repeating: 0)
+    private var parityHits = SIMD2<Int>(repeating: 0)
     private(set) var locked = false
     /// Почему захват потерян в последний раз; `nil`, если захвата еще не было (и после `reset()` без
     /// захвата). Меняется только при потере захвата: смена темпа без захвата причину не трогает,
@@ -557,7 +583,7 @@ public struct BeatTracker: Sendable {
             events: events,
             bpm: period.map { 60 / $0 },
             period: period,
-            confidence: confidence,
+            confidence: gridConfidence,
             locked: locked,
             unlockReason: locked ? nil : lastUnlockReason,
             weight: displayWeight,
@@ -574,7 +600,28 @@ public struct BeatTracker: Sendable {
         guard let nextBeat, let period, ambientAudible else {
             return AmbientInfo(anchor: 0, period: 0, confidence: 0, energy: 0)
         }
-        return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(confidence) * energyGate, energy: 0)
+        return AmbientInfo(anchor: nextBeat, period: period, confidence: Float(gridConfidence) * energyGate, energy: 0)
+    }
+
+    /// Показанная четность попадает заметно чаще скрытой (`everyOtherLockRatio`): решения о захвате
+    /// идут и по ее долям.
+    private var shownParityLeads: Bool {
+        guard parameters.everyOtherLockRatio > 0, let shown = shownParity else { return false }
+        let index = Int(shown)
+        return parityConfidence[index] >= parameters.everyOtherLockRatio * parityConfidence[1 - index]
+    }
+
+    /// Уверенность для захвата, веса показа и защиты захвата: при `shownParityLeads` большая из
+    /// уверенности всех долей и уверенности показанных.
+    var gridConfidence: Double {
+        guard shownParityLeads, let shown = shownParity else { return confidence }
+        return max(confidence, parityConfidence[Int(shown)])
+    }
+
+    /// Серия попаданий для захвата и роста веса, как `gridConfidence`.
+    private var gridHits: Int {
+        guard shownParityLeads, let shown = shownParity else { return hits }
+        return max(hits, parityHits[Int(shown)])
     }
 
     /// Длинное среднее уровня бочки не ниже `ambientFloorDB`.
@@ -667,6 +714,8 @@ public struct BeatTracker: Sendable {
         committedAmplitude = nil
         confidence = 0
         hits = 0
+        parityConfidence = .zero
+        parityHits = .zero
         lastUnlockReason = locked ? .reset : nil
         locked = false
         disagreements = 0
@@ -749,7 +798,7 @@ public struct BeatTracker: Sendable {
                 recordRaceEvidence(shadowScore: phaseScore(at: shadow, period: estimate.period), currentScore: comb.currentScore)
             }
         }
-        let plpProposal = locked && confidence >= parameters.lockConfidence ? plpCandidate(period: estimate.period) : nil
+        let plpProposal = locked && gridConfidence >= parameters.lockConfidence ? plpCandidate(period: estimate.period) : nil
         if (plpProposal != nil) != proposedByPLP {
             proposedByPLP = plpProposal != nil
             disagreements = 0
@@ -762,7 +811,7 @@ public struct BeatTracker: Sendable {
         guard let comb else { return }
         let diff = Self.circularDifference(comb.time - nextBeat, period: estimate.period)
         let stronger = comb.score > (1 + parameters.phaseJumpMargin) * comb.currentScore
-        if parameters.raceStartRatio > 0, shadowNext == nil, locked, confidence >= parameters.lockConfidence {
+        if parameters.raceStartRatio > 0, shadowNext == nil, locked, gridConfidence >= parameters.lockConfidence {
             let leans = abs(abs(diff) - estimate.period / 2) <= parameters.matchWindow * estimate.period
                 && comb.score >= parameters.raceStartRatio * comb.currentScore
             raceStartEvidence += Self.raceStartGain * ((leans ? 1 : 0) - raceStartEvidence)
@@ -781,7 +830,7 @@ public struct BeatTracker: Sendable {
                 shadowVotes = agrees ? shadowVotes + 1 : 0
             }
             if disagreements >= parameters.phaseJumpChecks, shadowNext == nil {
-                if locked, confidence >= parameters.lockConfidence {
+                if locked, gridConfidence >= parameters.lockConfidence {
                     startShadow(at: comb.time)
                 } else {
                     // Уверенного захвата нет, защищать нечего: скачок сразу, как в 1.1.
@@ -809,6 +858,8 @@ public struct BeatTracker: Sendable {
         beatCounter += 2
         confidence = 1
         hits = max(hits, parameters.lockHits)
+        parityConfidence = SIMD2(repeating: 1)
+        parityHits = SIMD2(repeating: hits)
         locked = true
         disagreements = 0
         dropShadow()
@@ -878,6 +929,8 @@ public struct BeatTracker: Sendable {
     /// запоминается, только если захват был.
     private mutating func resetConfidence(_ reason: UnlockReason) {
         confidence *= 0.5
+        parityConfidence *= 0.5
+        parityHits = .zero
         capWeight()
         hits = 0
         if locked { lastUnlockReason = reason }
@@ -943,7 +996,7 @@ public struct BeatTracker: Sendable {
             shadowNext = shadow + period
             shadowMatched = false
             shadowBeats += 1
-            shadowLead = shadowConfidence > confidence + parameters.raceMargin ? shadowLead + 1 : 0
+            shadowLead = shadowConfidence > gridConfidence + parameters.raceMargin ? shadowLead + 1 : 0
             if let nextBeat, abs(Self.circularDifference(shadow + period - nextBeat, period: period)) <= parameters.phaseJump * period {
                 // Фазы сошлись: это та же сетка.
                 dropShadow()
@@ -997,6 +1050,8 @@ public struct BeatTracker: Sendable {
         beatCounter += 2
         disagreements = 0
         confidence = shadowConfidence
+        parityConfidence = SIMD2(repeating: shadowConfidence)
+        parityHits = SIMD2(repeating: shadowHits)
         capWeight()
         hits = shadowHits
         let wasLocked = locked
@@ -1174,13 +1229,21 @@ public struct BeatTracker: Sendable {
                 confidence += parameters.confidenceGain * (hit - confidence)
                 halfConfidence += parameters.confidenceGain * ((halfMatched ? 1.0 : 0.0) - halfConfidence)
                 hits = nextMatched ? hits + 1 : 0
+                if shownParity != nil {
+                    let parity = Int(beatCounter & 1)
+                    parityConfidence[parity] += parameters.confidenceGain * (hit - parityConfidence[parity])
+                    parityHits[parity] = nextMatched ? parityHits[parity] + 1 : 0
+                } else {
+                    parityConfidence = SIMD2(repeating: confidence)
+                    parityHits = SIMD2(repeating: hits)
+                }
                 if locked {
                     // Первая доля после брейка решает: промах значит, что сетка ушла, захват сразу
                     // отпускается. Ее вспышка зафиксирована еще при закрытом вороте и не видна.
-                    locked = confidence >= parameters.unlockConfidence && (nextMatched || !coasted)
+                    locked = gridConfidence >= parameters.unlockConfidence && (nextMatched || !coasted)
                     if !locked { lastUnlockReason = .misses }
                 } else {
-                    locked = confidence >= parameters.lockConfidence && hits >= parameters.lockHits
+                    locked = gridConfidence >= parameters.lockConfidence && gridHits >= parameters.lockHits
                         && phaseBeatsHalf(nextBeat, period: period)
                 }
                 // Атака при закрытом вороте сетку не подтверждает: решает доля с открытым воротом. После
@@ -1242,14 +1305,15 @@ public struct BeatTracker: Sendable {
 
     private mutating func updateWeight() {
         displayWeight = Self.nextWeight(
-            displayWeight, confidence: confidence, beats: hopDuration / (period ?? Self.defaultPeriod), parameters: parameters,
-            rising: nextBeat != nil && (locked || hits >= parameters.weightHits)
+            displayWeight, confidence: gridConfidence, beats: hopDuration / (period ?? Self.defaultPeriod),
+            parameters: parameters,
+            rising: nextBeat != nil && (locked || gridHits >= parameters.weightHits)
         )
     }
 
     /// Новая сетка: вес не выше цели по ее уверенности, старый вес ее не подтверждал.
     private mutating func capWeight() {
-        let target = Self.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(confidence))
+        let target = Self.smoothstep(Float(parameters.weightLow), Float(parameters.weightHigh), Float(gridConfidence))
         displayWeight = min(displayWeight, target)
     }
 
@@ -1333,7 +1397,7 @@ public struct BeatTracker: Sendable {
             Self.select(UnsafeMutableBufferPointer(rebasing: buffer[0..<count]), rank: count / 2)
         }
         let ratio = max(odf(age: 0), odf(age: 1)) / (median + Self.confirmEpsilon)
-        if period != nil, confidence >= parameters.weightLow, energyGate >= Self.confirmGateOpen {
+        if period != nil, gridConfidence >= parameters.weightLow, energyGate >= Self.confirmGateOpen {
             return max(parameters.kickConfirmFloor, Self.smoothstep(parameters.kickConfirmLow, Self.confirmHigh, ratio))
         }
         return Self.smoothstep(Self.confirmLow, Self.confirmHigh, ratio)

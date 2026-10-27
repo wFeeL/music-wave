@@ -298,6 +298,7 @@ extension BeatTracker.Parameters {
         "carryTolerance", "carryPhase", "raceBeats", "raceMargin", "raceLimit", "raceVotes", "raceEvidenceChecks",
         "raceEvidenceShare", "raceEvidenceRatio", "raceEvidenceHits", "raceDropRatio", "raceStartRatio", "raceDim",
         "coastGate", "gateFallPerBeatDB", "gateFallNoTempoDB", "plpShadow", "everyOtherPeriod", "everyOtherHold",
+        "everyOtherLockRatio",
     ]
 
     /// Задает поле по имени. `false`, если имени нет или значение не подходит (целые поля берут только
@@ -338,6 +339,7 @@ extension BeatTracker.Parameters {
         case "plpShadow": plpShadow = value
         case "everyOtherPeriod": everyOtherPeriod = value
         case "everyOtherHold": everyOtherHold = value
+        case "everyOtherLockRatio": everyOtherLockRatio = value
         case "lockHits", "phaseJumpChecks", "raceBeats", "raceLimit", "raceVotes", "raceEvidenceChecks", "weightHits":
             guard value == value.rounded(), abs(value) < 1e9 else { return false }
             switch name {
