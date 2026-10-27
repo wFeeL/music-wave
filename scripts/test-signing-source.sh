@@ -166,6 +166,28 @@ if command -v openssl > /dev/null 2>&1; then
     rm -rf "$HOME/Downloads/music-wave-develop"
     if find_downloads_signing_dir "1111111111111111111111111111111111111111" > /dev/null 2>&1; then rc=0; else rc=$?; fi
     check "Загрузки: читаемая копия с другим хэшем пропускается, код 1" eq "$rc" 1
+
+    # --- make-signing-key.sh ---
+    rm -rf "$HOME/Library" "$HOME/Downloads" "$LEGACY_DIR"
+    KEY_OUT=$(bash "$SCRIPT_DIR/make-signing-key.sh" 2>&1) && rc=0 || rc=$?
+    check "make-signing-key: ключ создан, код 0" eq "$rc" 0
+    check "make-signing-key: пара найдена в Application Support" eq "$(find_signing_dir)" "$APP_DIR"
+    check "make-signing-key: хэш p12 совпадает с expected-leaf.txt" \
+        eq "$(signing_leaf_hash "$APP_DIR")" "$(signing_expected_leaf)"
+    check "make-signing-key: p12 с правами 600" eq "$(mode_of "$APP_DIR/wavefeels-signing.p12")" 600
+    check "make-signing-key: каталог с правами 700" eq "$(mode_of "$APP_DIR")" 700
+    BEFORE=$(cat "$APP_DIR/expected-leaf.txt")
+    KEY_OUT=$(bash "$SCRIPT_DIR/make-signing-key.sh" 2>&1) && rc=0 || rc=$?
+    check "make-signing-key: повторный запуск ключ не меняет" eq "$rc.$(cat "$APP_DIR/expected-leaf.txt")" "0.$BEFORE"
+    check "make-signing-key: повторный запуск говорит, что ключ есть" \
+        eq "$([[ "$KEY_OUT" == *"уже есть"* ]] && echo yes)" yes
+    rm -rf "$HOME/Library"
+    mkdir -p "$HOME/Downloads/music-wave-develop 2"
+    cp -R "$TMP/real2/signing" "$HOME/Downloads/music-wave-develop 2/signing"
+    KEY_OUT=$(bash "$SCRIPT_DIR/make-signing-key.sh" 2>&1) && rc=0 || rc=$?
+    check "make-signing-key: старая копия в Загрузках, код 1 и ничего не создано" \
+        eq "$rc.$([[ -e "$APP_DIR" ]] && echo made || echo none)" "1.none"
+    rm -rf "$HOME/Library" "$HOME/Downloads"
 else
     echo "skip проверки хэша: нет openssl"
 fi

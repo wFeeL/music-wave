@@ -357,7 +357,7 @@ elif OLD_COPY=$(find_downloads_signing_dir "$EXPECTED_LEAF"); then
     say "Нашел старую копию с ключом подписи: «$OLD_COPY»"
     import_checked_key "$OLD_COPY"
 else
-    fail "Не нашел ключ подписи. Если WaveFeels на этом маке еще не ставили, создайте ключ командами из README (раздел «Быстрый запуск», шаг 3). Если ключ лежит в старой копии: bash scripts/build-local.sh --signing-dir <папка со старой копией>/signing --install"
+    fail "Не нашел ключ подписи. Если WaveFeels на этом маке еще не ставили, создайте ключ: bash scripts/make-signing-key.sh. Если ключ лежит в старой копии: bash scripts/build-local.sh --signing-dir <папка со старой копией>/signing --install"
 fi
 
 # --- версия ---

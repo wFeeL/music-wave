@@ -68,34 +68,9 @@ WaveFeels живет в строке меню и рисует волны вок�
    cd music-wave
    ```
    Клонируется ветка main, в ней последняя выпущенная версия. Перед следующей сборкой обновите код командой `git pull`.
-3. **Создайте ключ подписи.** Это нужно один раз, если WaveFeels на этом маке еще не собирали. macOS помнит разрешение на звук для конкретной подписи, поэтому все сборки подписываются одним ключом. В репозитории ключа нет, его создает себе каждый. Скопируйте блок целиком и вставьте в Терминал:
+3. **Создайте ключ подписи.** Это нужно один раз, если WaveFeels на этом маке еще не собирали. macOS помнит разрешение на звук для конкретной подписи, поэтому все сборки подписываются одним ключом. В репозитории ключа нет, его создает себе каждый:
    ```
-   (
-   set -e
-   D="$HOME/Library/Application Support/WaveFeels/signing"
-   if [ -e "$D/wavefeels-signing.p12" ]; then echo "Ключ уже есть: $D"; exit 0; fi
-   mkdir -p "$D" && chmod 700 "$D" && cd "$D"
-   umask 077
-   cat > cert.cnf <<'EOF'
-   [req]
-   distinguished_name = dn
-   x509_extensions = codesign
-   prompt = no
-   [dn]
-   CN = WaveFeels Self-Signed
-   [codesign]
-   basicConstraints = critical,CA:false
-   keyUsage = critical,digitalSignature
-   extendedKeyUsage = critical,codeSigning
-   subjectKeyIdentifier = hash
-   EOF
-   /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 -config cert.cnf -keyout key.pem -out cert.pem
-   /usr/bin/openssl rand -hex 24 > password.txt
-   /usr/bin/openssl pkcs12 -export -inkey key.pem -in cert.pem -name "WaveFeels Self-Signed" -passout file:password.txt -out wavefeels-signing.p12
-   /usr/bin/openssl x509 -in cert.pem -noout -fingerprint -sha1 | cut -d= -f2 > expected-leaf.txt
-   rm cert.cnf key.pem cert.pem
-   echo "Ключ создан: $D"
-   )
+   bash scripts/make-signing-key.sh
    ```
    Ключ ляжет в «~/Library/Application Support/WaveFeels/signing», сборка найдет его сама. Сохраните копию этой папки: если ключ потеряется, с новым macOS снова спросит доступ к звуку.
 
@@ -183,6 +158,6 @@ bash scripts/cpu-probe.sh --preset max dist/WaveFeels.app
 
 Ключи `--preset user`, `--island expanded`, `--style spectrum`, `--set wf.ключ=значение` и `--sample` описаны в `bash scripts/cpu-probe.sh --help`. Итог пишется в `ci-out/`.
 
-Разрешение на звук привязано к подписи, поэтому все сборки подписываются одним сертификатом. Его нельзя терять и менять: с новым macOS снова спросит доступ к звуку. Храните копию `wavefeels-signing.p12` и пароль вне репозитория. Для CI сертификат кладется в секреты `SIGNING_P12_BASE64` и `SIGNING_P12_PASSWORD`, ожидаемый хэш лежит в `signing/expected-leaf.txt`, `scripts/sign.sh` сверяет его после подписи. Для своего ключа, созданного по шагу 3, хэш берется из `expected-leaf.txt` рядом с ключом в Application Support.
+Разрешение на звук привязано к подписи, поэтому все сборки подписываются одним сертификатом. Его нельзя терять и менять: с новым macOS снова спросит доступ к звуку. Храните копию `wavefeels-signing.p12` и пароль вне репозитория. Для CI сертификат кладется в секреты `SIGNING_P12_BASE64` и `SIGNING_P12_PASSWORD`, ожидаемый хэш лежит в `signing/expected-leaf.txt`, `scripts/sign.sh` сверяет его после подписи. Для своего ключа из `scripts/make-signing-key.sh` хэш берется из `expected-leaf.txt` рядом с ключом в Application Support.
 
 </details>
